@@ -2,9 +2,9 @@
 // @name         Wayfarer Duplicate Map Descriptions
 // @version      0.1.0
 // @description  Add links to open Showcase and Nearby portals in Ingress Prime
-// @namespace    https://github.com/tehstone/wayfarer-addons
-// @downloadURL  https://github.com/tehstone/wayfarer-addons/raw/main/wayfarer-prime-portal-links.user.js
-// @homepageURL  https://github.com/tehstone/wayfarer-addons
+// @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
+// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/duplicate-descriptions.user.js
+// @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
 // ==/UserScript==
 
