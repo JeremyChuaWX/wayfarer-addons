@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Duplicate Map Descriptions
 // @version      0.1.0
-// @description  Add links to open Showcase and Nearby portals in Ingress Prime
+// @description  Add descriptions to Nearby portals in Ingress Prime
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/duplicate-descriptions.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
@@ -89,19 +89,23 @@
                           return obj['infoWindowComponentData']['title'] === el.target.alt;
                         });
                         if (output.length === 1) {
-                            const guid = output[0].id;
-                            const lat = output[0].latitude;
-                            const lng = output[0].longitude;
+                            const description = output[0].infoWindowComponentData.description;
+                            const imageUrl = output[0].infoWindowComponentData.imageUrl;
                             let nearbyBox = document.querySelector('.gm-style-iw-d > div:nth-child(1) > div:nth-child(1)');
                             if (nearbyBox !== null && nearbyBox !== undefined) {
-                                const linkDiv = document.createElement('div');
-                                linkDiv.classList.add('font-medium');
+                                const textDiv = document.createElement('div');
+                                textDiv.classList.add('font-small');
                                 const link = document.createElement('a');
-                                link.href = `https://link.ingress.com/?link=https%3a%2f%2fintel.ingress.com%2Fportal%2f${guid}&apn=com.nianticproject.ingress&isi=576505181&ibi=com.google.ingress&ifl=https%3a%2f%2fapps.apple.com%2fapp%2fingress%2fid576505181&ofl=https%3a%2f%2fintel.ingress.com%2fintel%3fpll%3d${lat}%2c${lng}`;
+                                link.href = `${imageUrl}=s0`;
                                 link.target = 'wayfareropenin';
-                                link.textContent = el.target.alt;
-                                linkDiv.appendChild(link);
-                                nearbyBox.insertBefore(linkDiv, nearbyBox.children[0]);
+                                if (description.length == 0) {
+                                    link.innerHTML = `<img src="${imageUrl}" class="wf-image-modal h-24" title="No Description">`;
+                                }
+                                else {
+                                    link.innerHTML = `<img src="${imageUrl}" class="wf-image-modal h-24" title="${description}">`;
+                                }
+                                textDiv.appendChild(link);
+                                nearbyBox.insertBefore(textDiv, nearbyBox.children[2]);
                                 nearbyBox.removeChild(nearbyBox.children[1]);
                             }
                         }
