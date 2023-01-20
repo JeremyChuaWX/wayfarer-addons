@@ -5,7 +5,7 @@
 // @version 0.1
 // @downloadURL https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/opengeospatial.user.js
 // @updateURL https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/opengeospatial.user.js
-// @description Adds a QR code that opens Geospatial Browser to the selected portal.
+// @description Adds a link that opens Geospatial Browser to the selected portal.
 // @author Tntnnbltn - adapted from Marius Lindvall
 // @include https://intel.ingress.com/*
 // @match https://intel.ingress.com/*
