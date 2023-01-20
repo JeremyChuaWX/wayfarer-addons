@@ -36,7 +36,7 @@ function wrapper(plugin_info) {
             const guid = data.guid;
             const lat = data.portalData.latE6 / 1000000;
             const lng = data.portalData.lngE6 / 1000000;
-            const url = `https://lightship.dev/account/geospatial-browser/${lat}%2c${lng}%2c18%2c%2c${guid}`;
+            const url = `https://lightship.dev/account/geospatial-browser/${lat},${lng},16,,${guid}`;
             const link = document.createElement('a');
             link.textContent = 'Open in Geospatial';
             link.addEventListener('click', function(e) {
