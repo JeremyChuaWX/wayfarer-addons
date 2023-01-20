@@ -43,16 +43,7 @@ function wrapper(plugin_info) {
                 if (window.isSmartphone()) {
                     window.open(url);
                 } else {
-                    const container = dialog({
-                        width: 'auto',
-                        html: '<div style="background-color:#fff; padding: 10px;"><div class="geospatial-qrcode" style="width: 512px; height: 512px;"></div></div>',
-                        title: 'Open in Geospatial',
-                        buttons: {
-                            'Copy to clipboard': function() {
-                                navigator.clipboard.writeText(url);
-                                container.dialog('close');
-                            }
-                        }
+                    window.open(url)
                     });
 
                     const div = container[0];
