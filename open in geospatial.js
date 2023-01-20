@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name IITC Plugin: Open in Prime
+// @name IITC Plugin: Open in Geospatial Browser
 // @id portalOpenInGame
 // @category Info
 // @version 0.1.6
 // @downloadURL https://varden.info/~m/iitc/iitc-open-prime.user.js
 // @updateURL https://varden.info/~m/iitc/iitc-open-prime.user.js
 // @description Adds a QR code that opens Ingress Prime to the selected portal.
-// @author Marius Lindvall
+// @author Marius Lindvall - Modified by Tntnnbltn
 // @require https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js
 // @include https://intel.ingress.com/*
 // @match https://intel.ingress.com/*
@@ -19,35 +19,34 @@ function wrapper(plugin_info) {
     // and other plugins assume the same.
     if (typeof window.plugin !== "function") window.plugin = function () {};
 
-    window.plugin.PortalOpenInGame = function () {};
-    const thisPlugin = window.plugin.PortalOpenInGame;
+    window.plugin.GeospatialOpenInGame = function () {};
+    const thisPlugin = window.plugin.GeospatialOpenInGame;
 
     // Name of the IITC build for first-party plugins
-    plugin_info.buildName = "PortalOpenInGame";
+    plugin_info.buildName = "GeospatialOpenInGame";
 
     // Datetime-derived version of the plugin
-    plugin_info.dateTimeVersion = "202203152054";
+    plugin_info.dateTimeVersion = "202301202054";
 
     // ID/name of the plugin
-    plugin_info.pluginId = "portalopeningame";
+    plugin_info.pluginId = "geospatialopeningame";
 
     const setup = function() {
         window.addHook('portalDetailsUpdated', function(data) {
             const guid = data.guid;
             const lat = data.portalData.latE6 / 1000000;
             const lng = data.portalData.lngE6 / 1000000;
-            const url = `https://link.ingress.com/?link=https%3a%2f%2fintel.ingress.com%2Fportal%2f${guid}&apn=com.nianticproject.ingress&isi=576505181&ibi=com.google.ingress&ifl=https%3a%2f%2fapps.apple.com%2fapp%2fingress%2fid576505181&ofl=https%3a%2f%2fintel.ingress.com%2fintel%3fpll%3d${lat}%2c${lng}`;
-
+            const url = `https://lightship.dev/account/geospatial-browser/${lat}%2c${lng}%2c18%2c%2c${guid}`;
             const link = document.createElement('a');
-            link.textContent = 'Open in Prime';
+            link.textContent = 'Open in Geospatial';
             link.addEventListener('click', function(e) {
                 if (window.isSmartphone()) {
                     window.open(url);
                 } else {
                     const container = dialog({
                         width: 'auto',
-                        html: '<div style="background-color:#fff; padding: 10px;"><div class="prime-qrcode" style="width: 512px; height: 512px;"></div></div>',
-                        title: 'Open in Ingress Prime',
+                        html: '<div style="background-color:#fff; padding: 10px;"><div class="geospatial-qrcode" style="width: 512px; height: 512px;"></div></div>',
+                        title: 'Open in Geospatial',
                         buttons: {
                             'Copy to clipboard': function() {
                                 navigator.clipboard.writeText(url);
@@ -57,7 +56,7 @@ function wrapper(plugin_info) {
                     });
 
                     const div = container[0];
-                    const codebox = div.querySelector('.prime-qrcode');
+                    const codebox = div.querySelector('.geospatial-qrcode');
                     new QRCode(codebox, {
                         text: url,
                         width: 512,
