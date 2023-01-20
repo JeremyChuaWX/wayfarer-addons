@@ -6,8 +6,7 @@
 // @downloadURL https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/opengeospatial.user.js
 // @updateURL https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/opengeospatial.user.js
 // @description Adds a QR code that opens Geospatial Browser to the selected portal.
-// @author Marius Lindvall - Modified by Tntnnbltn
-// @require https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js
+// @author Tntnnbltn - adapted from Marius Lindvall
 // @include https://intel.ingress.com/*
 // @match https://intel.ingress.com/*
 // @grant none
@@ -36,27 +35,11 @@ function wrapper(plugin_info) {
             const guid = data.guid;
             const lat = data.portalData.latE6 / 1000000;
             const lng = data.portalData.lngE6 / 1000000;
-            const url = `https://lightship.dev/account/geospatial-browser/${lat},${lng},16,,${guid}`;
+            const url = `https://lightship.dev/account/geospatial-browser/${lat},${lng},16,,${guid}/scan-wayspot`;
             const link = document.createElement('a');
-            link.textContent = 'Open in Geospatial';
+            link.textContent = 'Geospatial Browser';
             link.addEventListener('click', function(e) {
-                if (window.isSmartphone()) {
-                    window.open(url);
-                } else {
-                    const container = dialog({
-                        width: 'auto',
-                        html: '<div style="background-color:#fff; padding: 10px;"><div class="geospatial-qrcode" style="width: 512px; height: 512px;"></div></div>',
-                        title: 'Open in Geospatial',
-                    });
-
-                    const div = container[0];
-                    const codebox = div.querySelector('.geospatial-qrcode');
-                    new QRCode(codebox, {
-                        text: url,
-                        width: 512,
-                        height: 512,
-                    });
-                }
+                window.open(url);
             });
             const div = document.createElement('div');
             div.appendChild(link);
