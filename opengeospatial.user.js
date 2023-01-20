@@ -2,10 +2,10 @@
 // @name IITC Plugin: Open in Geospatial Browser
 // @id geospatialOpenInGame
 // @category Info
-// @version 0.1.6
-// @downloadURL https://varden.info/~m/iitc/iitc-open-prime.user.js
-// @updateURL https://varden.info/~m/iitc/iitc-open-prime.user.js
-// @description Adds a QR code that opens Geospatia Browser to the selected portal.
+// @version 0.1
+// @downloadURL https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/opengeospatial.user.js
+// @updateURL https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/opengeospatial.user.js
+// @description Adds a QR code that opens Geospatial Browser to the selected portal.
 // @author Marius Lindvall - Modified by Tntnnbltn
 // @require https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js
 // @include https://intel.ingress.com/*
