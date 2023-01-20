@@ -36,34 +36,9 @@ function wrapper(plugin_info) {
             const guid = data.guid;
             const lat = data.portalData.latE6 / 1000000;
             const lng = data.portalData.lngE6 / 1000000;
-            const url = `https://lightship.dev/account/geospatial-browser/${lat},${lng},16,,${guid}`;
+            const url = `https://lightship.dev/account/geospatial-browser/${lat},${lng},16,,${guid}/scan-wayspot`;
             const link = document.createElement('a');
             link.textContent = 'Open in Geospatial';
-            link.addEventListener('click', function(e) {
-                if (window.isSmartphone()) {
-                    window.open(url);
-                } else {
-                    const container = dialog({
-                        width: 'auto',
-                        html: '<div style="background-color:#fff; padding: 10px;"><div class="geospatial-qrcode" style="width: 512px; height: 512px;"></div></div>',
-                        title: 'Open in Geospatial',
-                        buttons: {
-                            'Copy to clipboard': function() {
-                                navigator.clipboard.writeText(url);
-                                container.dialog('close');
-                            }
-                        }
-                    });
-
-                    const div = container[0];
-                    const codebox = div.querySelector('.geospatial-qrcode');
-                    new QRCode(codebox, {
-                        text: url,
-                        width: 512,
-                        height: 512,
-                    });
-                }
-            });
             const div = document.createElement('div');
             div.appendChild(link);
             const aside = document.createElement('aside');
