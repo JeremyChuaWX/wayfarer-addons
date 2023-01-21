@@ -84,12 +84,13 @@ function init() {
             existingExportButton.remove();
         }
 
-        // Check if the export button already exists
+        // Check if the reset button already exists
         const existingResetButton = document.querySelector('.footer .pull-left .reset');
         if (existingResetButton) {
             // Remove the existing reset button
             existingResetButton.remove();
         }
+
         // Get the Live Missions button
         const liveMissionsButton = document.querySelector('.footer .pull-left .big');
 
