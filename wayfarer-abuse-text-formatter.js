@@ -69,7 +69,7 @@
     }
 
      const awaitElement = get => new Promise((resolve, reject) => {
-                let triesLeft = 10;
+                let triesLeft = 20;
                 const queryLoop = () => {
                         const ref = get();
                         if (ref) resolve(ref);
