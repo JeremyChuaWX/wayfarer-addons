@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Wayfarer Review Map Tiles
-// @version      0.0.1
+// @version      0.0.2
 // @namespace    https://gitlab.com/tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-review-tiles.js
+// @downloadURL  https://gitlab.com/tntnnbltn/wayfarer-addons/raw/main/wayfarer-review-tiles.user.js
 // @homepageURL  https://gitlab.com/tntnnbltn/wayfarer-addons
 // @description  Add Map Mods to Wayfarer Review Page
 // @match        https://wayfarer.nianticlabs.com/*
@@ -87,6 +87,7 @@ function init() {
             .then((ref) => {
                 gmap = ref;
                 if (gmap === document.querySelector("app-select-location-edit")) {
+                    console.log('location edit');
                     mapCtx = gmap.__ngContext__[gmap.__ngContext__.length - 1].niaMap;
                     map = mapCtx.componentRef.map;
                     addMapLayers();
@@ -109,6 +110,8 @@ function init() {
 
     function addMapLayers() {
         // Initialize mapTypeControlOptions here
+        console.log(map);
+        console.log('addMapLayers is running');
         let mapTypeControlOptions = {
             style: google.maps.MapTypeControlStyle.DROPDOWN_MENU,
             position: google.maps.ControlPosition.TOP_LEFT,
@@ -123,6 +126,7 @@ function init() {
 
         map.setOptions({
             mapTypeControlOptions: mapTypeControlOptions,
+            mapTypeControl: true,
         });
     }
 
