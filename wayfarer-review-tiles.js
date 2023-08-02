@@ -2,7 +2,7 @@
 // @name         Wayfarer Review Map Tiles
 // @version      0.0.1
 // @namespace    https://gitlab.com/tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/tntnnbltn/wayfarer-addons/raw/main/wayfarer-review-tiles.user.js
+// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-review-tiles.js
 // @homepageURL  https://gitlab.com/tntnnbltn/wayfarer-addons
 // @description  Add Map Mods to Wayfarer Review Page
 // @match        https://wayfarer.nianticlabs.com/*
