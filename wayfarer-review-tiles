@@ -15,11 +15,6 @@ function init() {
     let candidate;
     let map;
     let mapCtx;
-    let overlay;
-    let closeCircle;
-    let moveCircle;
-    let cellShade;
-    let userId;
 
     let pano = null;
     let listenSVFocus = false;
@@ -45,14 +40,6 @@ function init() {
             open.apply(this, arguments);
         };
     })(XMLHttpRequest.prototype.open);
-
-    document.addEventListener('focusin', (e) => {
-        // Prevent scroll to Street View on load (if applicable)
-        if (listenSVFocus && document.activeElement.classList.contains('mapsConsumerUiSceneInternalCoreScene__root')) {
-            listenSVFocus = false;
-            document.querySelector('mat-sidenav-content').scrollTo(0, 0);
-        }
-    });
 
     function parseCandidate(e) {
         try {
@@ -120,22 +107,15 @@ function init() {
         });
     }
 
-    function modifyMapControls() {
-        map.setOptions({
-            mapTypeControlOptions: mapTypeControlOptions,
-        });
-    }
-
     function addMapLayers() {
         // Initialize mapTypeControlOptions here
         let mapTypeControlOptions = {
             style: google.maps.MapTypeControlStyle.DROPDOWN_MENU,
             position: google.maps.ControlPosition.TOP_LEFT,
-            mapTypeIds: ['roadmap', 'satellite', 'Bing'],
+            mapTypeIds: ['roadmap', 'satellite'],
         };
 
-        setupBingMaps();
-
+        mapTypeControlOptions = setupMapLayer(mapTypeControlOptions, "Bing", 19, 0, "https://t0.tiles.virtualearth.net/tiles/a{quadKey}.jpeg?g=1398");
         mapTypeControlOptions = setupMapLayer(mapTypeControlOptions, "Esri", 19, 0, "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}");
         mapTypeControlOptions = setupMapLayer(mapTypeControlOptions, "Esri Clarity", 19, 0, "https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}");
         mapTypeControlOptions = setupMapLayer(mapTypeControlOptions, "Yandex", 19, 0, "https://core-sat.maps.yandex.net/tiles?l=sat&v=3.1083.0&x={x}&y={y}&z={z}&scale=2");
@@ -146,7 +126,7 @@ function init() {
         });
     }
 
-    function setupMapLayer(mapTypeControlOptions, name, maxZoom, minZoom, url) {
+    function setupMapLayer(mapTypeControlOptions, name, maxZoom, minZoom, url, isBing = false) {
         const mapType = new google.maps.ImageMapType({
             getTileUrl: function (coord, zoom) {
                 const normalizedCoord = getNormalizedCoord(coord, zoom);
@@ -155,15 +135,21 @@ function init() {
                     return "";
                 }
 
-                return url
-                    .replace('{z}', zoom)
-                    .replace('{x}', normalizedCoord.x)
-                    .replace('{y}', normalizedCoord.y);
+                if (name === "Bing") {
+                    // For Bing Maps, use the quadkey
+                    const quadKey = getBingMapsQuadKey(coord.x, coord.y, zoom);
+                    return url.replace('{quadKey}', quadKey);
+                } else {
+                    // For other layers, replace the placeholders normally
+                    return url
+                        .replace('{z}', zoom)
+                        .replace('{x}', normalizedCoord.x)
+                        .replace('{y}', normalizedCoord.y);
+                }
             },
             tileSize: new google.maps.Size(256, 256),
             maxZoom: maxZoom,
             minZoom: minZoom,
-            // @ts-ignore TODO 'radius' does not exist in type 'ImageMapTypeOptions'
             radius: 1738000,
             name: name,
         });
@@ -175,26 +161,6 @@ function init() {
         map.mapTypes.set(name, mapType);
 
         return mapTypeControlOptions;
-    }
-
-    function setupBingMaps() {
-        const bingApiKey = 'ArR2hTa2C9cRQZT-RmgrDkfvh3PwEVRl0gB34OO4wJI7vQNElg3DDWvbo5lfUs3p';
-
-        const bingMapType = new google.maps.ImageMapType({
-                getTileUrl: function(coord, zoom) {
-                    const normalizedCoord = getNormalizedCoord(coord, zoom);
-                    if (!normalizedCoord) {
-                        return "";
-                    }
-                    const quadKey = getBingMapsQuadKey(coord.x, coord.y, zoom);
-                    return `https://t0.tiles.virtualearth.net/tiles/a${quadKey}.jpeg?g=1398`;
-                },
-                tileSize: new google.maps.Size(256, 256),
-                maxZoom: 20,
-                name: "Bing",
-        });
-
-        map.mapTypes.set("Bing", bingMapType);
     }
 
     // Function to convert Google Maps Tile coordinates to Bing Maps QuadKey
