@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Review Map Tiles
-// @version      0.0.2
+// @version      0.0.3
 // @namespace    https://gitlab.com/tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/tntnnbltn/wayfarer-addons/raw/main/wayfarer-review-tiles.user.js
 // @homepageURL  https://gitlab.com/tntnnbltn/wayfarer-addons
@@ -14,7 +14,6 @@
 function init() {
     let candidate;
     let map;
-    let mapCtx;
 
     let pano = null;
     let listenSVFocus = false;
@@ -67,42 +66,34 @@ function init() {
     }
 
     function checkPageType() {
-        awaitElement(() =>
-                document.querySelector('app-should-be-wayspot') ||
-                document.querySelector('app-review-edit'))
-            .then((ref) => {
-                addMapMods();
-            })
+        awaitElement(() => (
+            document.getElementById('check-duplicates-card') ||
+            document.querySelector('app-review-edit')
+        )).then(ref => {
+            addMapMods();
+        })
     };
 
     function addMapMods() {
-        if (typeof(google) === 'undefined') {
-            setTimeout(addMapMods, 200);
-            return;
-        }
         let gmap;
+        let mapCtx;
+
         awaitElement(() =>
-                document.querySelector('#check-duplicates-card nia-map') ||
-                document.querySelector("app-select-location-edit"))
+                     document.querySelector("nia-map")
+                    )
             .then((ref) => {
-                gmap = ref;
-                if (gmap === document.querySelector("app-select-location-edit")) {
-                    console.log('location edit');
-                    mapCtx = gmap.__ngContext__[gmap.__ngContext__.length - 1].niaMap;
-                    map = mapCtx.componentRef.map;
-                    addMapLayers();
-                } else {
-                    mapCtx = gmap.__ngContext__[gmap.__ngContext__.length - 1];
-                    map = mapCtx.componentRef.map;
-                    const ll = {
-                        lat: candidate.lat,
-                        lng: candidate.lng
-                    };
-                    map.setZoom(17);
-                    map.setCenter(ll);
+            gmap = ref;
+            mapCtx = gmap.__ngContext__[gmap.__ngContext__.length - 1];
+
+            // Sometimes map wasn't being set. This makes it work.
+            const setMapInterval = setInterval(() => {
+                map = mapCtx.componentRef.map;
+                if (map) {
+                    clearInterval(setMapInterval);
                     addMapLayers();
                 }
-            })
+            }, 100);
+        })
             .catch(() => {
             return;
         });
@@ -110,8 +101,6 @@ function init() {
 
     function addMapLayers() {
         // Initialize mapTypeControlOptions here
-        console.log(map);
-        console.log('addMapLayers is running');
         let mapTypeControlOptions = {
             style: google.maps.MapTypeControlStyle.DROPDOWN_MENU,
             position: google.maps.ControlPosition.TOP_LEFT,
@@ -121,7 +110,6 @@ function init() {
         mapTypeControlOptions = setupMapLayer(mapTypeControlOptions, "Bing", 19, 0, "https://t0.tiles.virtualearth.net/tiles/a{quadKey}.jpeg?g=1398");
         mapTypeControlOptions = setupMapLayer(mapTypeControlOptions, "Esri", 19, 0, "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}");
         mapTypeControlOptions = setupMapLayer(mapTypeControlOptions, "Esri Clarity", 19, 0, "https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}");
-        mapTypeControlOptions = setupMapLayer(mapTypeControlOptions, "Yandex", 19, 0, "https://core-sat.maps.yandex.net/tiles?l=sat&v=3.1083.0&x={x}&y={y}&z={z}&scale=2");
         mapTypeControlOptions = setupMapLayer(mapTypeControlOptions, "OSM", 20, 0, "https://tile.openstreetmap.org/{z}/{x}/{y}.png");
 
         map.setOptions({
@@ -201,7 +189,7 @@ function init() {
         return { x: x, y: y };
     }
 
-//    window.initMap = initMap;
+    //    window.initMap = initMap;
 
 
     const awaitElement = get => new Promise((resolve, reject) => {
