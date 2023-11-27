@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Layout Mod
-// @version      0.0.1
+// @version      0.0.2
 // @description  Restores the layout to be more similar to the old layout
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-layout-mod.user.js
@@ -151,15 +151,32 @@ function init() {
             // Append the street address after the description text
             var streetAddressContainer = photo.querySelector('.mt-2');
             var descriptionTextContainer = titleAndDescription.querySelector('.mt-4.text-lg');
-            if (streetAddressContainer && descriptionTextContainer) {
-                // Move street address after the description text
-                descriptionTextContainer.appendChild(streetAddressContainer);
+            var parentContainer = descriptionTextContainer.parentNode;
+
+            if (streetAddressContainer && descriptionTextContainer && parentContainer) {
+                // Create a new div for the street address
+                var streetAddressDiv = document.createElement('div');
+                streetAddressDiv.classList.add('street-address-container');
+
+                // Move street address to the new div
+                streetAddressDiv.appendChild(streetAddressContainer);
 
                 // Set the font size for the street address text
                 streetAddressContainer.style.fontSize = '12px'; // Adjust the font size as needed
 
                 // Prevent street address from inheriting text-lg line-height
                 streetAddressContainer.style.lineHeight = 'initial';
+
+                // Append the new div to the parent container
+                parentContainer.appendChild(streetAddressDiv);
+
+                // Apply flex styles to the parent container
+                parentContainer.style.display = 'flex';
+                parentContainer.style.flexDirection = 'column';
+                parentContainer.style.justifyContent = 'space-between';
+
+                // Apply styles to the street address div
+                streetAddressDiv.style.marginTop = 'auto';
             }
 
             // Remove the <wf-select> with class "review-categorization"
