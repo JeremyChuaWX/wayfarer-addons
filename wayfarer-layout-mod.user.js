@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Layout Mod
-// @version      0.0.3
+// @version      0.0.4
 // @description  Restores the layout to be more similar to the old layout
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-layout-mod.user.js
@@ -103,10 +103,6 @@ function init() {
                 supportingCard.style.height = '100%';
             }
 
-            // Add 10 pixels of padding between the three review cards in the top row
-            // titleAndDescription.style.marginRight = '10px';
-            // photo.style.marginRight = '10px';
-
             // Append title and description, photo, and supporting information to the top row container
             topRowContainer.appendChild(titleAndDescription);
             topRowContainer.appendChild(photo);
@@ -129,7 +125,7 @@ function init() {
             leftColumnContainer.classList.add('left-column-container');
             // Set the flex property for the left column to 1
             leftColumnContainer.style.flex = '1';
-            // leftColumnContainer.style.flexShrink = '0';
+            leftColumnContainer.style.maxWidth = '630px';
 
             // Add 20 pixels of padding between the left and right columns of the bottom row
             leftColumnContainer.style.marginRight = '20px';
