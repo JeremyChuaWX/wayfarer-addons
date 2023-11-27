@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Layout Mod
-// @version      0.0.2
+// @version      0.0.3
 // @description  Restores the layout to be more similar to the old layout
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-layout-mod.user.js
@@ -64,6 +64,9 @@ function init() {
             titleAndDescription.style.flex = '1';
             photo.style.flex = '1';
             supportingInfo.style.flex = '1';
+            supportingInfo.style.maxWidth = '450px';
+            // Enable overflow wrap for the supportingInfo element
+            supportingInfo.style.overflowWrap = 'break-word';
 
             // Set the max height of images within the Photo and Supporting cards to 300 pixels
             var photoImage = photo.querySelector('img');
@@ -100,9 +103,9 @@ function init() {
                 supportingCard.style.height = '100%';
             }
 
-            // Add 20 pixels of padding between the three review cards in the top row
-            titleAndDescription.style.marginRight = '20px';
-            photo.style.marginRight = '20px';
+            // Add 10 pixels of padding between the three review cards in the top row
+            // titleAndDescription.style.marginRight = '10px';
+            // photo.style.marginRight = '10px';
 
             // Append title and description, photo, and supporting information to the top row container
             topRowContainer.appendChild(titleAndDescription);
@@ -126,6 +129,7 @@ function init() {
             leftColumnContainer.classList.add('left-column-container');
             // Set the flex property for the left column to 1
             leftColumnContainer.style.flex = '1';
+            // leftColumnContainer.style.flexShrink = '0';
 
             // Add 20 pixels of padding between the left and right columns of the bottom row
             leftColumnContainer.style.marginRight = '20px';
@@ -179,11 +183,27 @@ function init() {
                 streetAddressDiv.style.marginTop = 'auto';
             }
 
-            // Remove the <wf-select> with class "review-categorization"
-            var wfSelectElement = categorizationCard.querySelector('wf-select.review-categorization.ng-star-inserted');
-            if (wfSelectElement) {
-                wfSelectElement.remove();
+            // Text formatting for supporting statemetn to deal with line breaks and width
+            var supportingInfoStatement = document.querySelector('.supporting-info-statement');
+            if (!supportingInfoStatement) {
+                supportingInfoStatement = document.querySelector('.cursor-pointer.ng-star-inserted');
             }
+            if (supportingInfoStatement) {
+            supportingInfoStatement.style.lineBreak = 'normal';
+            supportingInfoStatement.style.maxWidth = '380px';
+            }
+
+            // Remove the additional category selection menu
+            // var wfSelectElement = categorizationCard.querySelector('wf-select.review-categorization.ng-star-inserted');
+            // if (wfSelectElement) {
+            //     wfSelectElement.remove();
+            // }
+
+            var categoryCards = document.querySelectorAll('.wf-review-card.review-category-card');
+            categoryCards.forEach(function (card) {
+                card.style.paddingBottom = '0';
+                card.style.minHeight = '350px';
+            });
 
             // Remove the height: 100% style from elements with the class wf-review-card--map
             var mapCards = document.querySelectorAll('.wf-review-card--map');
@@ -191,13 +211,34 @@ function init() {
                 card.style.height = 'auto';
             });
 
-            // Remove the padding-bottom: 240px style from elements with the class wf-review-card.review-category-card
-            var categoryCards = document.querySelectorAll('.wf-review-card.review-category-card');
-            categoryCards.forEach(function (card) {
-                card.style.paddingBottom = '0';
-            });
+            // SPLIT REVIEW CATEGORY INTO TWO COLUMNS FOR SPACING
+            // Find the review-categorization container
+            var reviewCategorizationContainer = document.querySelector('.review-categorization');
 
-            // Remove the unwanted div
+            if (reviewCategorizationContainer) {
+                // Find the wf-select element within reviewCategorizationContainer
+                var wfSelectElement = reviewCategorizationContainer.querySelector('wf-select.review-categorization.ng-star-inserted');
+
+                if (wfSelectElement) {
+                    // Create the left column
+                    var categorizationLeft = document.createElement('div');
+                    categorizationLeft.className = 'categorization-left ' + reviewCategorizationContainer.className;
+                    categorizationLeft.style.marginRight = '20px';
+
+                    // Get the parent of reviewCategorizationContainer
+                    var parentOfReviewCategorization = reviewCategorizationContainer.parentNode;
+
+                    // Move the content from reviewCategorizationContainer to categorizationLeft
+                    while (reviewCategorizationContainer.firstChild !== wfSelectElement) {
+                        categorizationLeft.appendChild(reviewCategorizationContainer.firstChild);
+                    }
+
+                    // Insert categorizationLeft before reviewCategorizationContainer
+                    parentOfReviewCategorization.insertBefore(categorizationLeft, reviewCategorizationContainer);
+                }
+            }
+
+            // Remove an unwanted div
             var nominationInfoDiv = mainContainer.querySelector('.flex-col');
             if (nominationInfoDiv) {
                 nominationInfoDiv.remove();
@@ -229,8 +270,21 @@ function init() {
             if (questionCards.length >= 4) {
                 var eligibilityCriteriaHeading = document.createElement('h4');
                 eligibilityCriteriaHeading.textContent = 'Eligibility Criteria';
+
+                // Add padding above and below the h4 element
+                eligibilityCriteriaHeading.style.marginTop = '10px';
+                eligibilityCriteriaHeading.style.marginBottom = '10px';
+
+                // Insert the h4 element before the 5th question card
                 questionsContainer.insertBefore(eligibilityCriteriaHeading, questionCards[4]);
             }
+
+            // THIS IS CODE TO MOVE THE SUBMIT BUTTON TO THE GAP IN THE RIGHT COLUMN
+            // NOT USED CURRENTLY BECAUSE IT MAKES THE ADD-ONS RED BUTTON DISAPPEAR
+            //var actionButtonContainer = document.querySelector('.flex.justify-center.mt-8.ng-star-inserted');
+            //if (actionButtonContainer && questionsContainer) {
+            //    questionsContainer.appendChild(actionButtonContainer);
+            //}
 
             changed = true;
 
