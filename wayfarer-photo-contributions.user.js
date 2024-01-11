@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.0.1
+// @version      0.0.2
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -27,6 +27,9 @@ function init() {
     let ngcontent;
     let nghost;
     let photosListBox;
+
+    let skippedDuplicateEmailsCount = 0;
+    let skippedMalformedEmailsCount = 0;
 
     let filterSettings = {
         pending: true,
@@ -427,6 +430,13 @@ function init() {
                 await extractDataFromEmails(file);
             }
 
+            if (skippedDuplicateEmailsCount > 0) {
+                console.log(`Skipped ${skippedDuplicateEmailsCount} email(s) because they are a duplicate or the email details are already assigned to a photo.`);
+            }
+            if (skippedMalformedEmailsCount > 0) {
+                console.log(`Skipped ${skippedMalformedEmailsCount} email(s) because the email didn't match a known email template.`);
+            }
+
             // After processing all files, activate the following functions
             matchEmailsToWayspots();
             sortAndFilterPhotoSubmissions();
@@ -492,35 +502,50 @@ function init() {
                 }).join('\n');
 
                 if (plainTextBody) {
-                    const unfoldedPlainTextBody = plainTextBody
-                    .split(/=\r?\n/).join('')
-                    .split(/\r?\n/).map(e => {
-                        const uriStr = e.split('%').join('=25').split('=').join('%');
-                        switch (plainTextCharset) {
-                            case 'utf-8':
-                                return decodeURIComponent(uriStr);
-                            case 'iso-8859-1':
-                            case 'us-ascii':
-                            case 'windows-1252':
-                                return decodeURIComponent(asciiToUTF8(uriStr));
-                            default:
-                                throw new Error(`Unknown charset ${plainTextCharset}.`);
-                        }
-                    }).join('\n');
+                    try {
+                        const unfoldedPlainTextBody = plainTextBody
+                        .split(/=\r?\n/).join('')
+                        .split(/\r?\n/).map(e => {
+                            const uriStr = e.split('%').join('=25').split('=').join('%');
+                            switch (plainTextCharset) {
+                                case 'utf-8':
+                                    return decodeURIComponent(uriStr);
+                                case 'iso-8859-1':
+                                case 'us-ascii':
+                                case 'windows-1252':
+                                    return decodeURIComponent(asciiToUTF8(uriStr));
+                                default:
+                                    throw new Error(`Unknown charset ${plainTextCharset}.`);
+                            }
+                        }).join('\n');
 
-                    // Append unfoldedPlainTextBody to unfoldedBody
-                    unfoldedBody += `\n\n${unfoldedPlainTextBody}`;
+                        // Append unfoldedPlainTextBody to unfoldedBody
+                        unfoldedBody += `\n\n${unfoldedPlainTextBody}`;
+                    } catch (error) {
+                        console.error('Plain text component could not be decoded. Skipping...');
+                        resolve(); // Stop processing the email
+                    }
                 }
 
                 let email = {};
 
                 // Extract relevant information from headers
                 headers.forEach(([token, field]) => {
-                    // (e.g., Date, From, Subject)
-                    if (token === "Date") {
-                        extractDate(field, email);
-                    } else if (token === "Message-ID") {
+                    if (token === "Message-ID") {
                         extractMessageId(field, email);
+
+                        // Check for duplicates based on unique messageId
+                        const isDuplicateEmailData = emailData.some(existingEmail => existingEmail.messageId === email.messageId);
+                        const isDuplicateSubmissions = photoSubmissions.some(submission =>
+                                                                             submission.submitted.messageId === email.messageId || submission.outcome.messageId === email.messageId
+                                                                            );
+
+                        if (isDuplicateEmailData || isDuplicateSubmissions) {
+                            skippedDuplicateEmailsCount++;
+                            resolve(); // Stop processing the email
+                        }
+                    } else if (token === "Date") {
+                        extractDate(field, email);
                     } else if (token === "Subject") {
                         extractTitleAndStatus(field, email, unfoldedBody);
                     }
@@ -529,28 +554,18 @@ function init() {
                 extractImageUrl(unfoldedBody, email);
 
                 if (email.title) {
-                    // Check for duplicates based on unique messageId
-                    const isDuplicate = emailData.some(existingEmail => existingEmail.messageId === email.messageId);
-
-                    // Check if messageId is present in photoSubmissions
-                    const isMessageIdInSubmissions = photoSubmissions.some(submission =>
-                                                                           submission.submitted.messageId === email.messageId || submission.outcome.messageId === email.messageId
-                                                                          );
-
-                    if (!isDuplicate && !isMessageIdInSubmissions) {
-                        emailData.push(email);
-                    } else {
-                        console.log('Email skipped because it is a duplicate or its details are already assigned to a photo:', email);
-                    }
+                    emailData.push(email);
                 } else {
-                    console.log('Email skipped because it was an unknown format (no Wayspot title):', email);
+                    skippedMalformedEmailsCount++;
                 }
+
                 resolve();
             };
 
             reader.readAsText(file);
         });
     }
+
 
     const parseMIME = data => {
         const bound = data.indexOf('\r\n\r\n');
@@ -857,7 +872,7 @@ function init() {
         if (matches) {
             const imageMatch = matches.find(url => url.includes('ggpht') || url.includes('googleusercontent'));
             if (imageMatch) {
-                email.imageUrl = imageMatch;
+                email.imageUrl = imageMatch.replace(/^http:/, 'https:');
             }
         }
     }
@@ -1713,47 +1728,47 @@ function init() {
         });
     }
 
-    function clearOverlay() {
-        const existingOverlayContainer = document.querySelector('.cdk-overlay-photos-container');
-        if (existingOverlayContainer) {
-            existingOverlayContainer.remove();
-        }
+function clearOverlay() {
+    const existingOverlayContainer = document.querySelector('.cdk-overlay-photos-container');
+    if (existingOverlayContainer) {
+        existingOverlayContainer.remove();
+    }
+}
+
+function clearPhotosListBox() {
+    photosListBox.innerHTML = "";
+}
+
+function createPhotoDetailsPane(photoSubmission) {
+    // Clear existing details pane if present
+    const existingPhotoDetailsPane = document.getElementById('photo-details-pane');
+    if (existingPhotoDetailsPane) {
+        existingPhotoDetailsPane.remove();
     }
 
-    function clearPhotosListBox() {
-        photosListBox.innerHTML = "";
-    }
+    // Extract information from the photoSubmission object
+    const { title, submission, status, imageUrl } = photoSubmission;
+    const submittedTimestamp = photoSubmission.submitted.timestamp;
+    const outcomeTimestamp = photoSubmission.outcome ? photoSubmission.outcome.timestamp : null;
 
-    function createPhotoDetailsPane(photoSubmission) {
-        // Clear existing details pane if present
-        const existingPhotoDetailsPane = document.getElementById('photo-details-pane');
-        if (existingPhotoDetailsPane) {
-            existingPhotoDetailsPane.remove();
-        }
+    // Create the details pane structure
+    const detailsPane = document.createElement('photo-details-pane');
+    detailsPane.setAttribute('class', 'nominations__detail');
+    detailsPane.setAttribute('id', 'photo-details-pane');
+    detailsPane.setAttribute(`${ngcontent}-c208`, '');
+    detailsPane.setAttribute(`${nghost}-c207`, '');
 
-        // Extract information from the photoSubmission object
-        const { title, submission, status, imageUrl } = photoSubmission;
-        const submittedTimestamp = photoSubmission.submitted.timestamp;
-        const outcomeTimestamp = photoSubmission.outcome ? photoSubmission.outcome.timestamp : null;
+    let outcomeHtml = '';
 
-        // Create the details pane structure
-        const detailsPane = document.createElement('photo-details-pane');
-        detailsPane.setAttribute('class', 'nominations__detail');
-        detailsPane.setAttribute('id', 'photo-details-pane');
-        detailsPane.setAttribute(`${ngcontent}-c208`, '');
-        detailsPane.setAttribute(`${nghost}-c207`, '');
-
-        let outcomeHtml = '';
-
-        if (status === 'accepted') {
-            outcomeHtml = `<p ${ngcontent}-c207="" class="mb=4">Accepted: ${formatDate(outcomeTimestamp)}</p>`
+    if (status === 'accepted') {
+        outcomeHtml = `<p ${ngcontent}-c207="" class="mb=4">Accepted: ${formatDate(outcomeTimestamp)}</p>`
     } else if (status === 'rejected') {
         outcomeHtml = `<p ${ngcontent}-c207="" class="mb=4">Rejected: ${formatDate(outcomeTimestamp)}</p>`
     } else {
         outcomeHtml = `<p ${ngcontent}-c207="" class="mb=4"> </p>`
     }
 
-        detailsPane.innerHTML = `
+    detailsPane.innerHTML = `
         <div ${ngcontent}-c207="" class="w-full h-full">
             <div ${ngcontent}-c207="" class="card details-pane dark:bg-gray-800">
             <div ${ngcontent}-c207="">
@@ -1791,18 +1806,18 @@ function init() {
         });
     }
 
-    function formatDate(timestamp) {
-        if (!timestamp) return '-';
+function formatDate(timestamp) {
+    if (!timestamp) return '-';
 
-        const date = new Date(timestamp);
-        const options = { year: 'numeric', month: 'short', day: 'numeric' };
-        return date.toLocaleDateString(undefined, options);
-    }
+    const date = new Date(timestamp);
+    const options = { year: 'numeric', month: 'short', day: 'numeric' };
+    return date.toLocaleDateString(undefined, options);
+}
 
-    // Function to append custom styles
-    function appendCustomStyles() {
-        const styleElement = document.createElement('style');
-        styleElement.textContent = `
+// Function to append custom styles
+function appendCustomStyles() {
+    const styleElement = document.createElement('style');
+    styleElement.textContent = `
 
     .hidden-list {
     display: none !important;
