@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.0.2
+// @version      0.1.0
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -25,11 +25,7 @@ function init() {
     const OBJECT_STORE_NAME = 'photoSubmissions';
     let nominations;
     let ngcontent;
-    let nghost;
-    let photosListBox;
-
-    let skippedDuplicateEmailsCount = 0;
-    let skippedMalformedEmailsCount = 0;
+    let photoListItems;
 
     let filterSettings = {
         pending: true,
@@ -37,12 +33,479 @@ function init() {
         rejected: true,
     };
 
+    let currentDisplay = 'wayspots';
+
+    let currentSearchTerm = '';
     let arrangementSettings = 'RECENT';
     let sortDirection = 'DESCENDING';
 
-    let emailData = [];
-
     let photoSubmissions = [];
+
+    let language = 'en';
+
+    const strings = {
+        en: {
+            switchToPhotos: 'Switch to Photos',
+            switchToNominations: 'Switch to Wayspots',
+            pending: 'Pending',
+            submitted: 'Submitted',
+            linkPhotos: 'Link Photos',
+            linkPhotosExplanation1: 'Use this function to link together photo submissions for the same Wayspot.',
+            linkPhotosExplanation2: 'Click each photo which would you like to connect to this entry.',
+            submittedPhotos: 'Submitted photos:',
+            submittedWayspots: 'Submitted Wayspots:',
+            editData: 'Edit Wayspot Data',
+            formSeparator: ':',
+            latitude: 'Latitude',
+            longitude: 'Longitude',
+            city: 'City',
+            state: 'State',
+            importData: 'Import Wayspot Data',
+            importDataExplanation: 'Manually import Wayspot data in JSON format from external sources such as Ingress IITC.',
+        },
+        ja: {
+            switchToPhotos: '写真に切り替える',
+            switchToNominations: 'Wayspotsに切り替える',
+            pending: '保留中',
+            submitted: '提出済み',
+            linkPhotos: '写真のリンク',
+            linkPhotosExplanation1: '同じWayspotに投稿された写真をリンクさせる機能です。',
+            linkPhotosExplanation2: 'リンクしたい写真をクリックしてください。',
+            submittedPhotos: '投稿写真',
+            submittedWayspots: '投稿されたWayspots:',
+            editData: 'Wayspotデータの編集',
+            formSeparator: '',
+            latitude: '緯度',
+            longitude: '経度',
+            city: '都市名',
+            state: '州',
+            importData: 'Wayspotデータのインポート',
+            importDataExplanation: 'Wayspot データを Ingress IITC などの外部ソースから JSON 形式で手動インポートします。',
+        },
+        ko: {
+            switchToPhotos: '사진으로 전환',
+            switchToNominations: 'Wayspot으로 전환',
+            pending: '보류 중',
+            submitted: '제출된',
+            linkPhotos: '사진 서로 연결',
+            linkPhotosExplanation1: '이 기능을 사용하여 동일한 Wayspot에 대한 사진 제출을 연결할 수 있습니다.',
+            linkPhotosExplanation2: '이 항목에 연결하려는 각 사진을 클릭합니다.',
+            submittedPhotos: '제출된 사진:',
+            submittedWayspots: '제출된 Wayspot:',
+            editData: 'Wayspot 데이터 편집',
+            formSeparator: ':',
+            latitude: '위도',
+            longitude: '경도',
+            city: '도시',
+            state: '주',
+            importData: 'Wayspot 데이터 가져오기',
+            importDataExplanation: 'Ingress IITC와 같은 외부 소스에서 JSON 형식의 Wayspot 데이터를 수동으로 가져옵니다.',
+        },
+        pt: {
+            switchToPhotos: 'Mudar para fotos',
+            switchToNominations: 'Mudar para Wayspots',
+            pending: 'Pendente',
+            submitted: 'Submetido',
+            linkPhotos: 'Vincular fotos',
+            linkPhotosExplanation1: 'Use essa função para vincular envios de fotos para o mesmo Wayspot.',
+            linkPhotosExplanation2: 'Clique em cada foto que você deseja conectar a este registro.',
+            submittedPhotos: 'Fotos enviadas:',
+            submittedWayspots: 'Wayspots enviados:',
+            editData: 'Editar dados do Wayspot',
+            formSeparator: ':',
+            latitude: 'Latitude',
+            longitude: 'Longitude',
+            city: 'Cidade',
+            state: 'Estado',
+            importData: 'Importar dados do Wayspot',
+            importDataExplanation: 'Importe manualmente os dados do Wayspot no formato JSON de fontes externas, como o Ingress IITC.',
+        },
+        cs: {
+            switchToPhotos: 'Přepněte na Fotky',
+            switchToNominations: 'Přepněte na Wayspoty',
+            pending: 'čekající',
+            submitted: 'Předloženo',
+            linkPhotos: 'Propojení fotografií',
+            linkPhotosExplanation1: 'Pomocí této funkce můžete propojit dohromady odeslané fotografie pro stejný Wayspot.',
+            linkPhotosExplanation2: 'Klikněte na každou fotografii, kterou chcete k tomuto záznamu připojit.',
+            submittedPhotos: 'Odeslané fotografie:',
+            submittedWayspots: 'Odeslané Wayspoty:',
+            editData: 'Upravit údaje o Wayspotu',
+            formSeparator: ':',
+            latitude: 'Zeměpisná šířka',
+            longitude: 'Zeměpisná délka',
+            city: 'Město',
+            state: 'Stát',
+            importData: 'Importovat data Wayspot',
+            importDataExplanation: 'Ručně importujte data Wayspot ve formátu JSON z externích zdrojů, například Ingress IITC.',
+        },
+        es: {
+            switchToPhotos: 'Cambiar a fotos',
+            switchToNominations: 'Cambiar a Wayspots',
+            pending: 'Pendiente',
+            submitted: 'Enviado',
+            linkPhotos: 'Vincular fotos',
+            linkPhotosExplanation1: 'Utilice esta función para enlazar las fotos enviadas para el mismo punto de acceso.',
+            linkPhotosExplanation2: 'Haga clic en cada foto que desea conectar a esta entrada.',
+            submittedPhotos: 'Fotos enviadas:',
+            submittedWayspots: 'Wayspots enviados:',
+            editData: 'Editar datos Wayspot',
+            formSeparator: ':',
+            latitude: 'Latitud',
+            longitude: 'Longitud',
+            city: 'Ciudad',
+            state: 'Estado',
+            importData: 'Importar datos Wayspot',
+            importDataExplanation: 'Importe manualmente datos Wayspot en formato JSON desde fuentes externas como Ingress IITC.',
+        },
+        de: {
+            switchToPhotos: 'Zu Fotos wechseln',
+            switchToNominations: 'Zu Wayspots wechseln',
+            pending: 'Ausstehend',
+            submitted: 'Eingereicht',
+            linkPhotos: 'Fotos miteinander verknüpfen',
+            linkPhotosExplanation1: 'Mit dieser Funktion könnt ihr Fotos, die für denselben Wayspot eingereicht wurden, miteinander verknüpfen.',
+            linkPhotosExplanation2: 'Klickt auf jedes Foto, das ihr mit diesem Eintrag verbinden möchtet.',
+            submittedPhotos: 'Eingereichte Fotos:',
+            submittedWayspots: 'Eingereichte Wayspots:',
+            editData: 'Wayspot-Daten bearbeiten',
+            formSeparator: ':',
+            latitude: 'Breitengrad',
+            longitude: 'Längengrad',
+            city: 'Stadt',
+            state: 'Staat',
+            importData: 'Wayspot-Daten importieren',
+            importDataExplanation: 'Manuelles Importieren von Wayspot-Daten im JSON-Format aus externen Quellen wie Ingress IITC.',
+        },
+        fr: {
+            switchToPhotos: 'Vers les photos',
+            switchToNominations: 'Vers les Wayspots',
+            pending: 'En attente',
+            submitted: 'Soumis',
+            linkPhotos: 'Relier des photos',
+            linkPhotosExplanation1: 'Utilisez cette fonction pour relier des photos soumises pour le même Wayspot.',
+            linkPhotosExplanation2: 'Cliquez sur chaque photo que vous souhaitez relier à cette entrée.',
+            submittedPhotos: 'Photos soumises :',
+            submittedWayspots: 'Wayspots soumis :',
+            editData: 'Modifier les données Wayspot',
+            formSeparator: ' :',
+            latitude: 'Latitude',
+            longitude: 'Longitude',
+            city: 'Ville',
+            state: 'État',
+            importData: 'Importer des données Wayspot',
+            importDataExplanation: 'Importer manuellement des données Wayspot au format JSON à partir de sources externes telles que Ingress IITC.',
+        },
+        it: {
+            switchToPhotos: 'Passa alle foto',
+            switchToNominations: 'Passa a Wayspot',
+            pending: 'In attesa di',
+            submitted: 'Inviate',
+            linkPhotos: 'Collegamento di foto',
+            linkPhotosExplanation1: 'Utilizzare questa funzione per collegare tra loro le foto inviate per lo stesso Wayspot.',
+            linkPhotosExplanation2: 'Fare clic su ciascuna foto che si desidera collegare a questa voce.',
+            submittedPhotos: 'Foto inviate:',
+            submittedWayspots: 'Wayspot inviati:',
+            editData: 'Modifica dati Wayspot',
+            formSeparator: ':',
+            latitude: 'Latitudine',
+            longitude: 'Longitudine',
+            city: 'Città',
+            state: 'Stato',
+            importData: 'Importazione di dati Wayspot',
+            importDataExplanation: 'Importa manualmente i dati Wayspot in formato JSON da fonti esterne come Ingress IITC.',
+        },
+        in: {
+            switchToPhotos: 'Beralih ke foto',
+            switchToNominations: 'Beralih ke wayspot',
+            pending: 'Tertunda',
+            submitted: 'Diserahkan',
+            linkPhotos: 'Tautkan Foto Bersama',
+            linkPhotosExplanation1: 'Gunakan fungsi ini untuk menautkan kiriman foto untuk Wayspot yang sama.',
+            linkPhotosExplanation2: 'Klik setiap foto yang ingin Anda hubungkan ke entri ini.',
+            submittedPhotos: 'Foto yang dikirimkan:',
+            submittedWayspots: 'Wayspot yang dikirimkan:',
+            editData: 'Mengedit Data Wayspot',
+            formSeparator: ':',
+            latitude: 'Lintang',
+            longitude: 'Bujur',
+            city: 'Kota',
+            state: 'Negara Bagian',
+            importData: 'Mengimpor Data Wayspot',
+            importDataExplanation: 'Mengimpor data Wayspot secara manual dalam format JSON dari sumber eksternal seperti Ingress IITC.',
+        },
+        nl: {
+            switchToPhotos: `Wisselen naar foto's`,
+            switchToNominations: 'Wisselen naar wayspots',
+            pending: 'In behandeling',
+            submitted: 'Ingediend',
+            linkPhotos: `Foto's aan elkaar koppelen`,
+            linkPhotosExplanation1: 'Gebruik deze functie om foto-inzendingen voor dezelfde Wayspot aan elkaar te koppelen.',
+            linkPhotosExplanation2: 'Klik op elke foto die je wilt koppelen aan dit item.',
+            submittedPhotos: "Ingediende foto's:",
+            submittedWayspots: 'Ingediende Wayspots:',
+            editData: 'Bewerk Wayspot Data',
+            formSeparator: ':',
+            latitude: 'Breedtegraad',
+            longitude: 'Lengtegraad',
+            city: 'Stad',
+            state: 'Staat',
+            importData: 'Wayspot Data Importeren',
+            importDataExplanation: 'Importeer handmatig Wayspot data in JSON formaat van externe bronnen zoals Ingress IITC.',
+        },
+        no: {
+            switchToPhotos: 'Bytt til bilder',
+            switchToNominations: 'Bytt til nominasjoner',
+            pending: 'Avventer',
+            submitted: 'Sendt',
+            linkPhotos: 'Koble sammen bilder',
+            linkPhotosExplanation1: 'Bruk denne funksjonen til å koble sammen bilder som er sendt inn for samme Wayspot.',
+            linkPhotosExplanation2: 'Klikk på hvert bilde som du ønsker å koble til denne oppføringen.',
+            submittedPhotos: 'Innsendte bilder:',
+            submittedWayspots: 'Innsendte Wayspots:',
+            editData: 'Rediger Wayspot-data',
+            formSeparator: ':',
+            latitude: 'Breddegrad',
+            longitude: 'Lengdegrad',
+            city: 'By',
+            state: 'Delstat',
+            importData: 'Importere Wayspot-data',
+            importDataExplanation: 'Importer Wayspot-data manuelt i JSON-format fra eksterne kilder som Ingress IITC.',
+        },
+        pl: {
+            switchToPhotos: 'Przełącz na zdjęcia',
+            switchToNominations: 'Przejdź do Wayspotów',
+            pending: 'w oczekiwaniu',
+            submitted: 'zgłoszony',
+            linkPhotos: 'Połącz zdjęcia',
+            linkPhotosExplanation1: 'Ta funkcja służy do łączenia zdjęć przesłanych dla tego samego punktu trasy.',
+            linkPhotosExplanation2: 'Kliknij każde zdjęcie, które chcesz połączyć z tym wpisem.',
+            submittedPhotos: 'Zgłoszone zdjęcia:',
+            submittedWayspots: 'Zgłoszone punkty trasy:',
+            editData: 'Edytuj dane Wayspot',
+            formSeparator: ':',
+            latitude: 'Szerokość geograficzna',
+            longitude: 'Długość geograficzna',
+            city: 'Miasto',
+            state: 'Stan',
+            importData: 'Importowanie danych Wayspot',
+            importDataExplanation: 'Ręcznie importuj dane Wayspot w formacie JSON z zewnętrznych źródeł, takich jak Ingress IITC.',
+        },
+        ru: {
+            switchToPhotos: 'Переключиться на фотографии',
+            switchToNominations: 'Переключиться на Wayspots',
+            pending: 'В процессе',
+            submitted: 'Поданный',
+            linkPhotos: 'Связать фотографии вместе',
+            linkPhotosExplanation1: 'Используйте эту функцию, чтобы связать вместе фотографии, присланные для одного и того же Wayspot.',
+            linkPhotosExplanation2: 'Щелкните каждую фотографию, которую вы хотите связать с этой записью.',
+            submittedPhotos: 'Отправленные фотографии:',
+            submittedWayspots: 'Отправленные Wayspots:',
+            editData: 'Редактировать данные Wayspot',
+            formSeparator: ':',
+            latitude: 'Широта',
+            longitude: 'Долгота',
+            city: 'Город',
+            state: 'Штат',
+            importData: 'Импорт данных Wayspot',
+            importDataExplanation: 'Ручной импорт данных Wayspot в формате JSON из внешних источников, таких как Ingress IITC.',
+        },
+        sv: {
+            switchToPhotos: 'Byt till foton',
+            switchToNominations: 'Byt till Wayspots',
+            pending: 'I väntan på',
+            submitted: 'Inskickad',
+            linkPhotos: 'Länka foton tillsammans',
+            linkPhotosExplanation1: 'Använd denna funktion för att länka samman foton som skickats in för samma Wayspot.',
+            linkPhotosExplanation2: 'Klicka på varje foto som du vill koppla till den här posten.',
+            submittedPhotos: 'Inskickade foton:',
+            submittedWayspots: 'Inskickade Wayspots:',
+            editData: 'Redigera Wayspot-data',
+            formSeparator: ':',
+            latitude: 'Latitud',
+            longitude: 'Longitud',
+            city: 'Stad',
+            state: 'Delstat',
+            importData: 'Importera Wayspot-data',
+            importDataExplanation: 'Importera Wayspot-data manuellt i JSON-format från externa källor som Ingress IITC.',
+        },
+        th: {
+            switchToPhotos: 'สลับไปที่รูปถ่าย',
+            switchToNominations: 'สลับไปที่ Wayspots',
+            pending: 'รอดำเนินการ',
+            submitted: 'ส่ง',
+            linkPhotos: 'เชื่อมโยงรูปภาพเข้าด้วยกัน',
+            linkPhotosExplanation1: 'ใช้ฟังก์ชันนี้เพื่อเชื่อมโยงการส่งภาพถ่ายสำหรับ Wayspot เดียวกัน',
+            linkPhotosExplanation2: 'คลิกแต่ละภาพที่คุณต้องการเชื่อมต่อกับรายการนี้',
+            submittedPhotos: 'ภาพถ่ายที่ส่ง:',
+            submittedWayspots: 'Wayspots ที่ส่ง:',
+            editData: 'แก้ไขข้อมูล Wayspot',
+            formSeparator: ':',
+            latitude: 'ละติจูด',
+            longitude: 'ลองจิจูด',
+            city: 'เมือง',
+            state: 'สถานะ',
+            importData: 'นำเข้าข้อมูล Wayspot',
+            importDataExplanation: 'นำเข้าข้อมูล Wayspot ด้วยตนเองในรูปแบบ JSON จากแหล่งภายนอก เช่น Ingress IITC',
+        },
+        zh_TW: {
+            switchToPhotos: '切換到照片',
+            switchToNominations: '切換到 Wayspots',
+            pending: '待辦的',
+            submitted: '已提交',
+            linkPhotos: '將照片連結在一起',
+            linkPhotosExplanation1: '使用此功能可將同一 Wayspot 的照片提交連結在一起。',
+            linkPhotosExplanation2: '點擊您想要連接到此條目的每張照片。',
+            submittedPhotos: '提交的照片：',
+            submittedWayspots: '提交的 Wayspots：',
+            editData: '編輯 Wayspot 數據',
+            formSeparator: '：',
+            latitude: '緯度',
+            longitude: '經度',
+            city: '城市',
+            state: '狀態',
+            importData: '匯入 Wayspot 數據',
+            importDataExplanation: '從 Ingress IITC 等外部來源手動匯入 JSON 格式的 Wayspot 資料。',
+        },
+        bn: {
+            switchToPhotos: 'ছবিতে স্যুইচ করুন',
+            switchToNominations: 'ওয়েস্পটে স্যুইচ করুন',
+            pending: 'বিচারাধীন',
+            submitted: 'জমা দেওয়া হয়েছে',
+            linkPhotos: 'একসাথে ফটো লিঙ্ক করুন',
+            linkPhotosExplanation1: 'একই ওয়েস্পটের জন্য ফটো জমাগুলিকে একসাথে লিঙ্ক করতে এই ফাংশনটি ব্যবহার করুন৷',
+            linkPhotosExplanation2: 'আপনি এই এন্ট্রিতে সংযোগ করতে চান এমন প্রতিটি ফটোতে ক্লিক করুন।',
+            submittedPhotos: 'জমা দেওয়া ছবি:',
+            submittedWayspots: 'জমা দেওয়া Wayspots:',
+            editData: 'Wayspot ডেটা সম্পাদনা করুন',
+            formSeparator: ':',
+            latitude: 'অক্ষাংশ',
+            longitude: 'দ্রাঘিমাংশ',
+            city: 'শহর',
+            state: 'অবস্থা',
+            importData: 'Wayspot ডেটা আমদানি করুন',
+            importDataExplanation: 'Ingress IITC এর মতো বাহ্যিক উত্স থেকে JSON ফর্ম্যাটে ম্যানুয়ালি Wayspot ডেটা আমদানি করুন৷',
+        },
+        hi: {
+            switchToPhotos: 'फ़ोटो पर स्विच करें',
+            switchToNominations: 'वेस्पॉट्स पर स्विच करें',
+            pending: 'लंबित',
+            submitted: 'प्रस्तुत',
+            linkPhotos: 'फ़ोटो को एक साथ लिंक करें',
+            linkPhotosExplanation1: 'एक ही वेस्पॉट के लिए फोटो सबमिशन को एक साथ जोड़ने के लिए इस फ़ंक्शन का उपयोग करें।',
+            linkPhotosExplanation2: 'प्रत्येक फोटो पर क्लिक करें जिसे आप इस प्रविष्टि से जोड़ना चाहेंगे।',
+            submittedPhotos: 'आपकी सबमिट की गई तस्वीरें:',
+            submittedWayspots: 'आपके सबमिट किए गए वेस्पॉट्स:',
+            editData: 'वेस्पॉट डेटा संपादित करें',
+            formSeparator: ':',
+            latitude: 'अक्षांश',
+            longitude: 'देशांतर',
+            city: 'शहर',
+            state: 'राज्य',
+            importData: 'वेस्पॉट डेटा आयात करें',
+            importDataExplanation: 'Ingress IITC जैसे बाहरी स्रोतों से JSON प्रारूप में वेस्पॉट डेटा को मैन्युअल रूप से आयात करें।',
+        },
+        mr: {
+            switchToPhotos: 'फोटोंवर स्विच करा',
+            switchToNominations: 'वेस्पॉट्सवर स्विच करा',
+            pending: 'प्रलंबित',
+            submitted: 'सबमिट केले',
+            linkPhotos: 'फोटो एकत्र लिंक करा',
+            linkPhotosExplanation1: 'समान वेस्पॉटसाठी फोटो सबमिशन एकत्र जोडण्यासाठी हे कार्य वापरा.',
+            linkPhotosExplanation2: 'तुम्ही या एंट्रीशी कनेक्ट करू इच्छित असलेल्या प्रत्येक फोटोवर क्लिक करा.',
+            submittedPhotos: 'तुमचे सबमिट केलेले फोटो:',
+            submittedWayspots: 'तुमचे सबमिट केलेले वेस्पॉट्स:',
+            editData: 'वेस्पॉट डेटा संपादित करा',
+            formSeparator: ':',
+            latitude: 'अक्षांश',
+            longitude: 'रेखांश',
+            city: 'शहर',
+            state: 'राज्य',
+            importData: 'वेस्पॉट डेटा आयात करा',
+            importDataExplanation: 'Ingress IITC सारख्या बाह्य स्त्रोतांकडून JSON फॉरमॅटमध्ये वेस्पॉट डेटा मॅन्युअली इंपोर्ट करा.',
+        },
+        ta: {
+            switchToPhotos: 'புகைப்படங்களுக்கு மாறவும்',
+            switchToNominations: 'Wayspots க்கு மாறவும்',
+            pending: 'நிலுவையில் உள்ளது',
+            submitted: 'சமர்ப்பிக்கப்பட்டது',
+            linkPhotos: 'புகைப்படங்களை ஒன்றாக இணைக்கவும்',
+            linkPhotosExplanation1: 'ஒரே Wayspotக்கான புகைப்பட சமர்ப்பிப்புகளை ஒன்றாக இணைக்க இந்தச் செயல்பாட்டைப் பயன்படுத்தவும்.',
+            linkPhotosExplanation2: 'இந்த பதிவில் இணைக்க விரும்பும் ஒவ்வொரு புகைப்படத்தையும் கிளிக் செய்யவும்.',
+            submittedPhotos: 'நீங்கள் சமர்ப்பித்த புகைப்படங்கள்:',
+            submittedWayspots: 'நீங்கள் சமர்ப்பித்த Wayspots:',
+            editData: 'Wayspot தரவைத் திருத்தவும்',
+            formSeparator: ':',
+            latitude: 'அட்சரேகை',
+            longitude: 'தீர்க்கரேகை',
+            city: 'நகரம்',
+            state: 'மாநிலம்',
+            importData: 'Wayspot தரவை இறக்குமதி செய்யவும்',
+            importDataExplanation: 'Ingress IITC போன்ற வெளிப்புற மூலங்களிலிருந்து JSON வடிவத்தில் Wayspot தரவை கைமுறையாக இறக்குமதி செய்யவும்.',
+        },
+        te: {
+            switchToPhotos: 'ఫోటోలను ఒకదానితో ఒకటి లింక్ చేయండి',
+            switchToNominations: 'వేస్‌పాట్‌లకు మారండి',
+            pending: 'పెండింగ్‌లో ఉంది',
+            submitted: 'సమర్పించబడింది',
+            linkPhotos: 'ఫోటోలను ఒకదానితో ఒకటి లింక్ చేయండి',
+            linkPhotosExplanation1: 'ఒకే వేస్‌పాట్ కోసం ఫోటో సమర్పణలను కలిపి లింక్ చేయడానికి ఈ ఫంక్షన్‌ని ఉపయోగించండి.',
+            linkPhotosExplanation2: 'మీరు ఈ ఎంట్రీకి కనెక్ట్ చేయాలనుకుంటున్న ప్రతి ఫోటోను క్లిక్ చేయండి.',
+            submittedPhotos: 'మీరు సమర్పించిన ఫోటోలు:',
+            submittedWayspots: 'మీరు సమర్పించిన వేస్‌పాట్‌లు:',
+            editData: 'వేస్పాట్ డేటాను సవరించండి',
+            formSeparator: ':',
+            latitude: 'అక్షాంశం',
+            longitude: 'రేఖాంశం',
+            city: 'నగరం',
+            state: 'రాష్ట్రం',
+            importData: 'వేస్‌పాట్ డేటాను దిగుమతి చేయండి',
+            importDataExplanation: 'Ingress IITC వంటి బాహ్య మూలాల నుండి JSON ఆకృతిలో వేస్‌పాట్ డేటాను మాన్యువల్‌గా దిగుమతి చేయండి.',
+        },
+        tl: {
+            switchToPhotos: 'Lumipat sa mga larawan',
+            switchToNominations: 'Lumipat sa Wayspots',
+            pending: 'Nakabinbin',
+            submitted: 'Isinumite',
+            linkPhotos: 'Sumali sa Photos',
+            linkPhotosExplanation1: 'Gamitin ang function na ito upang iugnay ang mga pagsusumite ng larawan para sa parehong Wayspot.',
+            linkPhotosExplanation2: 'I-click ang bawat larawan na gusto mong ikonekta sa entry na ito.',
+            submittedPhotos: 'Mga isinumiteng larawan:',
+            submittedWayspots: 'Mga isinumite na Wayspot:',
+            editData: 'I-edit ang Wayspot Data',
+            formSeparator: ':',
+            latitude: 'Latitude',
+            longitude: 'Longitude',
+            city: 'Lungsod',
+            state: 'Estado',
+            importData: 'Mag-import ng Data ng Wayspot',
+            importDataExplanation: 'Manu-manong mag-import ng data ng Wayspot sa JSON na format mula sa mga external na source gaya ng INGRESS IITC.',
+        },
+        tr: {
+            switchToPhotos: 'Fotoğraflara geç',
+            switchToNominations: `Wayspots'a geç`,
+            pending: 'Askıda olması',
+            submitted: 'Gönderilen',
+            linkPhotos: 'Fotoğrafları Bağlayın',
+            linkPhotosExplanation1: 'Aynı Wayspot için fotoğraf gönderimlerini ilişkilendirmek için bu işlevi kullanın.',
+            linkPhotosExplanation2: 'Bu girişe bağlamak istediğiniz her bir fotoğrafa tıklayın.',
+            submittedPhotos: 'Gönderilen fotoğraflar:',
+            submittedWayspots: 'Gönderilen Wayspots:',
+            editData: 'Wayspot Verilerini Düzenle',
+            formSeparator: ':',
+            latitude: 'Enlem',
+            longitude: 'Boylam',
+            city: 'Şehir',
+            state: 'Eyalet',
+            importData: 'Wayspot Verilerini İçe Aktar',
+            importDataExplanation: 'Wayspot verilerini Ingress IITC gibi harici kaynaklardan JSON formatında manuel olarak içe aktarın.',
+        }
+    };
+
+    const getL10N = () => {
+        const i18n = JSON.parse(localStorage['@transloco/translations']);
+        return i18n[language];
+    };
 
     // Attach an event listener for the "Escape" key press
     document.addEventListener('keydown', handleEscapeKey);
@@ -55,6 +518,14 @@ function init() {
             if (url == '/api/v1/vault/manage') {
                 if (method == 'GET') {
                     this.addEventListener('load', parseNominations, false);
+                }
+            } else if (url == '/api/v1/vault/properties') {
+                if (method == 'GET') {
+                    this.addEventListener('load', interceptProperties, false);
+                }
+            } else if (url == '/api/v1/vault/review') {
+                if (method == 'GET') {
+                    this.addEventListener('load', parseReview, false);
                 }
             }
             open.apply(this, arguments);
@@ -86,6 +557,71 @@ function init() {
         }
     }
 
+    function parseReview(e) {
+        try {
+            const response = this.response;
+            const json = JSON.parse(response);
+            if (!json) {
+                console.log('Failed to parse response from Wayfarer');
+                return;
+            }
+            // ignore if it's related to captchas
+            if (json.captcha)
+                return;
+
+            const result = json.result
+
+            if (result.type === 'NEW' && result.nearbyPortals) {
+                result.nearbyPortals.forEach(portal => {
+                    extractLightshipDataFromReview(portal);
+                });
+                return;
+            }
+            if (result.type === 'EDIT') {
+                extractLightshipDataFromReview(result);
+                return;
+            }
+        } catch (e)    {
+            console.log(e); // eslint-disable-line no-console
+        }
+    }
+
+    function interceptProperties() {
+        try {
+            const response = this.response;
+            const json = JSON.parse(response);
+            if (!json) return;
+            if (!json.result || !json.result.language) return;
+            language = json.result.language;
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    function extractLightshipDataFromReview(response) {
+        const imageUrl = response.imageUrl;
+
+        // Check if the URL from response.imageUrl appears in photoSubmissions
+        const matchingSubmission = photoSubmissions.find(submission => submission.imageUrl === imageUrl);
+
+        if (matchingSubmission) {
+            console.log('Found a submitted photo during a Wayfarer review! Details saved for ', response.title);
+            // Update the matching submission with lightship data
+            matchingSubmission.lightship = {
+                guid: response.guid || null,
+                title: response.title || null,
+                description: response.description || null,
+                lat: response.lat,
+                lng: response.lng,
+                _lastImported: new Date().getTime(),
+            };
+
+            matchingSubmission.submitted.edited = true;
+
+            synchronizeLightshipData(matchingSubmission);
+        }
+    }
+
     // Opens an IDB database connection.
     // IT IS YOUR RESPONSIBILITY TO CLOSE THE RETURNED DATABASE CONNECTION WHEN YOU ARE DONE WITH IT.
     // THIS FUNCTION DOES NOT DO THIS FOR YOU - YOU HAVE TO CALL db.close()!
@@ -102,7 +638,24 @@ function init() {
             const db = event.target.result;
             const dbVer = db.version;
             console.log(`IndexedDB initialization complete (database version ${dbVer}).`);
-            if (!db.objectStoreNames.contains(OBJECT_STORE_NAME)) {
+
+            // Check if the object store with the old keyPath 'uuid' exists.
+            if (db.objectStoreNames.contains(OBJECT_STORE_NAME) &&
+                db.transaction([OBJECT_STORE_NAME]).objectStore(OBJECT_STORE_NAME).keyPath === 'uuid') {
+                db.close();
+                console.log(`Deleting object store ${OBJECT_STORE_NAME} with keyPath 'uuid'. Closing and incrementing version.`);
+
+                // Delete the existing object store
+                const deleteRequest = indexedDB.open('wayfarer-tools-db', dbVer + 1);
+                deleteRequest.onupgradeneeded = deleteEvent => {
+                    const deleteDB = deleteEvent.target.result;
+                    deleteDB.deleteObjectStore(OBJECT_STORE_NAME);
+                };
+
+                deleteRequest.onsuccess = () => {
+                    getIDBInstance(dbVer + 1).then(resolve);
+                };
+            } else if (!db.objectStoreNames.contains(OBJECT_STORE_NAME)) {
                 db.close();
                 console.log(`Database does not contain column ${OBJECT_STORE_NAME}. Closing and incrementing version.`);
                 getIDBInstance(dbVer + 1).then(resolve);
@@ -110,16 +663,23 @@ function init() {
                 resolve(db);
             }
         };
+
         openRequest.onupgradeneeded = event => {
             console.log('Upgrading database...');
             const db = event.target.result;
+
+            // Create the object store with the new keyPath 'imageUrl'
             if (!db.objectStoreNames.contains(OBJECT_STORE_NAME)) {
-                db.createObjectStore(OBJECT_STORE_NAME, { keyPath: 'uuid' });
+                db.createObjectStore(OBJECT_STORE_NAME, { keyPath: 'imageUrl' });
             }
         };
     });
 
-    loadPhotoSubmissionsFromIDB();
+    // Call the functions to load submission data and email data from the IDB
+    loadPhotoSubmissionsFromIDB().then(() => {
+        // Now that photo submissions are loaded, proceed to load email data
+        loadEmailDataFromIDB();
+    });
 
     // Function to load photoSubmissions from IndexedDB
     function loadPhotoSubmissionsFromIDB() {
@@ -159,7 +719,7 @@ function init() {
                 // Process each photoSubmission in the global variable
                 photoSubmissions.forEach(photoSubmission => {
                     // Check if 'edited' property is true
-                    if (photoSubmission.edited) {
+                    if (photoSubmission.edited && photoSubmission.imageUrl) {
                         // Remove the 'edited' property
                         delete photoSubmission.edited;
 
@@ -167,22 +727,23 @@ function init() {
                         const request = objectStore.put(photoSubmission);
 
                         request.onerror = () => {
-                            console.error(`Error saving photo submission with UUID ${photoSubmission.uuid}`);
-                            reject(`Error saving photo submission with UUID ${photoSubmission.uuid}`);
+                            console.error(`Error saving photo submission with image url: ${photoSubmission.imageUrl}`);
+                            reject(`Error saving photo submission with image url: ${photoSubmission.imageUrl}`);
                         };
                     }
                 });
 
-                // Delete entries from IDB with uuid not present in photoSubmissions
+                // Delete entries from IDB with image url not present in photoSubmissions
+                // Could be because a Redacted Rejection has been matched to the real photo
                 objectStore.openCursor().onsuccess = event => {
                     const cursor = event.target.result;
                     if (cursor) {
-                        const storedUUID = cursor.value.uuid;
-                        if (!photoSubmissions.some(submission => submission.uuid === storedUUID)) {
+                        const storedImageUrl = cursor.value.imageUrl;
+                        if (!photoSubmissions.some(submission => submission.imageUrl === storedImageUrl)) {
                             const deleteRequest = cursor.delete();
                             deleteRequest.onerror = () => {
-                                console.error(`Error deleting photo submission with UUID ${storedUUID}`);
-                                reject(`Error deleting photo submission with UUID ${storedUUID}`);
+                                console.error(`Error deleting photo submission with image url: ${storedImageUrl}`);
+                                reject(`Error deleting photo submission with image url: ${storedImageUrl}`);
                             };
                         }
                         cursor.continue();
@@ -195,6 +756,64 @@ function init() {
         });
     }
 
+    // Function to log all email Message IDs and extract information to emailData
+    async function loadEmailDataFromIDB() {
+        try {
+            const windowRef = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+            // Check if the API and emailImport are defined
+            if (windowRef.wft_plugins_api && windowRef.wft_plugins_api.emailImport) {
+
+                const unprocessedEmails = [];
+
+                // Create a list of already used message IDs so we don't reprocess same emails
+                const existingMessageIds = [];
+                for (const submission of photoSubmissions) {
+                    if (submission.submitted) {
+                        existingMessageIds.push(submission.submitted.messageId);
+                    }
+                    if (submission.outcome) {
+                        existingMessageIds.push(submission.outcome.messageId);
+                    }
+                }
+
+                for await (const email of windowRef.wft_plugins_api.emailImport.iterate()) {
+                    const messageId = email.messageID;
+
+                    // Check if the messageId exists in the list of existingMessageIds
+                    if (existingMessageIds.includes(messageId)) {
+                        // Skip processing for this email
+                        continue;
+                    }
+
+                    const subject = email.getHeader('Subject');
+                    const date = email.getHeader('Date');
+                    const from = email.getHeader('From');
+                    const importedDate = email.importedDate;
+                    const textHtml = email.getBody('text/html');
+                    const textPlain = email.getBody('text/plain');
+
+                    const emailInfo = {
+                        messageId,
+                        subject,
+                        date,
+                        from,
+                        importedDate,
+                        textHtml,
+                        textPlain,
+                    };
+
+                    unprocessedEmails.push(emailInfo);
+                }
+
+                extractDataFromEmails(unprocessedEmails);
+            } else {
+                console.error('window.wft_plugins_api.emailImport is not defined.');
+            }
+        } catch (error) {
+            console.error('Error retrieving email instances:', error);
+        }
+    }
+
     // Function to change the text content of wf-page-header, add a class, hide the next sibling,
     // insert a new div, and identify the _ngcontent string
     async function modifyContributionsPage() {
@@ -203,15 +822,10 @@ function init() {
 
             const nextSibling = pageHeader.nextSibling;
             if (nextSibling) {
-                // Find the _ngcontent string so inserted code matches existing css styles
-                ngcontent = getNgContentString(nextSibling);
-                ngcontent = ngcontent.slice(0, -5);
-                nghost = ngcontent.replace('content', 'host');
-
                 nextSibling.classList.add('noms-list');
-
-                appendCustomStyles();
-                addImportButton();
+                getNgContentString(nextSibling);
+                appendFilterCssStyles();
+                appendCustomCssStyles();
                 modifyExistingNominationsList();
                 createPhotosDiv(nextSibling);
             }
@@ -253,7 +867,7 @@ function init() {
             const spanElement = document.createElement('span');
             spanElement.className = 'text-xs';
             spanElement.id = 'switch-to-photos-text';
-            spanElement.innerText = '[ Switch to Photos ]';
+            spanElement.innerText = `[ ${strings[language].switchToPhotos} ]`;
 
             // Attach click event listener to newButton
             newButton.addEventListener('click', toggleDisplayedList);
@@ -276,110 +890,11 @@ function init() {
     function getNgContentString(element) {
         for (const attribute of element.attributes) {
             if (attribute.name.startsWith('_ngcontent-')) {
-                return attribute.name;
+                ngcontent = attribute.name.slice(0, -5);
+                return;
             }
         }
-        return null;
     }
-
-    function addImportButton(nominations) {
-        if (document.getElementById('photoImportBtn') !== null) return;
-
-        const ref = document.querySelector('wf-logo');
-        const div = document.createElement('div');
-        const btn = document.createElement('btn');
-
-        btn.textContent = 'Import photos';
-        btn.addEventListener('click', () => {
-            const outer = document.createElement('div');
-            outer.classList.add('photoImportBg', 'cdk-overlay-photos-container');
-            document.querySelector('body').appendChild(outer);
-
-            const backdrop = document.createElement('div');
-            backdrop.classList.add('cdk-overlay-backdrop', 'cdk-overlay-dark-backdrop', 'cdk-overlay-backdrop-showing');
-            backdrop.addEventListener('click', () => {
-                outer.parentNode.removeChild(outer);
-            });
-
-            outer.appendChild(backdrop);
-
-            const wrapper = document.createElement('div');
-            wrapper.classList.add('cdk-global-overlay-wrapper');
-            wrapper.setAttribute('dir', 'ltr');
-            wrapper.style.justifyContent = 'center';
-            wrapper.style.alignItems = 'center';
-
-            outer.appendChild(wrapper);
-
-            const inner = document.createElement('div');
-            inner.classList.add('photoImportInner');
-            inner.classList.add('photoImportMethod');
-            inner.style.pointerEvents = 'auto';
-            wrapper.appendChild(inner);
-
-            const header = document.createElement('h1');
-            header.textContent = 'Import photos from emails';
-            inner.appendChild(header);
-
-            const sub = document.createElement('p');
-            sub.textContent = 'Please select how you want to import your emails.';
-            inner.appendChild(sub);
-
-            importMethods.forEach(method => {
-                const btn = document.createElement('div');
-                btn.classList.add('photoMethodButton');
-                btn.style.zIndex = '1000'; // Set the z-index
-
-                if (method.icon) {
-                    btn.style.paddingLeft = '60px';
-                    btn.style.backgroundImage = 'url(' + method.icon + ')';
-                }
-
-                const btnTitle = document.createElement('p');
-                btnTitle.classList.add('photoMethodTitle');
-                btnTitle.textContent = method.title;
-                btn.appendChild(btnTitle);
-
-                const btnDesc = document.createElement('p');
-                btnDesc.classList.add('photoMethodDesc');
-                btnDesc.textContent = method.description;
-                btn.appendChild(btnDesc);
-
-                btn.addEventListener('click', () => {
-                    outer.parentNode.removeChild(outer);
-                    method.callback(nominations);
-                });
-
-                inner.appendChild(btn);
-            });
-        });
-
-        btn.id = 'photoImportBtn';
-        btn.classList.add('photoTopButton');
-        div.appendChild(btn);
-        ref.parentNode.parentNode.appendChild(div);
-
-        // Add event listener to the overlay backdrop
-        const overlayBackdrop = document.querySelector('.cdk-overlay-backdrop');
-        if (overlayBackdrop) {
-            overlayBackdrop.addEventListener('click', clearOverlay);
-        }
-    }
-
-    const importMethods = [
-        {
-            title: 'From *.eml files',
-            description: 'Import email files saved and exported from an email client, such as Thunderbird',
-            callback: importFromEml,
-            icon: 'data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9Im5vIj8+CjxzdmcKICAgdmVyc2lvbj0iMS4xIgogICBpZD0iTGF5ZXJfMSIKICAgeD0iMHB4IgogICB5PSIwcHgiCiAgIHdpZHRoPSIyODM0LjkzOCIKICAgaGVpZ2h0PSIyOTAyLjE5MzEiCiAgIHZpZXdCb3g9IjAgMCAyODM0LjkzNzkgMjkwMi4xOTMxIgogICBlbmFibGUtYmFja2dyb3VuZD0ibmV3IDAgMCA1MzU2LjkyOSA1MDE0Ljk5NyIKICAgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIgogICB4bWxuczpzdmc9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8ZGVmcwogICAgIGlkPSJkZWZzNDMiIC8+CiAgPGcKICAgICBpZD0iZzM4IgogICAgIHRyYW5zZm9ybT0idHJhbnNsYXRlKC0xMzE1LjQ2NCwtOTQ2LjkxMikiPgogICAgPGcKICAgICAgIGlkPSJnMzYiPgogICAgICA8cGF0aAogICAgICAgICBmaWxsPSIjZjM3MDViIgogICAgICAgICBkPSJtIDQwMzUuNDcsMjA0OS44NzkgYyAtMzAuMTYzLC0xOC4zMjEgLTY0LjE3MiwtMjkuNTg3IC0xMDAuODAyLC0yOS41ODcgSCAxNTMxLjExNyBjIC00OC40NSwwIC05Mi42MzUsMTguNzY3IC0xMjguNjk0LDQ5LjQ2MiBsIDEyMTguNzY1LDkzMi43NzkgNC40NzksMS4zNzggLTQuNDc5LDIuNzA2IDEwNi44MTMsODEuNzU0IDEwOC4zNTMsLTg1LjgzOCAtNC4yODgsLTIuNzI5IDQuMjg4LC0xLjI1NyB6IgogICAgICAgICBpZD0icGF0aDYiIC8+CiAgICAgIDxwYXRoCiAgICAgICAgIGZpbGw9IiNmMzcwNWIiCiAgICAgICAgIGQ9Im0gMTQwMi40MiwyMDczLjc5NiBjIDAsMCAxMTY0LjUxMSwtMTEyNi44ODQgMTMzNS41MDEsLTExMjYuODg0IDE3MS4wNjcsMCAxMjk3LjU1MywxMTA2Ljk4IDEyOTcuNTUzLDExMDYuOTggeiIKICAgICAgICAgaWQ9InBhdGg4IiAvPgogICAgICA8ZwogICAgICAgICBpZD0iZzI0Ij4KICAgICAgICA8cmVjdAogICAgICAgICAgIHg9IjE5MDIuMDc4IgogICAgICAgICAgIHk9IjE3NTQuNzI3MSIKICAgICAgICAgICBmaWxsPSIjZmZmZmZmIgogICAgICAgICAgIHdpZHRoPSIxNjkzLjc1MSIKICAgICAgICAgICBoZWlnaHQ9IjE5NzYuMDUyIgogICAgICAgICAgIGlkPSJyZWN0MTAiIC8+CiAgICAgICAgPHJlY3QKICAgICAgICAgICB4PSIyMDIxLjc2NCIKICAgICAgICAgICB5PSIxOTI2LjA0MzkiCiAgICAgICAgICAgZmlsbD0iI2ZmZDA2NiIKICAgICAgICAgICB3aWR0aD0iMTQ1NC4zMDgiCiAgICAgICAgICAgaGVpZ2h0PSI4OC40MDQ5OTkiCiAgICAgICAgICAgaWQ9InJlY3QxMiIgLz4KICAgICAgICA8cmVjdAogICAgICAgICAgIHg9IjIwMjEuNzY0IgogICAgICAgICAgIHk9IjIzMzAuOTc0MSIKICAgICAgICAgICBmaWxsPSIjZmZkMDY2IgogICAgICAgICAgIHdpZHRoPSIxNDU0LjMwOCIKICAgICAgICAgICBoZWlnaHQ9Ijg4LjM2MSIKICAgICAgICAgICBpZD0icmVjdDE0IiAvPgogICAgICAgIDxyZWN0CiAgICAgICAgICAgeD0iMjAyMS43NjQiCiAgICAgICAgICAgeT0iMjEyOC41MTM5IgogICAgICAgICAgIGZpbGw9IiNmZmQwNjYiCiAgICAgICAgICAgd2lkdGg9IjE0NTQuMzA4IgogICAgICAgICAgIGhlaWdodD0iODguMzkxOTk4IgogICAgICAgICAgIGlkPSJyZWN0MTYiIC8+CiAgICAgICAgPHJlY3QKICAgICAgICAgICB4PSIyMDIxLjc2NCIKICAgICAgICAgICB5PSIyNTMzLjQzNDEiCiAgICAgICAgICAgZmlsbD0iI2ZmZDA2NiIKICAgICAgICAgICB3aWR0aD0iMTQ1NC4zMDgiCiAgICAgICAgICAgaGVpZ2h0PSI4OC4zMzAwMDIiCiAgICAgICAgICAgaWQ9InJlY3QxOCIgLz4KICAgICAgICA8cmVjdAogICAgICAgICAgIHg9IjIwMjEuNzY0IgogICAgICAgICAgIHk9IjI3MjIuNzEiCiAgICAgICAgICAgZmlsbD0iI2ZmZDA2NiIKICAgICAgICAgICB3aWR0aD0iMTQ1NC4zMDgiCiAgICAgICAgICAgaGVpZ2h0PSI4OC40MDQ5OTkiCiAgICAgICAgICAgaWQ9InJlY3QyMCIgLz4KICAgICAgICA8cmVjdAogICAgICAgICAgIHg9IjIwMjEuNzY0IgogICAgICAgICAgIHk9IjI5MjUuMjA4IgogICAgICAgICAgIGZpbGw9IiNmZmQwNjYiCiAgICAgICAgICAgd2lkdGg9IjE0NTQuMzA4IgogICAgICAgICAgIGhlaWdodD0iODguMzIzOTk3IgogICAgICAgICAgIGlkPSJyZWN0MjIiIC8+CiAgICAgIDwvZz4KICAgICAgPGcKICAgICAgICAgaWQ9ImczNCI+CiAgICAgICAgPHBvbHlnb24KICAgICAgICAgICBmaWxsPSIjNjZiYmM5IgogICAgICAgICAgIHBvaW50cz0iMjU1Mi42MzQsMjk1NC4wNjkgMjU1Mi44NCwyOTU0LjIzMSAyNTE2LjEyMSwyOTI2LjA4MiAiCiAgICAgICAgICAgaWQ9InBvbHlnb24yNiIgLz4KICAgICAgICA8cGF0aAogICAgICAgICAgIGZpbGw9IiNmN2JhMWQiCiAgICAgICAgICAgZD0ibSAyNTUyLjg0LDI5NTQuMjMxIC0wLjIwNiwtMC4xNjIgLTM2LjUxMywtMjcuOTg3IC0zNDEuODkyLC0yNjEuNTQ5IC03NzEuODA2LC01OTAuNzM2IGMgLTUyLjQwMSw0NC43NjIgLTg2Ljk1OSwxMTUuMzgyIC04Ni45NTksMTk1LjYxNiB2IDEzMzQuNTY5IGMgMCw2OS45MzUgMjYuMDY5LDEzMi41NTEgNjcuMzc2LDE3Ny4xODkgbCA5NTkuMTI1LC01OTkuOTI4IDI3OS4yMjQsLTE3NC42MjEgeiIKICAgICAgICAgICBpZD0icGF0aDI4IiAvPgogICAgICAgIDxwYXRoCiAgICAgICAgICAgZmlsbD0iI2Y3YmExZCIKICAgICAgICAgICBkPSJtIDQwMzUuNDcsMjA1My44OTYgLTg5Ni43ODUsNzA5LjU4NSB2IDAgbCAtMTg5LjYyMSwxNTAuMDc0IC05Ni42MjQsNzYuMzY2IC0xNi4wOTMsMTIuNjA4IDMzOS43ODUsMjE2LjQzMiA4OTcuMjY5LDU3MS40MTIgYyA0Ni43MDYsLTQ0Ljk1MSA3Ny4wMDEsLTExMS4yODIgNzcuMDAxLC0xODYuMzk1IFYgMjI2OS40MSBjIDAsLTkzLjgxNSAtNDYuOTEzLC0xNzQuMzIgLTExNC45MzIsLTIxNS41MTQgeiIKICAgICAgICAgICBpZD0icGF0aDMwIiAvPgogICAgICAgIDxwYXRoCiAgICAgICAgICAgZmlsbD0iI2U0YTMzYSIKICAgICAgICAgICBkPSJtIDMxNzYuMTQsMzIxOC45NjQgLTMzOS43ODYsLTIxNi40MzIgMTYuMDkzLC0xMi42MDggYyAtMC45ODUsMC42MzQgLTg5LjYzMyw1NS42MzUgLTEzMy41ODksNTUuNjM1IC00My43OTIsMCAtMTY1LjI0OCwtOTAuNjg0IC0xNjYuMDE0LC05MS4zMjggbCA2OC4zNTIsNTIuMzg2IC0yNzkuMjI0LDE3NC42MiAtOTU5LjEyOCw1OTkuOTMgYyAzOC41MjYsNDEuODUxIDkwLjY5Nyw2Ny45MzggMTQ4LjI4NCw2Ny45MzggaCAyNDAzLjU0OSBjIDUzLjE2LDAgMTAxLjA4MSwtMjIuNjI5IDEzOC43MzUsLTU4LjczNSB6IgogICAgICAgICAgIGlkPSJwYXRoMzIiIC8+CiAgICAgIDwvZz4KICAgIDwvZz4KICA8L2c+Cjwvc3ZnPgo='
-        },
-        {
-            title: 'Google Apps Script',
-            description: '[THIS DOES NOT DO ANYTHING YET - FUTURE FEATURE] Import emails directly from Gmail, using a Google Apps Script',
-            callback: console.log('importFromGAScript'),
-            icon: 'data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9Im5vIj8+CjxzdmcKICAgdmVyc2lvbj0iMS4xIgogICB3aWR0aD0iNDU2LjEzOTI1IgogICBoZWlnaHQ9IjM2MC44MDg1IgogICBpZD0ic3ZnMjIiCiAgIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIKICAgeG1sbnM6c3ZnPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPGRlZnMKICAgICBpZD0iZGVmczI2IiAvPgogIDxyZWN0CiAgICAgZmlsbD0iI2VhNDMzNSIKICAgICB4PSIwIgogICAgIHk9IjI1My41MzAzOCIKICAgICB3aWR0aD0iMzczIgogICAgIGhlaWdodD0iMTA3IgogICAgIHJ4PSI1My41IgogICAgIGlkPSJyZWN0MiIgLz4KICA8cmVjdAogICAgIGZpbGw9IiNmYmJjMDQiCiAgICAgeD0iLTQ5Mi45MDU5NCIKICAgICB5PSItMTE0LjA0NzMzIgogICAgIHdpZHRoPSIzNzMiCiAgICAgaGVpZ2h0PSIxMDciCiAgICAgcng9IjUzLjUiCiAgICAgdHJhbnNmb3JtPSJyb3RhdGUoLTE0NCkiCiAgICAgaWQ9InJlY3Q0IiAvPgogIDxyZWN0CiAgICAgZmlsbD0iIzM0YTg1MyIKICAgICB4PSI3MS4wODQ2MjUiCiAgICAgeT0iLTI2My42ODY5MiIKICAgICB3aWR0aD0iMzczIgogICAgIGhlaWdodD0iMTA3IgogICAgIHJ4PSI1My41IgogICAgIHRyYW5zZm9ybT0icm90YXRlKDcyKSIKICAgICBpZD0icmVjdDYiIC8+CiAgPHJlY3QKICAgICBmaWxsPSIjNDI4NWY0IgogICAgIHg9Ii0yNDYuMDAxMSIKICAgICB5PSIzNDUuOTQzNzMiCiAgICAgd2lkdGg9IjM3MyIKICAgICBoZWlnaHQ9IjEwNyIKICAgICByeD0iNTMuNSIKICAgICB0cmFuc2Zvcm09InJvdGF0ZSgtNzIpIgogICAgIGlkPSJyZWN0OCIgLz4KICA8ZwogICAgIGZpbGw9IiNmZmZmZmYiCiAgICAgaWQ9ImcyMCIKICAgICB0cmFuc2Zvcm09InRyYW5zbGF0ZSgtMjcuNTMwMDAxLC03NS4zNjk2MTMpIj4KICAgIDxjaXJjbGUKICAgICAgIGN4PSIyNjUuODQiCiAgICAgICBjeT0iMTI5LjI4IgogICAgICAgcj0iMjYuNzAwMDAxIgogICAgICAgaWQ9ImNpcmNsZTEwIiAvPgogICAgPGNpcmNsZQogICAgICAgY3g9IjEzMS40NCIKICAgICAgIGN5PSIyMjUuNDQiCiAgICAgICByPSIyNi43MDAwMDEiCiAgICAgICBpZD0iY2lyY2xlMTIiIC8+CiAgICA8Y2lyY2xlCiAgICAgICBjeD0iODEuMzYwMDAxIgogICAgICAgY3k9IjM4Mi42MDAwMSIKICAgICAgIHI9IjI2LjcwMDAwMSIKICAgICAgIGlkPSJjaXJjbGUxNCIgLz4KICAgIDxjaXJjbGUKICAgICAgIGN4PSIzNDguMjIiCiAgICAgICBjeT0iMzgxLjY0MDAxIgogICAgICAgcj0iMjYuNzAwMDAxIgogICAgICAgaWQ9ImNpcmNsZTE2IiAvPgogICAgPGNpcmNsZQogICAgICAgY3g9IjQzMC42NzAwMSIKICAgICAgIGN5PSIxMjcuODkiCiAgICAgICByPSIyNi43MDAwMDEiCiAgICAgICBpZD0iY2lyY2xlMTgiIC8+CiAgPC9nPgo8L3N2Zz4K'
-        }
-    ];
 
     function toggleDisplayedList() {
         const photosListDiv = document.querySelector('.photos-list');
@@ -390,10 +905,12 @@ function init() {
 
         // Define the detailsPane plane for each type
         const nominationDetailsPane = document.querySelector('app-details-pane');
-        const photoDetailsPane = document.getElementById('photo-details-pane');
+        const photoDetailsPane = document.querySelector('.wfpc-details-pane');
 
         if (isPhotosListHidden) {
             // Show the photos list, hide the nominations list
+            currentDisplay = 'photos';
+            sortAndFilterPhotoSubmissions();
             photosListDiv.classList.remove('hidden-list');
             nomsListDiv.classList.add('hidden-list');
             if (nominationDetailsPane) {
@@ -401,6 +918,7 @@ function init() {
             }
         } else {
             // Show the nominations list, hide the photos list
+            currentDisplay = 'wayspots';
             photosListDiv.classList.add('hidden-list');
             nomsListDiv.classList.remove('hidden-list');
             if (nominationDetailsPane) {
@@ -412,461 +930,93 @@ function init() {
         }
     }
 
-    function importFromEml() {
-        // Create a file input element
-        const fileInput = document.createElement('input');
-        fileInput.type = 'file';
-        fileInput.multiple = true;
+    // Function to extract additional data from emails
+    function extractDataFromEmails(emails) {
+        let skippedDuplicateEmailsCount = 0;
+        let skippedMalformedEmailsCount = 0;
+        let emailsToBeProcessedCount = 0;
 
-        // Trigger file input click when function is called
-        fileInput.click();
+        console.log(`Photo Contributions: Received ${emails.length} from email API database.`);
 
-        // Add change event listener to handle selected files
-        fileInput.addEventListener('change', async (event) => {
-            const files = event.target.files;
+        for (let i = emails.length - 1; i >= 0; i--) {
+            const email = emails[i];
 
-            // Process each file asynchronously
-            for (const file of files) {
-                await extractDataFromEmails(file);
+            // Extract timestamps from dates
+            // Note to self: In future could be used to skip older email imports
+            extractTimestampFromEmail(email);
+
+            // Check if we have already used this email before. If so, skip it.
+            const isAlreadyUsed = photoSubmissions.some(submission =>
+                                                        submission.submitted.messageId === email.messageId || submission.outcome.messageId === email.messageId
+                                                       );
+
+            if (isAlreadyUsed) {
+                skippedDuplicateEmailsCount++;
+                emails.splice(i, 1);
+                continue;
             }
 
-            if (skippedDuplicateEmailsCount > 0) {
-                console.log(`Skipped ${skippedDuplicateEmailsCount} email(s) because they are a duplicate or the email details are already assigned to a photo.`);
+            // Check if it matches a known media format by trying to extract Wayspot title
+            extractTitleAndStatus(email);
+            if (!email.title) {
+                skippedMalformedEmailsCount++;
+                emails.splice(i, 1);
+                continue;
             }
-            if (skippedMalformedEmailsCount > 0) {
-                console.log(`Skipped ${skippedMalformedEmailsCount} email(s) because the email didn't match a known email template.`);
-            }
-
-            // After processing all files, activate the following functions
-            matchEmailsToWayspots();
-            sortAndFilterPhotoSubmissions();
-        });
-    }
-
-    function extractDataFromEmails(file) {
-        return new Promise(resolve => {
-            const reader = new FileReader();
-
-            reader.onload = () => {
-                const emailText = reader.result;
-
-                // Parse the email using parseMIME
-                let [headers, body] = parseMIME(emailText);
-
-                // Find the content-type
-                let contentType, charset;
-                const contentTypeHeader = headers.find(([token]) => token.toLowerCase() === "content-type");
-                if (contentTypeHeader) {
-                    const ctValue = contentTypeHeader[1];
-                    contentType = parseContentType(ctValue);
-                    charset = (contentType.params.charset || 'utf-8').toLowerCase();
-                }
-
-                // Work around multipart/alternative
-                let plainTextBody, plainTextCharset, unfoldedPlainTextBody;
-
-                if (contentType.type == 'multipart/alternative') {
-                    body.split(`--${contentType.params.boundary}`).forEach(part => {
-                        const partMime = parseMIME(part);
-                        if (!partMime) return;
-                        const [ partHead, partBody ] = partMime;
-                        if (!partBody.trim().length) return;
-                        const innerCTHeader = partHead.find(([token]) => token.toLowerCase() === "content-type");
-                        if (innerCTHeader === null) return;
-                        contentType = parseContentType(innerCTHeader[1]);
-                        if (contentType.type == 'text/html') {
-                            body = partBody;
-                            charset = (contentType.params.charset || 'utf-8').toLowerCase();
-                        }
-                        if (contentType.type == 'text/plain') {
-                            plainTextBody = partBody;
-                            plainTextCharset = (contentType.params.charset || 'utf-8').toLowerCase();
-                        }
-                    });
-                }
-
-                let unfoldedBody = body
-                .split(/=\r?\n/).join('')
-                .split(/\r?\n/).map(e => {
-                    const uriStr = e.split('%').join('=25').split('=').join('%');
-                    switch (charset) {
-                        case 'utf-8':
-                            return decodeURIComponent(uriStr);
-                        case 'iso-8859-1':
-                        case 'us-ascii':
-                        case 'windows-1252':
-                            return decodeURIComponent(asciiToUTF8(uriStr));
-                        default:
-                            throw new Error(`Unknown charset ${charset}.`);
-                    }
-                }).join('\n');
-
-                if (plainTextBody) {
-                    try {
-                        const unfoldedPlainTextBody = plainTextBody
-                        .split(/=\r?\n/).join('')
-                        .split(/\r?\n/).map(e => {
-                            const uriStr = e.split('%').join('=25').split('=').join('%');
-                            switch (plainTextCharset) {
-                                case 'utf-8':
-                                    return decodeURIComponent(uriStr);
-                                case 'iso-8859-1':
-                                case 'us-ascii':
-                                case 'windows-1252':
-                                    return decodeURIComponent(asciiToUTF8(uriStr));
-                                default:
-                                    throw new Error(`Unknown charset ${plainTextCharset}.`);
-                            }
-                        }).join('\n');
-
-                        // Append unfoldedPlainTextBody to unfoldedBody
-                        unfoldedBody += `\n\n${unfoldedPlainTextBody}`;
-                    } catch (error) {
-                        console.error('Plain text component could not be decoded. Skipping...');
-                        resolve(); // Stop processing the email
-                    }
-                }
-
-                let email = {};
-
-                // Extract relevant information from headers
-                headers.forEach(([token, field]) => {
-                    if (token === "Message-ID") {
-                        extractMessageId(field, email);
-
-                        // Check for duplicates based on unique messageId
-                        const isDuplicateEmailData = emailData.some(existingEmail => existingEmail.messageId === email.messageId);
-                        const isDuplicateSubmissions = photoSubmissions.some(submission =>
-                                                                             submission.submitted.messageId === email.messageId || submission.outcome.messageId === email.messageId
-                                                                            );
-
-                        if (isDuplicateEmailData || isDuplicateSubmissions) {
-                            skippedDuplicateEmailsCount++;
-                            resolve(); // Stop processing the email
-                        }
-                    } else if (token === "Date") {
-                        extractDate(field, email);
-                    } else if (token === "Subject") {
-                        extractTitleAndStatus(field, email, unfoldedBody);
-                    }
-                });
-
-                extractImageUrl(unfoldedBody, email);
-
-                if (email.title) {
-                    emailData.push(email);
-                } else {
-                    skippedMalformedEmailsCount++;
-                }
-
-                resolve();
-            };
-
-            reader.readAsText(file);
-        });
-    }
-
-
-    const parseMIME = data => {
-        const bound = data.indexOf('\r\n\r\n');
-        if (bound < 0) return null;
-        const headers = data.substr(0, bound)
-        .replaceAll(/\r\n\s/g, ' ')
-        .split(/\r\n/).map(e => {
-            const b = e.indexOf(':');
-            const token = e.substr(0, b);
-            // Decode RFC 2047 atoms
-            const field = e.substr(b + 1).trim().replaceAll(/=\?([A-Za-z0-9-]+)\?([QqBb])\?([^\?]+)\?=(?:\s+(?==\?[A-Za-z0-9-]+\?[QqBb]\?[^\?]+\?=))?/g, (_, charset, encoding, text) => {
-                if (!['utf-8', 'us-ascii', 'iso-8859-1', 'windows-1252'].includes(charset.toLowerCase())) throw new Error(`Unknown charset "${charset}".`);
-                switch (encoding) {
-                    case 'Q': case 'q':
-                        text = text.split('_').join(' ').split('%').join('=25').split('=').join('%');
-                        return decodeURIComponent(charset.toLowerCase() == 'utf-8' ? text : asciiToUTF8(text))
-                    case 'B': case 'b': return charset.toLowerCase() == 'utf-8' ? atobUTF8(text) : atob(text);
-                    default: throw new Error(`Invalid RFC 2047 encoding format "${encoding}".`);
-                }
-            });
-            return [ token, field.trim() ];
-        });
-        const body = data.substr(bound + 4);
-        return [ headers, body ];
-    };
-
-    const parseContentType = ctHeader => {
-        const m = ctHeader.match(/^(?<type>[^\/]+\/[^\/;\s]+)(?=($|(?<params>(;[^;]*)*)))/);
-        const { type, params } = m.groups;
-        const paramMap = {};
-        if (params) params.substr(1).split(';').forEach(param => {
-            const [ attr, value ] = param.trim().split('=');
-            paramMap[attr.toLowerCase()] = value.startsWith('"') && value.endsWith('"') ? value.substring(1, value.length - 1) : value;
-        });
-        return { type: type.toLowerCase(), params: paramMap };
-    };
-
-    const atobUTF8 = text => decodeURIComponent(atob(text).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
-
-    const asciiToUTF8 = text => text.replaceAll(/%([A-Fa-f][0-9A-Fa-f])/g, (match, p1) => {
-        const ci = parseInt(p1, 16);
-        if (ci <= 0xBF) return '%c2%' + ci.toString(16);
-        if (ci >= 0xC0) return '%c3%' + (ci - 0x40).toString(16);
-    });
-
-    function extractDate(dateString, email) {
-        const date = new Date(dateString);
-
-        // Extract Unix timestamp
-        email.timestamp = Math.floor(date.getTime());
-    }
-
-    function extractMessageId(field, email) {
-        // Assuming field is in the format: "<message-id>"
-        const match = field.match(/<([^>]+)>/);
-        if (match && match[1]) {
-            email.messageId = match[1].trim();
-        }
-    }
-
-    function extractTitleAndStatus(subject, email, emailText) {
-
-        //  ---------------------------------------- ENGLISH [en] ----------------------------------------
-
-        // WAYFARER TEMPLATES
-        // Wayfarer Submitted Template
-        if (subject.startsWith("Thanks! Niantic Wayspot Photo received for ")) {
-            email.template = "Wayfarer";
-            email.title = subject.substring("Thanks! Niantic Wayspot Photo received for ".length, subject.length - 1);
-            email.status = "submitted";
-        }
-
-        // Wayfarer Decision Template
-        if (subject.startsWith("Niantic Wayspot media submission decided for ")) {
-            email.title = subject.substring("Niantic Wayspot media submission decided for ".length);
-            email.template = "Wayfarer";
-            if (emailText.includes("Congratulations,")) {
-                email.status = "accepted";
-            } else if (emailText.includes("not to accept")) {
-                email.status = "rejected";
-            }
-            const regex = /Thank you for your Wayspot Photo submission for ([^]+?) on (\w{3} \d{1,2}, \d{4}|[^]+?)\./;
-            email.originalSubmissionDate = extractSubmissionDate(emailText, regex);
-        }
-
-        // INGRESS TEMPLATES
-        // Ingress Submitted Template
-        if (subject.startsWith("Portal photo submission confirmation")) {
-            if (subject.includes(":")) {
-                email.template = "Ingress Redacted";
-                email.title = subject.substring(subject.indexOf(":") + 1).trim();
-            } else {
-                email.template = "Ingress Prime";
-                email.title = extractWayspotTitleING(emailText, "Portal photo submission confirmation:");
-                email.id = extractIdFromEmailText(emailText, "ID:");
-            }
-            email.status = "submitted";
-        }
-
-        // Ingress Decision Template
-        if (subject.startsWith("Portal photo review complete")) {
-            if (subject.includes(":")) {
-                email.template = "Ingress Redacted";
-                email.title = subject.substring(subject.indexOf(":") + 1).trim();
-            } else {
-                email.template = "Ingress Prime";
-                email.title = extractWayspotTitleING(emailText, "Portal photo review complete:");
-                email.id = extractIdFromEmailText(emailText, "ID:");
-            }
-            email.status = emailText.includes("Good work,") ? "accepted" : "rejected";
-            const regex = /Submission Date: ([^]+?) on (\w{3} \d{1,2}, \d{4}|[^]+?)\./;
-            email.originalSubmissionDate = extractSubmissionDate(emailText, regex);
-        }
-
-        // POKEMON GO TEMPLATES
-        // Pokemon Go Submitted Template
-        if (subject.startsWith("Photo Submission Received")) {
-            email.template = "Pokemon Go";
-            email.title = extractWayspotTitlePGO(emailText, "Photo submission confirmation:");
-            email.id = extractIdFromEmailText(emailText, "ID:");
-            email.status = "submitted";
-        }
-
-        // Pokemon Go Decision Templates
-        if (subject.startsWith("Photo Submission Accepted" || subject.startsWith("Photo Submission Rejected"))) {
-            email.template = "Pokemon Go";
-            email.title = extractWayspotTitlePGO(emailText, "Photo review complete:");
-            email.id = extractIdFromEmailText(emailText, "ID:");
-            email.status = subject.startsWith("Photo Submission Accepted") ? "accepted" : "rejected";
-            const regex = /Submission Date: ([^]+?) on (\w{3} \d{1,2}, \d{4}|[^]+?)\./;
-            email.originalSubmissionDate = extractSubmissionDate(emailText, regex);
-        }
-
-        //  ---------------------------------------- GERMAN [de] ----------------------------------------
-
-        // WAYFARER TEMPLATES
-        // Wayfarer Submitted Template
-        if (subject.startsWith("Danke! Wir haben den Upload Photo für den Wayspot ")) {
-            email.template = "Wayfarer";
-            email.title = subject.substring("Danke! Wir haben den Upload Photo für den Wayspot ".length, subject.indexOf(" erhalten!"));
-            email.status = "submitted";
-        }
-
-        // Wayfarer Decision Template
-        if (subject.startsWith("Entscheidung zu deinem Upload für den Wayspot ")) {
-            email.template = "Wayfarer";
-            email.title = subject.substring("Entscheidung zu deinem Upload für den Wayspot ".length);
-            if (emailText.includes("Glückwunsch,")) {
-                email.status = "accepted";
-            } else if (emailText.includes("Tut uns leid")) {
-                email.status = "rejected";
-            }
-            const regex = /danke, dass du am (\d{1,2}\.\d{1,2}\.\d{4}) den Upload Photo/;
-            email.originalSubmissionDate = extractSubmissionDate(emailText, regex);
-        }
-
-        // INGRESS TEMPLATES
-        // Ingress Submitted Template
-        if (subject.startsWith("Portalfotovorschlag erhalten")) {
-            if (subject.includes(":")) {
-                email.template = "Ingress Redacted";
-                email.title = subject.substring(subject.indexOf(":") + 1).trim();
-            } else {
-                email.template = "Ingress Prime";
-                email.title = extractWayspotTitleING(emailText, "Portalfotovorschlag erhalten:");
-                email.id = extractIdFromEmailText(emailText, "ID:");
-            }
-            email.status = "submitted";
-        }
-
-        // Ingress Decision Template
-        if (subject.startsWith("Überprüfung des Portalfotos abgeschlossen")) {
-            emailText = emailText.replace(/&Uuml;/g, 'Ü').replace(/&uuml;/g, 'ü'); // Character fix for "Überprüfung"
-            if (subject.includes(":")) {
-                email.template = "Ingress Redacted";
-                email.title = subject.substring(subject.indexOf(":") + 1).trim();
-            } else {
-                email.template = "Ingress Prime";
-                email.title = extractWayspotTitleING(emailText, "Überprüfung des Portalfotos abgeschlossen:");
-                email.id = extractIdFromEmailText(emailText, "ID:");
-            }
-            email.status = emailText.includes("Ausgezeichnete Arbeit,") ? "accepted" : "rejected";
-            const regex = /das Datum der Einreichung: (\d{1,2}\.\d{1,2}\.\d{4})/;
-            email.originalSubmissionDate = extractSubmissionDate(emailText, regex);
-        }
-
-        // POKEMON GO TEMPLATES
-        // Pokemon Go Submitted Template
-        if (subject.startsWith("Fotovorschlag erhalten")) {
-            email.template = "Pokemon Go";
-            email.title = extractWayspotTitlePGO(emailText, "wir haben dein eingereichtes Foto erhalten:");
-            email.id = extractIdFromEmailText(emailText, "ID:");
-            email.status = "submitted";
-        }
-
-        // Pokemon Go Decision Templates
-        if (subject.startsWith("Fotovorschlag akzeptiert" || subject.startsWith("Fotovorschlag abgelehnt"))) {
-            email.template = "Pokemon Go";
-            emailText = emailText.replace(/&Uuml;/g, 'Ü').replace(/&uuml;/g, 'ü'); // Character fix for "Überprüfung"
-            email.title = extractWayspotTitlePGO(emailText, "die Überprüfung deines Fotos ist abgeschlossen:");
-            email.id = extractIdFromEmailText(emailText, "ID:");
-            email.status = subject.startsWith("Fotovorschlag akzeptiert") ? "accepted" : "rejected";
-            const regex = /das Datum der Einreichung: (\d{1,2}\.\d{1,2}\.\d{4})/;
-            email.originalSubmissionDate = extractSubmissionDate(emailText, regex);
-        }
-
-        //  -------------------------------------- END OF LANGUAGES ----------------------------------------
-
-        // Replace UTF-8 URL-encoded characters
-        if (email.title) {
-            email.title = email.title.replace(/=([A-Fa-f0-9]{2})/g, function(match, hexCode) {
-                return String.fromCharCode(parseInt(hexCode, 16));
-            });
-
-            // Use decodeURIComponent to handle remaining URL-encoded characters
-            email.title = decodeURIComponent(email.title);
-
-            // Trim and perform additional replacements
-            email.title = email.title.replace(/=20/g, '').trim();
-            email.title = email.title.replace(/<br \/>/g, '').trim();
 
             // Define an array of replacement pairs
             const replacements = [
-                ["â", "–"],
-                ["â", "“"],
-                ["â", "”"],
                 ["&amp;", "&"],
                 ["&apos;", "'"],
-                ["&apos;!", "'!"],
-                ["&quot;", "\""],
-                ["&quot;", "\""],
-                ["â", "'"],
-                ["â", "'"],
-                ["Ã¼", "ü"],
-                ["Â½", "½"],
-                ["=E2=80=98", "‘"],
-                ["=E2=80=99", "’"]
+                ["&quot;", "\""]
             ];
 
-            // Perform replacements
+            // Perform replacements on title string
             if (email.title) {
                 replacements.forEach(([oldStr, newStr]) => {
                     email.title = email.title.replace(new RegExp(oldStr, "g"), newStr);
                 });
             }
-        }
-    }
 
-    // Helper function to extract Wayspot title
-    function extractWayspotTitleING(text, string) {
-        let index = text.indexOf(string);
-        if (index !== -1) {
-            let remainingText = text.substring(index + string.length);
-            let lines = remainingText.split("\n");
-            if (lines.length > 1) {
-                return lines[1].trim();
-            }
-        }
-        return '';
-    }
-
-    // Helper function to extract Wayspot title
-    function extractWayspotTitlePGO(emailText, string) {
-        let index = emailText.indexOf(string);
-        if (index !== -1) {
-            let remainingText = emailText.substring(index + string.length);
-            let lines = remainingText.split("\n");
-            if (lines.length > 0) {
-                return lines[0].trim();
-            }
-        }
-        return '';
-    }
-
-    function extractSubmissionDate(emailText, regex) {
-        const match = emailText.match(regex);
-        if (match) {
-            const dateString = match[2] || match[1];
-            if (dateString) {
-                // Convert the date string to a JavaScript Date object
-                const dateObject = new Date(dateString.replace(/(\d{2})\.(\d{2})\.(\d{4})/, '$2/$1/$3'));
-                return dateObject;
-            }
-        }
-        return null;
-    }
-
-    function extractIdFromEmailText(emailText, identifier) {
-        const regexPattern = new RegExp(`${identifier}\\s*([\\w\\d+/=]+)`);
-        const match = emailText.match(regexPattern);
-
-        if (match && match[1]) {
-            return match[1].trim();
+            // Extract the image URL from media emails
+            extractImageFromEmail(email);
+            emailsToBeProcessedCount++;
         }
 
-        return null; // Return null if no match is found
+        // Remove unneccesary parts of the email
+        const emailData = emails.map(email => {
+            const { subject, textPlain, textHtml, date, ...rest } = email;
+            return { ...rest };
+        });
+
+        if (emailsToBeProcessedCount > 0) {
+            console.log(`Photo Contributions: Found ${emailsToBeProcessedCount} new photo email(s) for analysis: `, emailData);
+        }
+        if (skippedDuplicateEmailsCount > 0) {
+            console.log(`Photo Contributions: Skipped ${skippedDuplicateEmailsCount} email(s) because they are a duplicate or the email details are already assigned to a photo.`);
+        }
+        if (skippedMalformedEmailsCount > 0) {
+            console.log(`Photo Contributions: Skipped ${skippedMalformedEmailsCount} email(s) because the email didn't match a known email template.`);
+        }
+
+        matchEmailsToWayspots(emailData);
+        createAllPhotoListItems();
+        sortAndFilterPhotoSubmissions();
     }
 
-    function extractImageUrl(unfoldedBody, email) {
+    function extractTimestampFromEmail(email) {
+        const date = new Date(email.date);
+        email.timestamp = date.getTime();
+
+        const importedDate = new Date(email.importedDate);
+        email.importedTimestamp = date.getTime();
+    }
+
+    function extractImageFromEmail(email) {
+        const textToSearch = email.textHtml || email.textPlain || '';
+
         const urlRegex = /http[s]?:\/\/[^\s<"]+/g;
-        const matches = unfoldedBody.match(urlRegex);
+        const matches = textToSearch.match(urlRegex);
 
         // Check whether the URL corresponds to a known photo URL format
         if (matches) {
@@ -877,39 +1027,493 @@ function init() {
         }
     }
 
-    function matchEmailsToWayspots() {
+    function extractTitleAndStatus(email) {
+        const subject = email.subject;
+        const from = email.from;
+        const emailText = email.textPlain || email.textHtml;
+
+        if (from === 'notices@wayfarer.nianticlabs.com') {
+
+            const wayfarerSubmittedTemplates = {
+                en: /Thanks! Niantic Wayspot Photo received for (?<title>.+)!/,
+                bn: /ধন্যবাদ! (?<title>.+) এর জন্য Niantic Wayspot Photo পাওয়া গিয়েছে!/,
+                cs: /Děkujeme! Přijali jsme Photo pro Niantic Wayspot (?<title>.+)!/,
+                de: /Danke! Wir haben den Upload Photo für den Wayspot (?<title>.+) erhalten!/,
+                es: /¡Gracias! ¡Hemos recibido el Photo del Wayspot de Niantic para (?<title>.+)!/,
+                fr: /Remerciements ! Contribution de Wayspot Niantic Photo reçue pour (?<title>.+) !/,
+                hi: /धन्यवाद! (?<title>.+) के लिए Niantic Wayspot संपादन सुझाव प्राप्त हुआ!/,
+                it: /Grazie! Abbiamo ricevuto Photo di Niantic Wayspot per (?<title>.+)./,
+                jp: /ありがとうございます。 Niantic Wayspot Photo「(?<title>.+)」が受領されました。/,
+                ko: /감사합니다! (?<title>.+)에 대한 Niantic Wayspot Photo 제출 완료/,
+                mr: /धन्यवाद! (?<title>.+) साठी Niantic वेस्पॉट Photo प्राप्त झाले!/,
+                nl: /Bedankt! Niantic Wayspot-Photo ontvangen voor (?<title>.+)!/,
+                no: /Takk! Vi har mottatt Photo for Niantic-Wayspot-en (?<title>.+)!/,
+                pl: /Dziękujemy! Odebrano materiały Photo Wayspotu Niantic (?<title>.+)./,
+                pt: /Agradecemos o envio de Photo para o Niantic Wayspot (?<title>.+)!/,
+                ru: /Спасибо! Получено: Photo Niantic Wayspot для (?<title>.+)/,
+                sv: /Tack! Niantic Wayspot Photo togs emot för (?<title>.+)!/,
+                ta: /धन्यवाद! (?<title>.+) साठी Niantic वेस्पॉट Photo प्राप्त झाले!/,
+                te: /ధన్యవాదాలు! (?<title>.+)! కొరకు Niantic Wayspot Photo అందుకున్నాము!/,
+                th: /ขอบคุณ! ได้รับ Niantic Wayspot Photo สำหรับ (?<title>.+) แล้ว!/,
+                zh: /感謝你！ 我們已收到 (?<title>.+) 的 Niantic Wayspot Photo/
+            };
+
+            const wayfarerOutcomeTemplates = {
+                en: {
+                    title: /Niantic Wayspot media submission decided for (?<title>.+)/,
+                    body: /Thank you for your Wayspot Photo submission for (?<title>.+) on (?<month>\w{3}) (?<day>\d{1,2}), (?<year>\d{4})/,
+                    acceptanceText: 'Congratulations, the community has decided to accept your Wayspot Photo submission'
+                },
+                //bn: {
+                //  title: / /,
+                //  body: / /,
+                //  acceptString: ''
+                //},
+                //cs: {
+                //  title: / /,
+                //  body: / /,
+                //  acceptString: ''
+                //},
+                de: {
+                    title: /Entscheidung zu deinem Upload für den Wayspot (?<title>.+)/,
+                    body: /danke, dass du am (?<day>\d{1,2})\.(?<month>\d{2})\.(?<year>\d{4}) den Upload Photo für den Wayspot (?<title>.*) eingereicht hast/,
+                    acceptanceText: 'Glückwunsch, die Community hat entschieden, deinen Upload Photo zu einem Wayspot zu akzeptieren',
+                },
+                //es: {
+                //  title: / /,
+                //  body: / /,
+                //  acceptString: ''
+                //},
+                //fr: {
+                //  title: / /,
+                //  body: / /,
+                //  acceptString: ''
+                //},
+                //hi: {
+                //  title: / /,
+                //  body: / /,
+                //  acceptString: ''
+                //},
+                it: {
+                    title: /Proposta di contenuti multimediali di Niantic Wayspot decisa per (?<title>.+)/,
+                    body: /grazie per la proposta di contenuti multimediali Photo di Wayspot per (?<title>.+) in data (?<day>\d{1,2})-(?<month>\w{3})-(?<year>\d{4})/,
+                    acceptanceText: 'Congratulazioni, la tua proposta di Photo di Wayspot è stata accettata dalla comunità Wayfarer',
+                },
+                //jp: {
+                //  title: / /,
+                //  body: / /,
+                //  acceptString: ''
+                //},
+                //ko: {
+                //  title: / /,
+                //  body: / /,
+                //  acceptString: ''
+                //},
+                //mr: {
+                //  title: / /,
+                //  body: / /,
+                //  acceptString: ''
+                //},
+                //nl: {
+                //  title: / /,
+                //  body: / /,
+                //  acceptString: ''
+                //},
+                no: {
+                    title: /En avgjørelse er tatt for Niantic Wayspot-medieinnholdet som er sendt inn for (?<title>.+)/,
+                    body: /Takk for Photo-innholdet for Wayspot-en (?<title>.+), som du sendte inn (?<day>\d{1,2})\.(?<month>\w{3})\.(?<year>\d{4})/,
+                    acceptanceText: 'Gratulerer – brukerne har valgt å godta Photo-innholdet du sendte inn for Wayspot-en'
+                },
+                //pl: {
+                //  title: / /,
+                //  body: / /,
+                //  acceptString: ''
+                //},
+                //pt: {
+                //  title: / /,
+                //  body: / /,
+                //  acceptString: ''
+                //},
+                //ru: {
+                //  title: / /,
+                //  body: / /,
+                //  acceptString: ''
+                //},
+                //sv: {
+                //  title: / /,
+                //  body: / /,
+                //  acceptString: ''
+                //},
+                //ta: {
+                //  title: / /,
+                //  body: / /,
+                //  acceptString: ''
+                //},
+                //te: {
+                //  title: / /,
+                //  body: / /,
+                //  acceptString: ''
+                //},
+                //th: {
+                //  title: / /,
+                //  body: / /,
+                //  acceptString: ''
+                //},
+                //zh: {
+                //  title: / /,
+                //  body: / /,
+                //  acceptString: ''
+                //}
+            }
+
+            // Process Wayfarer Submitted emails.
+            for (const lang in wayfarerSubmittedTemplates) {
+                const pattern = wayfarerSubmittedTemplates[lang];
+                const match = subject.match(pattern);
+
+                if (match) {
+                    const title = match.groups.title;
+                    email.title = title;
+                    email.template = 'Wayfarer';
+                    email.status = 'submitted';
+                    return;
+                }
+            }
+
+            // Process Wayfarer Outcome Templates
+            for (const lang in wayfarerOutcomeTemplates) {
+                const langTemplates = wayfarerOutcomeTemplates[lang];
+                const titleMatch = subject.match(langTemplates.title);
+
+                if (titleMatch) {
+                    const title = titleMatch.groups.title;
+                    const bodyMatch = emailText.match(langTemplates.body);
+
+                    if (bodyMatch) {
+                        const day = bodyMatch.groups.day;
+                        const month = bodyMatch.groups.month.toLowerCase();
+                        const year = bodyMatch.groups.year;
+
+                        email.originalSubmissionDate = convertDateComponents(lang, day, month, year);
+                    }
+
+                    if (emailText.includes(langTemplates.acceptanceText)) {
+                        email.status = 'accepted';
+                    } else {
+                        email.status = 'rejected';
+                    }
+
+                    email.title = title;
+                    email.template = 'Wayfarer';
+
+                    return;
+                }
+            }
+
+        } else if (from === 'hello@pokemongolive.com') {
+
+            const pokemonSubmissionTemplates = {
+                en: {
+                    subject: /Photo Submission Received/,
+                    body: /Photo submission confirmation: (?<title>.+)/,
+                    id: /ID: (?<id>\S+)/,
+                },
+                de: {
+                    subject: /Fotovorschlag erhalten/,
+                    body: /wir haben dein eingereichtes Foto erhalten: (?<title>.+)/,
+                    id: /ID: (?<id>\S+)/,
+                }
+            };
+
+            const pokemonOutcomeTemplates = {
+                en: {
+                    subject: /Photo Submission (Accepted|Rejected)/,
+                    body: /Photo review complete: (?<title>.+)/,
+                    submissionDate: /Submission Date:([^]+?)(?<month>\w{3}) (?<day>\d{1,2}), (?<year>\d{4})/,
+                    acceptanceText: 'Good work, Trainer',
+                    id: /ID: (?<id>\S+)/,
+                },
+                de: {
+                    subject: /Fotovorschlag (akzeptiert|abgelehnt)/,
+                    body: /die Überprüfung deines Fotos ist abgeschlossen: (?<title>.+)/,
+                    submissionDate: /Eingangsdatum:([^]+?)(?<day>\d{1,2})\.(?<month>\d{2})\.(?<year>\d{4})/,
+                    acceptanceText: 'Gute Arbeit, Trainer',
+                    id: /ID: (?<id>\S+)/,
+                },
+                zh: {
+                    subject: /你投稿的照片通過審核了/,
+                    body: /我們已完成下列照片的審核[:：] (?<title>.+)/,
+                    submissionDate: /提交日期\s*[:：]\s*(?<year>\d{4})-(?<month>\d{1,2})-(?<day>\d{1,2})/,
+                    id: /ID: (?<id>\S+)/,
+                }
+            };
+
+            // Process Pokemon Go Submitted Templates
+            for (const lang in pokemonSubmissionTemplates) {
+                const langTemplates = pokemonSubmissionTemplates[lang];
+                const subjectMatch = subject.match(langTemplates.subject);
+                const bodyMatch = emailText.match(langTemplates.body);
+                const idMatch = emailText.match(langTemplates.id);
+
+                if (subjectMatch && bodyMatch) {
+                    email.status = 'submitted';
+                    email.template = 'Pokemon Go';
+
+                    email.title = bodyMatch.groups.title
+
+                    if (idMatch) {
+                        email.id = idMatch.groups.id;
+                    }
+
+                    return;
+                }
+            }
+
+            // Process Pokemon Go Outcome Templates
+            for (const lang in pokemonOutcomeTemplates) {
+                const langTemplates = pokemonOutcomeTemplates[lang];
+                const subjectMatch = subject.match(langTemplates.subject);
+                const bodyMatch = emailText.match(langTemplates.body);
+                const submissionDateMatch = emailText.match(langTemplates.submissionDate);
+                const idMatch = emailText.match(langTemplates.id);
+
+                if (subjectMatch && bodyMatch) {
+
+                    email.template = "Pokemon Go";
+                    email.title = bodyMatch.groups.title;
+
+                    if (submissionDateMatch) {
+                        const day = submissionDateMatch.groups.day;
+                        const month = submissionDateMatch.groups.month.toLowerCase();
+                        const year = submissionDateMatch.groups.year;
+
+                        email.originalSubmissionDate = convertDateComponents(lang, day, month, year);
+                    }
+
+                    if (idMatch) {
+                        email.id = idMatch.groups.id;
+                    }
+
+                    if (emailText.includes(langTemplates.acceptanceText)) {
+                        email.status = 'accepted';
+                    } else {
+                        email.status = 'rejected';
+                    }
+
+                    return;
+                }
+            }
+        } else {
+            const ingressSubmittedTemplates = {
+                en: {
+                    title: /Portal photo submission confirmation(?:\s*:\s*(?<title>.+))?/,
+                    id: /ID: (?<id>\S+)/,
+                },
+                de: {
+                    title: /Portalfotovorschlag erhalten(?:\s*:\s*(?<title>.+))?/,
+                    id: /ID: (?<id>\S+)/,
+                },
+            };
+
+            const ingressOutcomeTemplates = {
+                en: {
+                    title: /Portal photo review complete(?:\s*:\s*(?<title>.+))?/,
+                    submissionDate: /Submission Date:([^]+?)(?<month>\w{3}) (?<day>\d{1,2}), (?<year>\d{4})/,
+                    id: /ID: (?<id>\S+)/,
+                    acceptanceText: 'Good work, Agent'
+                },
+                de: {
+                    title: /Überprüfung des Portalfotos abgeschlossen(?:\s*:\s*(?<title>.+))?/,
+                    submissionDate: /das Datum der Einreichung:([^]+?)(?<day>\d{1,2})\.(?<month>\d{2})\.(?<year>\d{4})/,
+                    id: /ID: (?<id>\S+)/,
+                    acceptanceText: 'Ausgezeichnete Arbeit, Agent'
+                },
+                fr: {
+                    title: /Évaluation de proposition de photo de Portail terminée(?:\s*:\s*(?<title>.+))?/,
+                    submissionDate: /Date de Soumission: (?<day>\d{1,2}) (?<month>[a-zA-Z]{3,4})\.? (?<year>\d{4})/,
+                    id: /ID: (?<id>\S+)/,
+                    acceptanceText: 'Beau travail, Agent'
+                },
+                it: {
+                    title: /Analisi della foto del Portale completata(?:\s*:\s*(?<title>.+))?/,
+                    submissionDate: /Data di presentazione:([^]+?)(?<day>\d{1,2})-(?<month>\w{3})-(?<year>\d{4})/,
+                    id: /ID: (?<id>\S+)/,
+                    acceptanceText: 'Ben fatto, Agente'
+                },
+                ko: {
+                    title: /포탈 사진 검토 완료(?:\s*:\s*(?<title>.+))?/,
+                    submissionDate: /제출일:([^]+?)(?<year>\d{4})\.\s*(?<month>\d{1,2})\.\s*(?<day>\d{1,2})/,
+                    id: /ID: (?<id>\S+)/,
+                    acceptanceText: '수고하셨습니다'
+                },
+                pt: {
+                    title: /A análise da foto do Portal foi concluída(?:\s*:\s*(?<title>.+))?/,
+                    submissionDate: /Data de submissão:([^]+?)(?<day>\d{1,2})\/(?<month>[a-zA-Z]+)\/(?<year>\d{4})/,
+                    id: /ID: (?<id>\S+)/,
+                    acceptanceText: 'Bom trabalho, Agente'
+                },
+            };
+
+            // Process Ingress Submitted Templates
+            for (const lang in ingressSubmittedTemplates) {
+                const langTemplates = ingressSubmittedTemplates[lang];
+                const subjectMatch = subject.match(langTemplates.title);
+                const bodyMatch = emailText.match(langTemplates.title);
+                const idMatch = emailText.match(langTemplates.id);
+
+                if (subjectMatch || bodyMatch) {
+                    email.status = 'submitted';
+
+                    const title = (subjectMatch && subjectMatch.groups.title) || (bodyMatch && bodyMatch.groups.title);
+                    if (title) {
+                        email.title = title.trim();
+                        email.template = (subjectMatch && subjectMatch.groups.title) ? 'Ingress Redacted' : 'Ingress Prime';
+                    }
+
+                    if (idMatch) {
+                        email.id = idMatch.groups.id;
+                    }
+
+                    return;
+                }
+            }
+
+            // Process Ingress Outcome Templates
+            for (const lang in ingressOutcomeTemplates) {
+                const langTemplates = ingressOutcomeTemplates[lang];
+                const subjectTitleMatch = subject.match(langTemplates.title);
+                const bodyTitleMatch = emailText.match(langTemplates.title);
+                const submissionDateMatch = emailText.match(langTemplates.submissionDate);
+                const idMatch = emailText.match(langTemplates.id);
+
+                if (subjectTitleMatch || (bodyTitleMatch && bodyTitleMatch.groups.title)) {
+
+                    const title = (subjectTitleMatch && subjectTitleMatch.groups.title) || (bodyTitleMatch && bodyTitleMatch.groups.title);
+                    if (title) {
+                        email.title = title.trim();
+                        email.template = (subjectTitleMatch && subjectTitleMatch.groups.title) ? 'Ingress Redacted' : 'Ingress Prime';
+                    }
+
+                    if (submissionDateMatch) {
+                        const day = submissionDateMatch.groups.day;
+                        const month = submissionDateMatch.groups.month.toLowerCase();
+                        const year = submissionDateMatch.groups.year;
+
+                        email.originalSubmissionDate = convertDateComponents(lang, day, month, year);
+                    }
+
+                    if (idMatch) {
+                        email.id = idMatch.groups.id;
+                    }
+
+                    if (emailText.includes(langTemplates.acceptanceText)) {
+                        email.status = 'accepted';
+                    } else {
+                        email.status = 'rejected';
+                    }
+
+                    return;
+                }
+            }
+        }
+
+        function convertDateComponents(lang, dayString, monthString, yearString) {
+            const months = {
+                en: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
+                bn: [],
+                cs: [],
+                de: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'],
+                es: ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sept', 'oct', 'nov', 'dic'],
+                fr: ['janv', 'févr', 'mars', 'avr', 'mai', 'juin', 'juil', 'août', 'sept', 'oct', 'nov', 'déc'],
+                hi: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
+                it: ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'],
+                jp: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'],
+                ko: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'],
+                mr: [],
+                nl: ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'],
+                no: ['jan', 'feb', 'mar', 'apr', 'mai', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'des'],
+                pl: [],
+                pt: ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'],
+                ru: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'],
+                sv: ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'],
+                ta: [],
+                te: [],
+                th: ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'],
+                zh: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']
+            };
+
+            const day = parseInt(dayString, 10);
+            const monthIndex = months[lang].indexOf(monthString.toLowerCase());
+            const year = parseInt(yearString, 10);
+
+            const originalSubmissionDate = new Date(year, monthIndex, day);
+            return originalSubmissionDate;
+        }
+    }
+
+    function extractUsingRegex(email, emailText, regex, months) {
+        const match = emailText.match(regex);
+
+        if (match) {
+            const title = match.groups.title;
+            const day = match.groups.day;
+            const month = match.groups.month;
+            const year = match.groups.year;
+
+            if (title) {
+                email.title = title;
+            }
+
+            if (day && month && year) {
+                // Convert the date string to a JavaScript Date object
+                const monthIndex = months.indexOf(month.toLowerCase());
+                if (monthIndex !== -1) {
+                    const formattedDateString = `${year}-${('0' + (monthIndex + 1)).slice(-2)}-${('0' + day).slice(-2)}`;
+                    const dateObject = new Date(formattedDateString);
+                    email.originalSubmissionDate = dateObject;
+                }
+            }
+        }
+    }
+
+    // Helper function to create a new submission object
+    function createNewSubmission(imageUrl, email, status) {
+        return {
+            imageUrl,
+            edited: true,
+            matched: false,
+            title: null,
+            status: null,
+            submitted: {
+                id: null,
+                messageId: null,
+                template: null,
+                timestamp: null,
+                title: null,
+            },
+            outcome: {
+                id: null,
+                messageId: null,
+                template: null,
+                timestamp: null,
+                title: null,
+                result: null,
+                submittedDate: null,
+            },
+            lightship: {},
+        };
+    }
+
+
+    function matchEmailsToWayspots(emailData) {
         // Keep track of which emails have been used for matching
         emailData.forEach(email => email.used = false);
 
         // Create a list of unique Wayspots from the unique image URLs
         emailData.forEach(email => {
             if (email.imageUrl && !photoSubmissions.some(submission => submission.imageUrl === email.imageUrl)) {
-                const photoSubmission = {
-                    imageUrl: email.imageUrl,
-                    edited: true,
-                    matched: false,
-                    title: null,
-                    status: null,
-                    uuid: null,
-                    submitted: {
-                        id: null,
-                        messageId: null,
-                        template: null,
-                        timestamp: null,
-                        title: null,
-                    },
-                    outcome: {
-                        id: null,
-                        messageId: null,
-                        template: null,
-                        timestamp: null,
-                        title: null,
-                        result: null,
-                        submittedDate: null,
-                    },
-                };
-
-                photoSubmissions.push(photoSubmission);
+                const newSubmission = createNewSubmission(email.imageUrl, email, null);
+                photoSubmissions.push(newSubmission);
             }
         });
 
@@ -921,20 +1525,9 @@ function init() {
 
                 // Add data from the email to the submission
                 if (matchingSubmission) {
-                    saveEmailDataToSubmission(matchingSubmission, email, email.status);
-                }
-            }
-        });
-
-        emailData.forEach(email => {
-            if (email.imageUrl) {
-                const matchingSubmission = photoSubmissions.find(submission => submission.imageUrl === email.imageUrl);
-
-                // Add data from the email to the submission
-                // If there are multiple outcome emails, only save the most recent
-                if (matchingSubmission) {
+                    // Account for photo appeals with two outcome emails.
                     if (
-                        email.status !== 'pending' &&
+                        email.status !== 'submitted' &&
                         matchingSubmission.outcome.timestamp &&
                         matchingSubmission.outcome.timestamp > email.timestamp
                     ) {
@@ -946,11 +1539,13 @@ function init() {
             }
         });
 
+                const structuredClone3 = JSON.parse(JSON.stringify(photoSubmissions));
+
         // Match emails to Wayspots using unique photo ID from emails
         // Template: Ingress Prime
         // Template: Pokemon Go
         emailData.forEach(email => {
-            if (email.id && !email.used) {
+            if (email.id && !email.used && email.status !== 'submitted') {
                 const matchingSubmission = photoSubmissions.find(submission => submission.submitted.id === email.id);
 
                 // Add data from the email to the submission
@@ -966,31 +1561,7 @@ function init() {
         emailData.forEach(email => {
             if (!email.imageUrl && !email.used && email.status === 'rejected') {
                 email.used = true;
-
-                const newSubmission = {
-                    imageUrl: null,
-                    edited: true,
-                    matched: false,
-                    title: null,
-                    status: null,
-                    submitted: {
-                        id: null,
-                        messageId: null,
-                        template: null,
-                        timestamp: null,
-                        title: null,
-                    },
-                    outcome: {
-                        id: email.id,
-                        messageId: email.messageId,
-                        template: email.template,
-                        timestamp: email.timestamp,
-                        title: email.title,
-                        result: email.status,
-                        submittedDate: email.originalSubmissionDate
-                    },
-                };
-
+                const newSubmission = createNewSubmission(null, email, 'rejected');
                 photoSubmissions.push(newSubmission);
             }
         });
@@ -999,38 +1570,13 @@ function init() {
         // Template: Ingress Redacted rejection
         emailData.forEach(email => {
             if (email.status === 'rejected' && email.template === 'Ingress Redacted') {
-                // Find matching photoSubmissions with the same imageUrl and outcome.messageId
                 const matchingSubmission = photoSubmissions.find(submission =>
                                                                  submission.outcome.messageId === email.messageId
                                                                 );
 
                 if (!matchingSubmission) {
                     email.used = true;
-
-                    const newSubmission = {
-                        imageUrl: email.imageUrl,
-                        edited: true,
-                        matched: false,
-                        title: null,
-                        status: null,
-                        submitted: {
-                            id: null,
-                            messageId: null,
-                            template: null,
-                            timestamp: null,
-                            title: null,
-                        },
-                        outcome: {
-                            id: email.id,
-                            messageId: email.messageId,
-                            template: email.template,
-                            timestamp: email.timestamp,
-                            title: email.title,
-                            result: email.status,
-                            submittedDate: email.originalSubmissionDate
-                        },
-                    };
-
+                    const newSubmission = createNewSubmission(email.imageUrl, email, 'rejected');
                     photoSubmissions.push(newSubmission);
                 }
             }
@@ -1126,11 +1672,6 @@ function init() {
             if (submission.outcome.submittedDate && !submission.submitted.timestamp) {
                 submission.submitted.timestamp = new Date(submission.outcome.submittedDate).getTime();
             }
-
-            // Generate UUID by concatenating messageIds
-            const messageIdSubmitted = submission.submitted.messageId || "";
-            const messageIdOutcome = submission.outcome.messageId || "";
-            submission.uuid = messageIdSubmitted + messageIdOutcome;
         });
 
         savePhotoSubmissionsToIDB();
@@ -1158,6 +1699,7 @@ function init() {
     }
 
     function createPhotosDiv() {
+        const l10n = getL10N();
         const photosListDiv = document.createElement('div');
         photosListDiv.classList.add('flex', 'flex-row', 'photos-list', 'hidden-list');
         photosListDiv.style.display = 'none !important';
@@ -1168,7 +1710,7 @@ function init() {
       <div ${ngcontent}-c208="" class="flex flex-col mb-4">
          <div ${ngcontent}-c208="" class="flex flex-row">
             <app-nominations-search ${ngcontent}-c208="" class="flex-grow">
-               <div ${ngcontent}-c198="" class="flex flex-col"><span ${ngcontent}-c198="" class="relative top-2 left-3 text-xs bg-gray-100 w-min">Search</span><input ${ngcontent}-c198="" id="photos-search-input" type="text" class="w-full bg-transparent py-1 px-2 border border-black rounded-md"></div>
+               <div ${ngcontent}-c198="" class="flex flex-col"><span ${ngcontent}-c198="" class="relative top-2 left-3 text-xs bg-gray-100 w-min">${l10n['nominations.search.title']}</span><input ${ngcontent}-c198="" id="photos-search-input" type="text" class="w-full bg-transparent py-1 px-2 border border-black rounded-md"></div>
                <!---->
             </app-nominations-search>
             <button ${ngcontent}-c208="" wf-button="" wftype="icon" class="wf-button cursor-pointer self-end ml-4 wf-button--icon" id="photos-filter-button"><img ${ngcontent}-c208="" src="img/options.svg" alt="" class="dark:filter-icon"></button>
@@ -1176,10 +1718,10 @@ function init() {
          <div ${ngcontent}-c208="" class="mt-2">
          <div class="flex flex-row">
                      <button ${ngcontent}-c208="" wf-button="" wftype="icon" class="wf-button nominations__reverse-btn wf-button--icon" id="switch-to-nominations-button">
-               <span ${ngcontent}-c208="" class="text-xs" id="switch-to-nominations-text">[ Switch to Nominations ]</span>
+               <span ${ngcontent}-c208="" class="text-xs" id="switch-to-nominations-text">[ ${strings[language].switchToNominations} ]</span>
             </button>
             <button ${ngcontent}-c208="" wf-button="" wftype="icon" class="wf-button nominations__reverse-btn wf-button--icon" id="photos-sort-button">
-               <span ${ngcontent}-c208="" class="text-xs" id="photo-sort-text">Most Recent</span>
+               <span ${ngcontent}-c208="" class="text-xs" id="photo-sort-text">${l10n['nominations.filter.recent']}</span>
                <mat-icon ${ngcontent}-c208="" role="img" class="mat-icon notranslate material-icons mat-icon-no-color" aria-hidden="true" data-mat-icon-type="font">expand_more</mat-icon>
             </button>
          </div>
@@ -1207,15 +1749,25 @@ function init() {
         const nomsListDiv = document.querySelector('.noms-list');
         nomsListDiv.insertAdjacentElement('afterend', photosListDiv);
 
-        // Identify location of photoslistbox for other functions
-        photosListBox = document.getElementsByClassName("photos-list-box")[0];
-
-        // // Add an event listener to the "Switch to Nominations" button
+        // // Add an event listener to the "Switch to Wayspots" button
         const switchToNominationsButton = document.getElementById('switch-to-nominations-button');
         switchToNominationsButton.addEventListener('click', toggleDisplayedList);
 
-        // Add event listener for search box
-        handleSearchInputChange();
+        // Add event listener for both search boxes (original + photos)
+        const photosSearchInput = document.getElementById('photos-search-input');
+        if (photosSearchInput) {
+            photosSearchInput.addEventListener('input', (event) => {
+                currentSearchTerm = event.target.value;
+                updateSearchBoxes(currentSearchTerm);
+            });
+        }
+        const wayspotSearchInput = document.querySelector('app-nominations-search input');
+        if (wayspotSearchInput) {
+            wayspotSearchInput.addEventListener('input', (event) => {
+                currentSearchTerm = event.target.value;
+                updateSearchBoxes(currentSearchTerm);
+            });
+        }
 
         // Add event listener for filter button
         const photosFilterButton = document.getElementById('photos-filter-button');
@@ -1225,129 +1777,64 @@ function init() {
         const sortButton = document.getElementById('photos-sort-button');
         sortButton.addEventListener('click', handleSortButtonClicked);
 
+        createAllPhotoListItems();
         sortAndFilterPhotoSubmissions();
     }
 
     function sortAndFilterPhotoSubmissions() {
-        // Get the search input element
-        const searchInput = document.getElementById('photos-search-input');
-
-        // Filter photoSubmissions based on filterSettings and search input
-        const filteredPhotoSubmissions = photoSubmissions.filter((submission) => {
+        // Filter photoListItems based on filterSettings and currentSearchTerm
+        const filteredPhotoListItems = photoListItems.filter((item) => {
             const matchesFilterSettings =
-                  (filterSettings.pending && submission.status === 'pending') ||
-                  (filterSettings.accepted && submission.status === 'accepted') ||
-                  (filterSettings.rejected && submission.status === 'rejected');
+                  (filterSettings.pending && item.status === 'pending') ||
+                  (filterSettings.accepted && item.status === 'accepted') ||
+                  (filterSettings.rejected && item.status === 'rejected');
 
-            const matchesSearch =
-                  !searchInput ||
-                  submission.title.toLowerCase().includes(searchInput.value.trim().toLowerCase()) ||
-                  (submission.submitted && submission.submitted.title && submission.submitted.title.toLowerCase().includes(searchInput.value.trim().toLowerCase())) ||
-                  (submission.outcome && submission.outcome.title && submission.outcome.title.toLowerCase().includes(searchInput.value.trim().toLowerCase()));
+            const trimmedSearchTerm = currentSearchTerm.trim().toLowerCase();
+            const searchTitle = item.searchTitle.toLowerCase();
+            const matchesSearch = !trimmedSearchTerm || searchTitle.includes(trimmedSearchTerm);
 
-            const hasSubmittedTimestamp = submission.submitted && submission.submitted.timestamp !== null;
-
-            return matchesFilterSettings && matchesSearch && hasSubmittedTimestamp;
+            return matchesFilterSettings && matchesSearch;
         });
 
         // Sort the remaining values
-        const sortedPhotoSubmissions = filteredPhotoSubmissions.sort((a, b) => {
+        const sortedPhotoListItems = filteredPhotoListItems.sort((a, b) => {
             if (arrangementSettings === 'RECENT') {
-                return sortDirection === 'ASCENDING' ? a.submitted.timestamp - b.submitted.timestamp : b.submitted.timestamp - a.submitted.timestamp;
+                return sortDirection === 'ASCENDING' ? a.timestamp - b.timestamp : b.timestamp - a.timestamp;
             } else if (arrangementSettings === 'ALPHABETICAL') {
-                const titleA = a.title.toLowerCase();
-                const titleB = b.title.toLowerCase();
+                const titleA = a.sortTitle.toLowerCase();
+                const titleB = b.sortTitle.toLowerCase();
                 return sortDirection === 'ASCENDING' ? titleA.localeCompare(titleB) : titleB.localeCompare(titleA);
             }
             return 0; // Default case, no sorting
         });
 
-        // Clear the old list and then add the newly sorted entries
-        clearPhotosListBox();
-        sortedPhotoSubmissions.forEach(createPhotosListItem);
+        // Join the matching photo items' HTML
+        const newPhotoListItemsHTML = sortedPhotoListItems.map(item => item.html).join('');
 
-        // Set the height for the photo-scroll-spacer element to match number of submissions
+        // Replace photosListBox.innerHTML with the joined HTML
+        const photosListBox = document.getElementsByClassName("photos-list-box")[0];
+
+        if (photosListBox) {
+            photosListBox.innerHTML = newPhotoListItemsHTML;
+            photosListBox.removeEventListener('click', handlePhotosListBoxClick);
+            photosListBox.addEventListener('click', handlePhotosListBoxClick);
+        }
+
+        // Set the height for the photo-scroll-spacer element to match the number of submissions
         const photoScrollSpacer = document.getElementById('photo-scroll-spacer');
         if (photoScrollSpacer) {
-            const spacerHeight = sortedPhotoSubmissions.length * 128;
+            const spacerHeight = sortedPhotoListItems.length * 128;
             photoScrollSpacer.style.height = spacerHeight + 'px';
         }
     }
 
-    function createPhotosListItem(photoSubmission) {
-        const {
-            imageUrl,
-            title,
-            status,
-            submitted,
-            outcome
-        } = photoSubmission;
+    function handlePhotosListBoxClick(event) {
+        // Replace photosListBox.innerHTML with the joined HTML
+        const photosListBox = document.getElementsByClassName("photos-list-box")[0];
 
-        // Extract information from the submitted and outcome objects
-        const submittedTitle = submitted ? submitted.title : '';
-        const submittedTimestamp = submitted ? submitted.timestamp : null;
-        const outcomeTitle = outcome ? outcome.title : '';
-        const outcomeTimestamp = outcome ? outcome.timestamp : null;
+        const clickedItem = event.target.closest('app-nominations-list-item');
 
-        // Create the main container for the nominations list item
-        const photosItemContainer = document.createElement('app-nominations-list-item');
-        photosItemContainer.classList.add(`${ngcontent}-c202`);
-
-        const outcomeClass = status === "pending"
-        ? "nomination-tag--queue"
-        : status === "accepted"
-        ? "nomination-tag--accepted"
-        : status === "rejected"
-        ? "nomination-tag--rejected"
-        : "nomination-tag--queue"; // Default class if none of the conditions match
-
-        // Determine if the sash icon should be added
-        const includeSashIcon = photoSubmission.status === "accepted";
-
-        // Add the sash icon HTML if needed
-        const sashIconHTML = includeSashIcon
-        ? `<img src="/img/sash.svg" alt="" class="relative -top-5 left-4 ng-star-inserted">`
-  : "";
-
-        const htmlContent = `
-    <div class="nominations-item">
-   <img alt="" class="w-24 h-20 rounded mr-4 object-cover" src="${imageUrl}">
-   <div class="flex flex-col h-full w-full py-3 justify-between">
-      <div class="flex flex-row justify-between">
-         <div>
-            <div class="flex flex-row items-center">
-               <span class="font-bold">${title}</span><!---->
-            </div>
-            <div class="text-xs"> </div>
-         </div>
-         ${sashIconHTML}
-         <!---->
-      </div>
-      <div class="flex flex-row justify-between items-center my-2">
-         <app-nomination-tag-set class="flex flex-wrap nominations-item__tags">
-            <app-nomination-tag ${ngcontent}-c200="" class="mr-1">
-            <div class="nomination-tag">
-               <!----><!----><!----><!----><!----><!----><span class="${outcomeClass}"> ${status} </span><!----><!----><!----><!----><!---->
-            </div>
-            <!---->
-            </app-nomination-tag>
-            <!----><!----><!----><!---->
-         </app-nomination-tag-set>
-         <div class="text-xs whitespace-nowrap">${formatDate(submittedTimestamp)}</div>
-      </div>
-   </div>
-</div>
-<!---->
-    `
-
-    // Set the HTML content
-    photosItemContainer.innerHTML = htmlContent;
-
-        // Append the nominations list item to the photos-list-box div
-        photosListBox.appendChild(photosItemContainer);
-
-        // Add a click event listener to the photosItemContainer
-        photosItemContainer.addEventListener('click', () => {
+        if (clickedItem) {
             // Remove selection highlighting from all items in the photos list
             const allItems = photosListBox.querySelectorAll('app-nominations-list-item');
             allItems.forEach(item => {
@@ -1357,199 +1844,416 @@ function init() {
                 }
             });
 
-            // Add selection highlighting to the chosen box
-            const selectedChildDiv = photosItemContainer.querySelector('.nominations-item');
+            // Add selection highlighting to the clicked box
+            const selectedChildDiv = clickedItem.querySelector('.nominations-item');
             if (selectedChildDiv) {
                 selectedChildDiv.classList.add('nominations-item--selected');
             }
 
-            // Create the photo details pane
-            createPhotoDetailsPane(photoSubmission);
-        });
-    }
+            // Extract the imgUrl associated with the clicked item (assuming it's the first child)
+            const imgUrl = clickedItem.querySelector('.w-24').src;
 
-    // Function to handle search input change
-    function handleSearchInputChange() {
-        const searchInput = document.getElementById('photos-search-input');
-
-        if (searchInput) {
-            searchInput.addEventListener('input', sortAndFilterPhotoSubmissions);
+            // Create the photo details pane using the imgUrl
+            createPhotoDetailsPane(imgUrl);
         }
     }
 
-    // Function to create filter overlay
-    function createFilterOverlay() {
-        // Reset current filter (just in case)
-        clearOverlay();
+    function createAllPhotoListItems() {
+        photoListItems = [];
 
+        photoSubmissions.forEach((submission) => {
+            if (submission.submitted.timestamp !== null) {
+                const sortTitle = submission.title;
+                const status = submission.status;
+
+                let submittedTitle = submission.submitted.title === sortTitle ? '' : submission.submitted.title || '';
+                let outcomeTitle = submission.outcome.title === sortTitle ? '' : submission.outcome.title || '';
+
+                const searchTitle = [sortTitle, submittedTitle, outcomeTitle].join(' / ');
+
+                const timestamp = submission.submitted.timestamp;
+                const html = createPhotosListHtml(submission);
+
+                photoListItems.push({
+                    sortTitle,
+                    status,
+                    searchTitle,
+                    timestamp,
+                    html
+                });
+            }
+        });
+    }
+
+    function createPhotosListHtml(photoSubmission) {
+        const l10n = getL10N();
+
+        const {
+            imageUrl,
+            title,
+            status,
+            submitted
+        } = photoSubmission;
+
+        const submittedTimestamp = submitted ? submitted.timestamp : null;
+
+        const city = photoSubmission.lightship.city || '';
+        const state = photoSubmission.lightship.state || '';
+        const address = `${city && state ? `${city}, ${state}` : city || state}`;
+
+        const outcomeClass = status === "pending"
+        ? "queue"
+        : status === "accepted"
+        ? "accepted"
+        : status === "rejected"
+        ? "rejected"
+        : "queue"; // Default class if none of the conditions match
+
+        const outcomeText = status === "pending"
+        ? strings[language].pending
+        : status === "accepted"
+        ? l10n['nominations.status.accepted']
+        : status === "rejected"
+        ? l10n['nominations.status.notaccepted']
+        : strings[language].pending; // Default text if none of the conditions match
+
+        // Determine if the sash icon should be added
+        const includeSashIcon = photoSubmission.status === "accepted";
+
+        // Add the sash icon HTML if needed
+        const sashIconHTML = includeSashIcon
+        ? `<img src="/img/sash.svg" class="relative -top-5 left-4">`
+        : "";
+
+        const htmlContent = `
+        <app-nominations-list-item ${ngcontent}-c202="">
+          <div class="nominations-item">
+            <img class="w-24 h-20 rounded mr-4 object-cover" src="${imageUrl}">
+            <div class="flex flex-col h-full w-full py-3 justify-between">
+              <div class="flex flex-row justify-between">
+                <div>
+                  <div class="flex flex-row items-center">
+                    <span class="font-bold">${title}</span>
+                  </div>
+                  <div class="text-xs">${address}</div>
+                </div> ${sashIconHTML}
+              </div>
+              <div class="flex flex-row justify-between items-center my-2">
+                <app-nomination-tag-set class="flex flex-wrap nominations-item__tags">
+                  <app-nomination-tag ${ngcontent}-c200="" class="mr-1">
+                    <div class="nomination-tag">
+                      <span class="nomination-tag--${outcomeClass}"> ${outcomeText} </span>
+                    </div>
+                  </app-nomination-tag>
+                </app-nomination-tag-set>
+                <div class="text-xs whitespace-nowrap">${formatDate(submittedTimestamp)}</div>
+              </div>
+            </div>
+          </div>
+        </app-nominations-list-item>
+    `
+        return htmlContent;
+    }
+
+    // Function to synchronise the search boxes
+    function updateSearchBoxes(value) {
+        const photosSearchInput = document.getElementById('photos-search-input');
+        if (photosSearchInput) {
+            photosSearchInput.value = value;
+        }
+
+        const appNominationsSearchInput = document.querySelector('app-nominations-search input');
+        if (appNominationsSearchInput) {
+            appNominationsSearchInput.value = value;
+        }
+
+        // Only filter the photos list if photos is currently being displayed
+        if (currentDisplay === 'photos') {
+            sortAndFilterPhotoSubmissions();
+        }
+    }
+
+    function createOverlayContainer(width, contentCallback) {
         // Create a new div with class "cdk-overlay-container"
         const newOverlayContainer = document.createElement('div');
         newOverlayContainer.classList.add('cdk-overlay-photos-container');
 
-        const htmlContent = `
-<div class="cdk-overlay-container">
-  <div class="cdk-overlay-backdrop cdk-overlay-dark-backdrop cdk-overlay-backdrop-showing"></div>
-  <div class="cdk-global-overlay-wrapper" dir="ltr" style="justify-content: center; align-items: center;">
-    <div id="cdk-overlay-1" class="cdk-overlay-pane" style="max-width: 80vw; width: 350px; position: static;">
-      <div tabindex="0" class="cdk-visually-hidden cdk-focus-trap-anchor" aria-hidden="true"></div>
-      <mat-dialog-container tabindex="-1" aria-modal="true" class="mat-dialog-container ng-tns-c129-3 ng-trigger ng-trigger-dialogContainer ng-star-inserted" id="mat-dialog-2" role="dialog" style="transform: none;">
-        <app-nominations-sort-modal ${nghost}-c190="" class="ng-star-inserted">
-          <div ${ngcontent}-c190="" class="w-full" style="">
-            <div ${ngcontent}-c190="">
-              <h4 ${ngcontent}-c190="" class="mb-2">Arrange</h4>
-              <mat-radio-group ${ngcontent}-c190="" role="radiogroup" formcontrolname="arrangeBy" class="mat-radio-group flex flex-col space-y-2">
-                <mat-radio-button ${ngcontent}-c190="" class="mat-radio-button mat-accent" id="photo-radio-alphabetical">
-                  <label class="mat-radio-label" for="photo-radio-alphabetical-input">
-                    <span class="mat-radio-container">
-                      <span class="mat-radio-outer-circle"></span>
-                      <span class="mat-radio-inner-circle"></span>
-                      <input type="radio" class="mat-radio-input cdk-visually-hidden" id="photo-radio-alphabetical-input" tabindex="0" name="photo-arrange-radio-group" value="ALPHABETICAL">
-                      <span mat-ripple="" class="mat-ripple mat-radio-ripple mat-focus-indicator">
-                        <span class="mat-ripple-element mat-radio-persistent-ripple"></span>
-                      </span>
-                    </span>
-                    <span class="mat-radio-label-content">
-                      <span style="display: none;">&nbsp;</span>Alphabetical </span>
-                  </label>
-                </mat-radio-button>
-                <mat-radio-button ${ngcontent}-c190="" class="mat-radio-button mat-radio-checked mat-accent" id="photo-radio-recent">
-                  <label class="mat-radio-label" for="photo-radio-recent-input">
-                    <span class="mat-radio-container">
-                      <span class="mat-radio-outer-circle"></span>
-                      <span class="mat-radio-inner-circle"></span>
-                      <input type="radio" class="mat-radio-input cdk-visually-hidden" id="photo-radio-recent-input" tabindex="0" name="photo-arrange-radio-group" value="RECENT">
-                      <span mat-ripple="" class="mat-ripple mat-radio-ripple mat-focus-indicator">
-                        <span class="mat-ripple-element mat-radio-persistent-ripple"></span>
-                      </span>
-                    </span>
-                    <span class="mat-radio-label-content">
-                      <span style="display: none;">&nbsp;</span>Most Recent </span>
-                  </label>
-                </mat-radio-button>
-            </div>
-            <div ${ngcontent}-c190="" class="mt-4">
-              <h4 ${ngcontent}-c190="" class="mb-2">Show</h4>
-              <div ${ngcontent}-c190="" class="sort-modal__statuses flex flex-col">
-                <wf-checkbox ${ngcontent}-c190="" value="status" class="wf-checkbox">
-                  <mat-checkbox class="mat-checkbox mat-accent" id="photo-filter-pending">
-                    <label class="mat-checkbox-layout" for="photo-filter-pending-input">
-                      <span class="mat-checkbox-inner-container">
-                        <input type="checkbox" class="mat-checkbox-input cdk-visually-hidden" id="photo-filter-pending-input" tabindex="0" aria-checked="false">
-                        <span matripple="" class="mat-ripple mat-checkbox-ripple mat-focus-indicator">
-                          <span class="mat-ripple-element mat-checkbox-persistent-ripple"></span>
-                        </span>
-                        <span class="mat-checkbox-frame"></span>
-                        <span class="mat-checkbox-background">
-                          <svg version="1.1" focusable="false" viewBox="0 0 24 24" xml:space="preserve" class="mat-checkbox-checkmark">
-                            <path fill="none" stroke="white" d="M4.1,12.7 9,17.6 20.3,6.3" class="mat-checkbox-checkmark-path"></path>
-                          </svg>
-                          <span class="mat-checkbox-mixedmark"></span>
-                        </span>
-                      </span>
-                      <span class="mat-checkbox-label">
-                        <span style="display: none;">&nbsp;</span> Pending </span>
-                    </label>
-                  </mat-checkbox>
-                </wf-checkbox>
-                <wf-checkbox ${ngcontent}-c190="" value="status" class="wf-checkbox">
-                  <mat-checkbox class="mat-checkbox mat-accent" id="photo-filter-accepted">
-                    <label class="mat-checkbox-layout" for="photo-filter-accepted-input">
-                      <span class="mat-checkbox-inner-container">
-                        <input type="checkbox" class="mat-checkbox-input cdk-visually-hidden" id="photo-filter-accepted-input" tabindex="0" aria-checked="false">
-                        <span matripple="" class="mat-ripple mat-checkbox-ripple mat-focus-indicator">
-                          <span class="mat-ripple-element mat-checkbox-persistent-ripple"></span>
-                        </span>
-                        <span class="mat-checkbox-frame"></span>
-                        <span class="mat-checkbox-background">
-                          <svg version="1.1" focusable="false" viewBox="0 0 24 24" xml:space="preserve" class="mat-checkbox-checkmark">
-                            <path fill="none" stroke="white" d="M4.1,12.7 9,17.6 20.3,6.3" class="mat-checkbox-checkmark-path"></path>
-                          </svg>
-                          <span class="mat-checkbox-mixedmark"></span>
-                        </span>
-                      </span>
-                      <span class="mat-checkbox-label">
-                        <span style="display: none;">&nbsp;</span> Accepted </span>
-                    </label>
-                  </mat-checkbox>
-                </wf-checkbox>
-                <wf-checkbox ${ngcontent}-c190="" value="status" class="wf-checkbox">
-                  <mat-checkbox class="mat-checkbox mat-accent" id="photo-filter-rejected">
-                    <label class="mat-checkbox-layout" for="photo-filter-rejected-input">
-                      <span class="mat-checkbox-inner-container">
-                        <input type="checkbox" class="mat-checkbox-input cdk-visually-hidden" id="photo-filter-rejected-input" tabindex="0" aria-checked="false">
-                        <span matripple="" class="mat-ripple mat-checkbox-ripple mat-focus-indicator">
-                          <span class="mat-ripple-element mat-checkbox-persistent-ripple"></span>
-                        </span>
-                        <span class="mat-checkbox-frame"></span>
-                        <span class="mat-checkbox-background">
-                          <svg version="1.1" focusable="false" viewBox="0 0 24 24" xml:space="preserve" class="mat-checkbox-checkmark">
-                            <path fill="none" stroke="white" d="M4.1,12.7 9,17.6 20.3,6.3" class="mat-checkbox-checkmark-path"></path>
-                          </svg>
-                          <span class="mat-checkbox-mixedmark"></span>
-                        </span>
-                      </span>
-                      <span class="mat-checkbox-label">
-                        <span style="display: none;">&nbsp;</span> Rejected </span>
-                    </label>
-                  </mat-checkbox>
-                </wf-checkbox>
-              </div>
-              <div ${ngcontent}-c190="" class="flex flex-row w-full justify-between mt-4">
-                <button ${ngcontent}-c190="" wf-button="" class="wf-button" id="filter_cancel">Cancel</button>
-                <button ${ngcontent}-c190="" wf-button="" wftype="primary" class="wf-button wf-button--primary" id="filter_accept"> Filter </button>
-              </div>
-            </div>
-          </div>
-          <!---->
-        </app-nominations-sort-modal>
-        <!---->
-      </mat-dialog-container>
-      <div tabindex="0" class="cdk-visually-hidden cdk-focus-trap-anchor" aria-hidden="true"></div>
-    </div>
-  </div>
-</div>
-        `
+        // Create backdrop element
+        const backdrop = document.createElement('div');
+        backdrop.classList.add('cdk-overlay-backdrop', 'cdk-overlay-dark-backdrop', 'cdk-overlay-backdrop-showing');
+        backdrop.addEventListener('click', clearOverlay);
 
-    // Set the HTML content
-    newOverlayContainer.innerHTML = htmlContent;
+        // Create global overlay wrapper
+        const globalOverlayWrapper = document.createElement('div');
+        globalOverlayWrapper.classList.add('cdk-global-overlay-wrapper');
+        globalOverlayWrapper.style.justifyContent = 'center';
+        globalOverlayWrapper.style.alignItems = 'center';
+
+        // Create cdk-overlay-pane
+        const cdkOverlayPane = document.createElement('div');
+        cdkOverlayPane.id = 'cdk-overlay-1';
+        cdkOverlayPane.classList.add('cdk-overlay-pane');
+        cdkOverlayPane.style.maxWidth = '80vw';
+        cdkOverlayPane.style.width = width;
+        cdkOverlayPane.style.position = 'static';
+
+        // Create mat-dialog-container
+        const matDialogContainer = document.createElement('mat-dialog-container');
+        matDialogContainer.classList.add('mat-dialog-container');
+
+        // Use the callback function to create the specific content
+        const specificContent = contentCallback();
+        matDialogContainer.appendChild(specificContent);
+
+        // Append mat-dialog-container to cdk-overlay-pane
+        cdkOverlayPane.appendChild(matDialogContainer);
+
+        // Append backdrop, global overlay wrapper, and cdk-overlay-pane to the new overlay container
+        newOverlayContainer.appendChild(backdrop);
+        newOverlayContainer.appendChild(globalOverlayWrapper);
+        globalOverlayWrapper.appendChild(cdkOverlayPane);
+
+        return newOverlayContainer;
+    }
+
+    function createButtonsContainer(cancelId, cancelText, acceptId, acceptText, acceptCallback) {
+        // Create buttons div
+        const buttonsContainerDiv = document.createElement('div');
+        buttonsContainerDiv.classList.add('flex', 'flex-row', 'w-full', 'justify-between', 'mt-4');
+
+        // Create cancel button
+        const cancelButton = document.createElement('button');
+        cancelButton.id = cancelId;
+        cancelButton.classList.add('wf-button');
+        cancelButton.textContent = cancelText;
+        cancelButton.addEventListener('click', clearOverlay);
+
+        // Create accept button
+        const acceptButton = document.createElement('button');
+        acceptButton.id = acceptId;
+        acceptButton.setAttribute('wftype', 'primary');
+        acceptButton.classList.add('wf-button', 'wf-button--primary');
+        acceptButton.textContent = acceptText;
+        acceptButton.addEventListener('click', acceptCallback);
+
+        // Append buttons to buttons div
+        buttonsContainerDiv.appendChild(cancelButton);
+        buttonsContainerDiv.appendChild(acceptButton);
+
+        return buttonsContainerDiv;
+    }
+
+    // Function to create filter overlay
+    function createFilterOverlay() {
+        const l10n = getL10N();
+
+        // Create content for the overlay
+        function createOverlayContent() {
+            const appNominationsSortModal = document.createElement('app-nominations-sort-modal');
+
+            // Create div for 'Grouping' section of filter overlay
+            const groupingDiv = document.createElement('div');
+            const groupingHeader = document.createElement('h4');
+            groupingHeader.classList.add('mb-2');
+            groupingHeader.textContent = "Grouping";
+            groupingDiv.appendChild(groupingHeader);
+
+            // Create ratio buttons for 'Grouping' section of filter overlay
+            const groupingRadioGroup = createRadioGroup('grouping');
+            const radioMerged = createRadioButton('photo-radio-merged', "Display photos for the same Wayspot as a combined entry.", 'MERGED', 'grouping');
+            const radioSeparate = createRadioButton('photo-radio-separate', "Display photos for the same Wayspot as separate entries.", 'SEPARATE', 'grouping');
+            groupingRadioGroup.appendChild(radioMerged);
+            groupingRadioGroup.appendChild(radioSeparate);
+            groupingDiv.appendChild(groupingRadioGroup);
+
+            // Create div for 'Arrange' section of filter overlay
+            const arrangeDiv = document.createElement('div');
+            arrangeDiv.classList.add('mt-4');
+            const arrangeHeader = document.createElement('h4');
+            arrangeHeader.classList.add('mb-2');
+            arrangeHeader.textContent = l10n['nominations.filter.header'];
+            arrangeDiv.appendChild(arrangeHeader);
+
+            // Create ratio buttons for 'Arrange' section of filter overlay
+            const arrangeRadioGroup = createRadioGroup('arrange');
+            const radioAlphabetical = createRadioButton('photo-radio-alphabetical', l10n['nominations.filter.title'], 'ALPHABETICAL', 'arrange');
+            const radioRecent = createRadioButton('photo-radio-recent', l10n['nominations.filter.recent'], 'RECENT', 'arrange');
+            arrangeRadioGroup.appendChild(radioAlphabetical);
+            arrangeRadioGroup.appendChild(radioRecent);
+            arrangeDiv.appendChild(arrangeRadioGroup);
+
+            // Create div for 'Sort' section of filter overlay
+            const sortDiv = document.createElement('div');
+            sortDiv.classList.add('mt-4');
+            const sortHeader = document.createElement('h4');
+            sortHeader.classList.add('mb-2');
+            sortHeader.textContent = l10n['nominations.filter.subheader'];
+
+            // Create checkbox container and checkboxes
+            const checkboxContainerDiv = document.createElement('div');
+            checkboxContainerDiv.classList.add('sort-modal__statuses', 'flex', 'flex-col');
+            checkboxContainerDiv.setAttribute(`${ngcontent}-c190`, '');
+
+            const pendingCheckbox = createCheckbox('photo-filter-pending', strings[language].pending, 'pending');
+            const acceptedCheckbox = createCheckbox('photo-filter-accepted', l10n['nominations.status.accepted'], 'accepted');
+            const rejectedCheckbox = createCheckbox('photo-filter-rejected', l10n['nominations.status.notaccepted'], 'rejected')
+
+            checkboxContainerDiv.appendChild(pendingCheckbox);
+            checkboxContainerDiv.appendChild(acceptedCheckbox);
+            checkboxContainerDiv.appendChild(rejectedCheckbox);
+
+            sortDiv.appendChild(sortHeader);
+            sortDiv.appendChild(checkboxContainerDiv);
+
+            // Create buttons div
+            const buttonsContainerDiv = createButtonsContainer('filter_cancel', l10n['nominations.btns.cancel'], 'filter_accept', l10n['nominations.btns.filter'], handleFilterButtonClick);
+
+            // Append header, content, and buttons divs to app-nominations-sort-modal
+            appNominationsSortModal.appendChild(groupingDiv);
+            appNominationsSortModal.appendChild(arrangeDiv);
+            appNominationsSortModal.appendChild(sortDiv);
+            appNominationsSortModal.appendChild(buttonsContainerDiv);
+
+            return appNominationsSortModal;
+        }
+
+        const newOverlayContainer = createOverlayContainer('550px', createOverlayContent);
 
         // Append the new overlay container to the end of the body
         document.body.appendChild(newOverlayContainer);
 
         // Initialise filter settings to match last used setting
         initializeFilterSettings();
+    }
 
-        // Add event listener to the overlay backdrop
-        const overlayBackdrop = document.querySelector('.cdk-overlay-backdrop');
-        if (overlayBackdrop) {
-            overlayBackdrop.addEventListener('click', clearOverlay);
-        } else {
-            console.error('Filter overlay backdrop not found.');
-        }
+    function createRadioGroup(groupName) {
+        const radioGroup = document.createElement('div');
+        radioGroup.classList.add('mat-radio-group', 'flex', 'flex-col', 'space-y-2');
+        radioGroup.setAttribute('name', groupName); // Set the name attribute
 
-        // Add event listener to the cancel button
-        const cancelButton = document.getElementById('filter_cancel');
-        if (cancelButton) {
-            cancelButton.addEventListener('click', clearOverlay);
-        } else {
-            console.error('Cancel button not found.');
-        }
+        return radioGroup;
+    }
 
-        // Add event listeners to each checkbox
-        const checkboxes = document.querySelectorAll('.mat-checkbox-input');
-        checkboxes.forEach((checkbox) => {
-            checkbox.addEventListener('click', handleCheckboxClick);
-        });
+    function createRadioButton(id, labelText, value, groupName) {
+        const radioGroup = createRadioGroup(groupName);
 
-        // Add event listeners to radio buttons
-        const radioButtons = document.querySelectorAll('.mat-radio-input');
-        radioButtons.forEach((radioButton) => {
-            radioButton.addEventListener('click', handleRadioButtonClick);
-        });
+        const radioButton = document.createElement('mat-radio-button');
+        radioButton.classList.add('mat-radio-button', 'mat-accent');
+        radioButton.id = id;
 
-        // Add event listen for 'Filter' button
-        const filterButton = document.getElementById('filter_accept');
-        filterButton.addEventListener('click', handleFilterButtonClick);
+        const label = document.createElement('label');
+        label.classList.add('mat-radio-label');
+        label.setAttribute('for', `${id}-input`);
+
+        const radioContainer = document.createElement('span');
+        radioContainer.classList.add('mat-radio-container');
+
+        const outerCircle = document.createElement('span');
+        outerCircle.classList.add('mat-radio-outer-circle');
+
+        const innerCircle = document.createElement('span');
+        innerCircle.classList.add('mat-radio-inner-circle');
+
+        const input = document.createElement('input');
+        input.type = 'radio';
+        input.classList.add('mat-radio-input', 'cdk-visually-hidden');
+        input.id = `${id}-input`;
+        input.value = value;
+        input.addEventListener('click', handleRadioButtonClick);
+
+        const rippleContainer = document.createElement('span');
+        rippleContainer.setAttribute('mat-ripple', '');
+        rippleContainer.classList.add('mat-ripple', 'mat-radio-ripple', 'mat-focus-indicator');
+
+        const rippleElement = document.createElement('span');
+        rippleElement.classList.add('mat-ripple-element', 'mat-radio-persistent-ripple');
+
+        rippleContainer.appendChild(rippleElement);
+        radioContainer.append(outerCircle, innerCircle, input, rippleContainer);
+
+        const labelContent = document.createElement('span');
+        labelContent.classList.add('mat-radio-label-content');
+        labelContent.innerHTML = `<span style="display: none;">&nbsp;</span>${labelText}`;
+
+        label.appendChild(radioContainer);
+        label.appendChild(labelContent);
+        radioButton.appendChild(label);
+
+        return radioButton;
+    }
+
+    function createCheckbox(id, label, value) {
+        const wfCheckbox = document.createElement('wf-checkbox');
+        wfCheckbox.setAttribute(`${ngcontent}-c190`, '');
+        wfCheckbox.setAttribute('value', value);
+        wfCheckbox.classList.add('wf-checkbox');
+
+        const matCheckbox = document.createElement('mat-checkbox');
+        matCheckbox.classList.add('mat-checkbox', 'mat-accent');
+        matCheckbox.id = id;
+
+        const labelElement = document.createElement('label');
+        labelElement.classList.add('mat-checkbox-layout');
+        labelElement.setAttribute('for', `${id}-input`);
+
+        const matCheckboxInnerContainer = document.createElement('span');
+        matCheckboxInnerContainer.classList.add('mat-checkbox-inner-container');
+
+        const checkboxInput = document.createElement('input');
+        checkboxInput.type = 'checkbox';
+        checkboxInput.classList.add('mat-checkbox-input', 'cdk-visually-hidden');
+        checkboxInput.id = `${id}-input`;
+
+        const rippleContainer = document.createElement('span');
+        rippleContainer.classList.add('mat-ripple', 'mat-checkbox-ripple', 'mat-focus-indicator');
+
+        const rippleElement = document.createElement('span');
+        rippleElement.classList.add('mat-ripple-element', 'mat-checkbox-persistent-ripple');
+
+        const checkboxFrame = document.createElement('span');
+        checkboxFrame.classList.add('mat-checkbox-frame');
+
+        const checkboxBackground = document.createElement('span');
+        checkboxBackground.classList.add('mat-checkbox-background');
+
+        const checkmarkSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        checkmarkSvg.setAttribute('version', '1.1');
+        checkmarkSvg.setAttribute('focusable', 'false');
+        checkmarkSvg.setAttribute('viewBox', '0 0 24 24');
+        checkmarkSvg.setAttribute('xml:space', 'preserve');
+        checkmarkSvg.classList.add('mat-checkbox-checkmark');
+
+        const checkmarkPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        checkmarkPath.setAttribute('fill', 'none');
+        checkmarkPath.setAttribute('stroke', 'white');
+        checkmarkPath.setAttribute('d', 'M4.1,12.7 9,17.6 20.3,6.3');
+        checkmarkPath.classList.add('mat-checkbox-checkmark-path');
+
+        const mixedmark = document.createElement('span');
+        mixedmark.classList.add('mat-checkbox-mixedmark');
+
+        const checkboxLabel = document.createElement('span');
+        checkboxLabel.classList.add('mat-checkbox-label');
+        checkboxLabel.innerHTML = `<span style="display: none;">&nbsp;</span> ${label}`;
+
+        // Attach event listener to the checkbox
+        matCheckbox.addEventListener('click', handleCheckboxClick);
+
+        // Append elements in the hierarchy
+        wfCheckbox.appendChild(matCheckbox);
+        labelElement.appendChild(matCheckboxInnerContainer);
+        matCheckboxInnerContainer.appendChild(checkboxInput);
+        matCheckboxInnerContainer.appendChild(rippleContainer);
+        rippleContainer.appendChild(rippleElement);
+        matCheckboxInnerContainer.appendChild(checkboxFrame);
+        matCheckboxInnerContainer.appendChild(checkboxBackground);
+        checkboxBackground.appendChild(checkmarkSvg);
+        checkmarkSvg.appendChild(checkmarkPath);
+        checkboxBackground.appendChild(mixedmark);
+        labelElement.appendChild(checkboxLabel);
+        matCheckbox.appendChild(labelElement);
+
+        return wfCheckbox;
     }
 
     // Function to handle checkbox click event
@@ -1572,9 +2276,9 @@ function init() {
         }
     }
 
-
     // Function to handle "Filter" button click event
     function handleFilterButtonClick() {
+        const l10n = getL10N();
         // Save checkbox settings
         const checkboxes = document.querySelectorAll('.mat-checkbox-input');
         checkboxes.forEach((checkbox) => {
@@ -1598,10 +2302,10 @@ function init() {
         const sortText = document.getElementById('photo-sort-text');
 
         if (arrangementSettings === 'RECENT') {
-            sortText.textContent = 'Most Recent';
+            sortText.textContent = l10n['nominations.filter.recent'];
             sortDirection = 'DESCENDING';
         } else if (arrangementSettings === 'ALPHABETICAL') {
-            sortText.textContent = 'Alphabetical';
+            sortText.textContent = l10n['nominations.filter.title'];
             sortDirection = 'ASCENDING';
         }
 
@@ -1688,28 +2392,494 @@ function init() {
         }
     }
 
+    // Function to create filter overlay
+    function createMatchPhotoOverlay(thisSubmission) {
+        const l10n = getL10N();
+
+        let searchInput, imagesLabel, nominationImagesLabel;
+
+        // Create content for the overlay
+        function createOverlayContent() {
+            const appNominationsSortModal = document.createElement('app-nominations-sort-modal');
+
+            // Create header div
+            const headerDiv = document.createElement('div');
+            const headerText = document.createElement('h4');
+            headerText.classList.add('mb-2');
+            headerText.textContent = 'Link Photos';
+            headerDiv.appendChild(headerText);
+
+            const headerExplanation = document.createElement('p');
+            headerExplanation.textContent = strings[language].linkPhotosExplanation1;
+            headerDiv.appendChild(headerExplanation);
+
+            const headerExplanation2 = document.createElement('p');
+            headerExplanation2.textContent = strings[language].linkPhotosExplanation2;
+            headerDiv.appendChild(headerExplanation2);
+
+            // Create a search box
+            const searchContainer = document.createElement('searchContainer');
+            searchContainer.setAttribute(`${ngcontent}-c198`, '');
+            searchContainer.classList.add('flex', 'flex-col');
+
+            const searchLabel = document.createElement('span');
+            searchLabel.classList.add('wfpc-search-header');
+            searchLabel.textContent = l10n['nominations.search.title'];
+
+            searchInput = document.createElement('input');
+            searchInput.setAttribute('type', 'text');
+            searchInput.classList.add('wfpc-input', 'border-black');
+            searchInput.value = thisSubmission.title;
+
+            searchContainer.appendChild(searchLabel);
+            searchContainer.appendChild(searchInput);
+
+            const imagesDiv = document.createElement('div');
+
+            imagesLabel = document.createElement('p');
+            imagesLabel.classList.add('mt-4', 'text-xs', 'hidden');
+            imagesLabel.textContent = strings[language].submittedPhotos;
+
+            // Create container to save the images from other photo submissions
+            const imagesContainer = document.createElement('div');
+            imagesContainer.id = 'imagesContainer';
+            imagesContainer.classList.add('flex', 'flex-row');
+            imagesContainer.style.overflowX = 'auto';
+
+            nominationImagesLabel = document.createElement('p');
+            nominationImagesLabel.classList.add('mt-4', 'text-xs', 'hidden');
+            nominationImagesLabel.textContent = strings[language].submittedWayspots;
+
+            // Create container to save the images from Wayspot nominations
+            const nominationImagesContainer = document.createElement('div');
+            nominationImagesContainer.id = 'nominationImagesContainer';
+            nominationImagesContainer.classList.add('flex', 'flex-row');
+            nominationImagesContainer.style.overflowX = 'auto';
+
+            imagesDiv.appendChild(imagesLabel);
+            imagesDiv.appendChild(imagesContainer);
+            imagesDiv.appendChild(nominationImagesLabel);
+            imagesDiv.appendChild(nominationImagesContainer);
+
+            // Create buttons div
+            const buttonsContainerDiv = createButtonsContainer('match_cancel', l10n['nominations.btns.cancel'], 'match_accept', l10n['settings.button.save'], saveLinkedPhotos);
+
+            // Append header, content, and buttons divs to app-nominations-sort-modal
+            appNominationsSortModal.appendChild(headerDiv);
+            appNominationsSortModal.appendChild(searchContainer);
+            appNominationsSortModal.appendChild(imagesDiv);
+            appNominationsSortModal.appendChild(buttonsContainerDiv);
+
+            return appNominationsSortModal;
+        }
+
+        // Use the createOverlayContainer function with the callback
+        const newOverlayContainer = createOverlayContainer('600px', createOverlayContent);
+
+        // Append the new overlay container to the end of the body
+        document.body.appendChild(newOverlayContainer);
+
+
+        // Add an event listener to the search input for real-time filtering
+        searchInput.addEventListener('input', handleSearchInput);
+
+        // Define variables to check linked and original status
+        const isLinked = !!thisSubmission.linkedTo;
+
+        let firstSubmission;
+
+        if (!isLinked) {
+            firstSubmission = thisSubmission;
+        } else {
+            firstSubmission = photoSubmissions.find(submission => submission.imageUrl === thisSubmission.linkedTo) || thisSubmission;
+        }
+
+        const linkedSubmissions = photoSubmissions.filter(submission => submission.linkedTo === firstSubmission.imageUrl);
+
+        findAndDisplayMatchingPhotos(thisSubmission.title.toLowerCase());
+
+        // Function to handle real-time filtering
+        function handleSearchInput() {
+            const searchTerm = searchInput.value.normalize().toLowerCase();
+            findAndDisplayMatchingPhotos(searchTerm);
+        }
+
+        function findAndDisplayMatchingPhotos(searchTerm) {
+            // Clear any existing images
+            const imagesContainer = document.getElementById('imagesContainer');
+            const nominationImagesContainer = document.getElementById('nominationImagesContainer');
+            if (imagesContainer) {
+                imagesContainer.innerHTML = '';
+            }
+            if (nominationImagesContainer) {
+                nominationImagesContainer.innerHTML = '';
+            }
+
+            // Create a Set to store unique submissions
+            const uniqueSubmissions = new Set();
+
+            // Add firstSubmission and linkedSubmissions to the Set
+            uniqueSubmissions.add(firstSubmission);
+            linkedSubmissions.forEach(submission => uniqueSubmissions.add(submission));
+
+            // Filter photoSubmissions based on the search term
+            photoSubmissions.forEach(submission => {
+                const isMatching = submission.title.toLowerCase().normalize().includes(searchTerm);
+                if (isMatching) {
+                    uniqueSubmissions.add(submission);
+                }
+            });
+
+            // Remove thisSubmission from the Set
+            uniqueSubmissions.delete(thisSubmission);
+
+            // Only show the label if there are photos
+            const matchingSubmissions = Array.from(uniqueSubmissions);
+
+            if (matchingSubmissions.length > 0) {
+                imagesLabel.classList.remove('hidden');
+            } else {
+                imagesLabel.classList.add('hidden');
+            }
+
+            // Also filter nominations for the search term and status 'ACCEPTED'
+            let matchingNominations = [];
+            let parentNomination;
+
+            // Check if thisSubmission has a parentNomination
+            if (thisSubmission.lightship.parentNomination) {
+                parentNomination = nominations.find(nomination => nomination.imageUrl === thisSubmission.lightship.parentNomination);
+
+                if (parentNomination) {
+                    matchingNominations.push(parentNomination);
+                }
+            }
+
+            // Filter other nominations based on the search term and status 'ACCEPTED'
+            nominations.forEach((nomination) => {
+                if ((!thisSubmission.lightship.parentNomination || nomination.imageUrl !== thisSubmission.lightship.parentNomination)
+                    && nomination.title.normalize().toLowerCase().includes(searchTerm)
+                    && nomination.status === 'ACCEPTED') {
+                    matchingNominations.push(nomination);
+                }
+            });
+
+            if (matchingNominations.length > 0) {
+                nominationImagesLabel.classList.remove('hidden');
+            } else {
+                nominationImagesLabel.classList.add('hidden');
+            }
+
+            // Create and display images for each matching photo submission
+            matchingSubmissions.forEach(submission => {
+                const image = document.createElement('img');
+                image.src = submission.imageUrl;
+                image.alt = submission.title;
+                image.title = submission.title;
+                image.style.height = '150px';
+                image.style.marginRight = '10px';
+                image.addEventListener('click', () => toggleSelection(image));
+
+                // Check if the image corresponds to firstSubmission or linkedSubmissions and initialize as selected
+                if (submission === firstSubmission || linkedSubmissions.includes(submission)) {
+                    image.classList.add('selected');
+                    image.style.border = '10px solid #209129';
+                }
+
+                imagesContainer.appendChild(image);
+            });
+
+            // Create and display images for each matching nomination submission
+            matchingNominations.forEach(nomination => {
+                const image = document.createElement('img');
+                image.src = nomination.imageUrl;
+                image.alt = nomination.title;
+                image.title = nomination.title;
+                image.style.height = '150px';
+                image.style.marginRight = '10px';
+                image.addEventListener('click', () => toggleSelectionForNominations(image));
+
+                // Check if the image corresponds to firstSubmission or linkedSubmissions and initialize as selected
+                if (nomination === parentNomination) {
+                    image.classList.add('selected');
+                    image.style.border = '10px solid #209129';
+                }
+                nominationImagesContainer.appendChild(image);
+            });
+        }
+
+        // Function to toggle image selection
+        function toggleSelection(image) {
+            const isSelected = image.classList.toggle('selected');
+            image.style.border = isSelected ? '10px solid #209129' : 'none';
+        }
+
+        // Function to toggle image selection for matchingNominations
+        function toggleSelectionForNominations(image) {
+            const isSelected = image.classList.contains('selected');
+
+            // Unselect all other matching nominations
+            const nominationImages = document.querySelectorAll('#nominationImagesContainer img.selected');
+            nominationImages.forEach(nominationImage => {
+                if (nominationImage !== image) {
+                    nominationImage.classList.remove('selected');
+                    nominationImage.style.border = 'none';
+                }
+            });
+
+            // Toggle selection for the clicked image
+            image.classList.toggle('selected');
+            image.style.border = isSelected ? 'none' : '10px solid #209129';
+        }
+
+        function saveLinkedPhotos() {
+            const selectedImages = document.querySelectorAll('#imagesContainer img.selected');
+            const selectedNominations = document.querySelectorAll('#nominationImagesContainer img.selected');
+
+            // Get the imageUrl of the selected nomination (if any)
+            const selectedNominationImageUrl = selectedNominations.length > 0 ? selectedNominations[0].src : undefined;
+
+            if (selectedImages.length > 0 || linkedSubmissions.length > 0 || thisSubmission.lightship.parentNomination || selectedNominationImageUrl) {
+                const selectedSubmissions = [thisSubmission, ...Array.from(selectedImages).map(image => {
+                    return photoSubmissions.find(submission => submission.imageUrl === image.src);
+                })];
+
+                // Find the oldest submission
+                const oldestSubmission = selectedSubmissions.reduce((oldest, current) => {
+                    return current.submitted.timestamp < oldest.submitted.timestamp ? current : oldest;
+                }, selectedSubmissions[0]);
+
+                // Clear linked status from all submissions
+                // This allows previously linked submissions to get unlinked.
+                linkedSubmissions.forEach(submission => {
+                    submission.linkedTo = undefined;
+                    submission.lightship = {};
+                    submission.edited = true;
+                });
+
+                // Add linking to the current selected submissions
+                // This is a reference to the oldest submission from the linked set.
+                selectedSubmissions.forEach(submission => {
+                    submission.linkedTo = oldestSubmission === submission ? undefined : oldestSubmission.imageUrl;
+                    if (selectedNominationImageUrl) {
+                        submission.lightship.parentNomination = selectedNominationImageUrl;
+                    }
+                    submission.edited = true;
+                });
+
+                // No selected nominations, remove parentNomination from linked submissions
+                // Important to removing a linked Wayspot nomination
+                if (selectedNominations.length === 0) {
+                    linkedSubmissions.forEach(submission => {
+                        if (submission.lightship.parentNomination) {
+                            delete submission.lightship.parentNomination;
+                            submission.edited = true;
+                        }
+                    });
+                }
+
+                synchronizeLightshipData(thisSubmission);
+            }
+
+            clearOverlay();
+        }
+    }
+
+    // Function to create filter overlay
+    function createImportDataOverlay(thisSubmission) {
+        const l10n = getL10N();
+
+        let textarea;
+
+        // Create content for the overlay
+        function createOverlayContent() {
+            const appNominationsSortModal = document.createElement('app-nominations-sort-modal');
+
+            // Create header div
+            const headerDiv = document.createElement('div');
+            const headerText = document.createElement('h4');
+            headerText.classList.add('mb-2');
+            headerText.textContent = strings[language].importData;
+            headerDiv.appendChild(headerText);
+
+            const headerExplanation = document.createElement('p');
+            headerExplanation.textContent = strings[language].importDataExplanation;
+            headerDiv.appendChild(headerExplanation);
+            headerDiv.classList.add('mb-4');
+
+            // Show the format for the input.
+            const jsonStructure = `{
+    "guid": "GUID",
+    "title": "TITLE",
+    "description": "DESCRIPTION",
+    "lat": lat,
+    "lng": lng,
+    "city": "CITY",
+    "state": "STATE",
+    "country": "COUNTRY"
+}`;
+
+            textarea = document.createElement('textarea');
+            textarea.rows = 10;
+            textarea.placeholder = jsonStructure;
+            textarea.classList.add('wfpc-input');
+
+            // Create buttons div
+            const buttonsContainerDiv = createButtonsContainer('import_cancel', l10n['nominations.btns.cancel'], 'import_accept', l10n['settings.button.save'], () => processImportedData(thisSubmission, textarea.value));
+
+            // Append header, content, and buttons divs to app-nominations-sort-modal
+            appNominationsSortModal.appendChild(headerDiv);
+            appNominationsSortModal.appendChild(textarea);
+            appNominationsSortModal.appendChild(buttonsContainerDiv);
+
+            return appNominationsSortModal;
+        }
+
+        // Use the createOverlayContainer function with the callback
+        const newOverlayContainer = createOverlayContainer('400px', createOverlayContent);
+
+        // Append the new overlay container to the end of the body
+        document.body.appendChild(newOverlayContainer);
+
+        textarea.focus();
+    }
+
+    // Function to ensure that all linked submissions inherit the same Lightship data
+    function synchronizeLightshipData(thisSubmission) {
+        // Determine the URL to which the submissions are linked
+        const linkingUrl = thisSubmission.linkedTo || thisSubmission.imageUrl;
+
+        // Find linked submissions
+        const linkedSubmissions = [
+            ...photoSubmissions.filter(submission => submission.linkedTo === linkingUrl),
+            ...photoSubmissions.filter(submission => submission.imageUrl === linkingUrl)
+        ];
+
+        let parentNomination;
+        let nominationTimestamp;
+
+        // Find corresponding nomination for parentNomination
+        if (thisSubmission.lightship && thisSubmission.lightship.parentNomination) {
+            parentNomination = nominations.find(nomination => nomination.imageUrl === thisSubmission.lightship.parentNomination);
+
+            if (parentNomination) {
+                nominationTimestamp = Date.parse(parentNomination.day);
+            }
+        }
+
+
+        // Helper function to find the lightship data with the most recent _lastImported timestamp
+        function findMostRecentLightshipData(lightshipField) {
+            return linkedSubmissions.reduce((mostRecentData, currentData) => {
+                if (currentData.lightship[lightshipField]) {
+                    const currentTimestamp = currentData.lightship._lastImported;
+                    const mostRecentTimestamp = mostRecentData._lastImported || 0;
+
+                    // Check if mostRecentTimestamp is greater than 0 before considering the current submission
+                    if (mostRecentTimestamp > 0 && currentTimestamp <= mostRecentTimestamp) {
+                        return mostRecentData;
+                    }
+
+                    return currentData.lightship;
+                }
+
+                return mostRecentData;
+            }, {});
+        }
+
+        // Create a new variable to temporarily store the lightshipData
+        let lightshipData = {};
+
+        // Copy additional values if parentNomination exists
+        if (parentNomination) {
+            lightshipData.description = parentNomination.description;
+            lightshipData.lat = parentNomination.lat;
+            lightshipData.lng = parentNomination.lng;
+            lightshipData.city = parentNomination.city;
+            lightshipData.state = parentNomination.state;
+            lightshipData._lastImported = nominationTimestamp;
+        }
+
+        // Copy across values from linked submissions
+        ['id', 'title', 'description', 'lat', 'lng', 'city', 'state', 'country', '_lastImported'].forEach(field => {
+            const mostRecentData = findMostRecentLightshipData(field);
+
+            // Only overwrite if mostRecentData[field] exists
+            if (mostRecentData[field] !== undefined && mostRecentData[field] !== null) {
+                lightshipData[field] = mostRecentData[field];
+            }
+        });
+
+        // Push values from lightshipData into all linked submissions
+        linkedSubmissions.forEach(submission => {
+            submission.edited = true;
+            // Iterate over all fields in lightshipData and update linked submissions
+            ['id', 'title', 'description', 'lat', 'lng', 'city', 'state', 'country', '_lastImported'].forEach(field => {
+                if (field === 'title' && lightshipData.title !== undefined && lightshipData.title !== null && lightshipData.title !== '') {
+                    submission.title = lightshipData.title;
+                } else {
+                    submission.lightship[field] = lightshipData[field];
+                }
+            });
+        });
+
+        createPhotoDetailsPane(thisSubmission.imageUrl);
+        updatePhotoListItems(linkedSubmissions);
+        savePhotoSubmissionsToIDB();
+    }
+
+    // Updates the title and address of the photo list items after a change in details
+    function updatePhotoListItems(linkedSubmissions) {
+        const photosListDiv = document.querySelector('.photos-list');
+
+        linkedSubmissions.forEach(linkedSubmission => {
+            const imageUrl = linkedSubmission.imageUrl;
+            const title = linkedSubmission.title;
+            const city = linkedSubmission.lightship.city || '';
+            const state = linkedSubmission.lightship.state || '';
+
+            // Find the corresponding photo list item based on imageUrl
+            const photoListItem = photosListDiv.querySelector(`.nominations-item img[src="${imageUrl}"]`);
+
+            if (photoListItem) {
+                const listItem = photoListItem.closest('.nominations-item');
+
+                if (listItem) {
+                    const titleElement = listItem.querySelector('.font-bold');
+                    const addressElement = listItem.querySelector('.text-xs');
+
+                    if (titleElement) {
+                        titleElement.textContent = title;
+                    }
+
+                    if (addressElement) {
+                        const address = `${city && state ? `${city}, ${state}` : city || state}`;
+                        addressElement.textContent = address;
+                    }
+                }
+            }
+        });
+    }
+
     function createImageOverlay(imageUrl) {
         const overlayDiv = document.createElement('div');
         overlayDiv.classList.add('cdk-overlay-photos-container');
         overlayDiv.innerHTML = `
       <div class="cdk-overlay-backdrop wf-image-modal-backdrop cdk-overlay-backdrop-showing"></div>
-  <div class="cdk-global-overlay-wrapper" dir="ltr" style="justify-content: center; align-items: center;">
-    <div id="cdk-overlay-1" class="cdk-overlay-pane wf-image-modal-panel" style="max-width: 80vw; position: static;">
-      <div tabindex="0" class="cdk-visually-hidden cdk-focus-trap-anchor" aria-hidden="true"></div>
-      <mat-dialog-container tabindex="-1" aria-modal="true" class="mat-dialog-container ng-tns-c129-2 ng-trigger ng-trigger-dialogContainer ng-star-inserted" id="mat-dialog-1" role="dialog" style="transform: none;">
-        <wf-image-dialog class="ng-star-inserted">
-          <div ${ngcontent}-c143="" class="fixed inset-0 flex items-center justify-center cursor-pointer">
-            <img ${ngcontent}-c143="" class="max-h-full object-contain cursor-pointer" src="${imageUrl}=s0">
-          </div>
-          <button ${ngcontent}-c143="" mat-dialog-close="" tabindex="0" class="absolute left-0 top-0 p-4 text-white dark:text-white" type="button">
-            <mat-icon ${ngcontent}-c143="" role="img" class="mat-icon notranslate material-icons mat-icon-no-color" aria-hidden="true" data-mat-icon-type="font">clear</mat-icon>
-          </button>
-        </wf-image-dialog>
-        <!---->
-      </mat-dialog-container>
-      <div tabindex="0" class="cdk-visually-hidden cdk-focus-trap-anchor" aria-hidden="true"></div>
-    </div>
-  </div>
+      <div class="cdk-global-overlay-wrapper">
+        <div class="cdk-overlay-pane wf-image-modal-panel">
+          <mat-dialog-container>
+            <wf-image-dialog>
+              <div class="fixed inset-0 flex items-center justify-center cursor-pointer">
+                <img class="max-h-full object-contain cursor-pointer" src="${imageUrl}=s0">
+              </div>
+              <button class="absolute p-4 text-white dark:text-white" type="button">
+                <mat-icon class="material-icons">clear</mat-icon>
+              </button>
+            </wf-image-dialog>
+          </mat-dialog-container>
+        </div>
+      </div>
     `;
 
         // Append the overlayDiv to the body or a specific container
@@ -1728,223 +2898,611 @@ function init() {
         });
     }
 
-function clearOverlay() {
-    const existingOverlayContainer = document.querySelector('.cdk-overlay-photos-container');
-    if (existingOverlayContainer) {
-        existingOverlayContainer.remove();
-    }
-}
-
-function clearPhotosListBox() {
-    photosListBox.innerHTML = "";
-}
-
-function createPhotoDetailsPane(photoSubmission) {
-    // Clear existing details pane if present
-    const existingPhotoDetailsPane = document.getElementById('photo-details-pane');
-    if (existingPhotoDetailsPane) {
-        existingPhotoDetailsPane.remove();
-    }
-
-    // Extract information from the photoSubmission object
-    const { title, submission, status, imageUrl } = photoSubmission;
-    const submittedTimestamp = photoSubmission.submitted.timestamp;
-    const outcomeTimestamp = photoSubmission.outcome ? photoSubmission.outcome.timestamp : null;
-
-    // Create the details pane structure
-    const detailsPane = document.createElement('photo-details-pane');
-    detailsPane.setAttribute('class', 'nominations__detail');
-    detailsPane.setAttribute('id', 'photo-details-pane');
-    detailsPane.setAttribute(`${ngcontent}-c208`, '');
-    detailsPane.setAttribute(`${nghost}-c207`, '');
-
-    let outcomeHtml = '';
-
-    if (status === 'accepted') {
-        outcomeHtml = `<p ${ngcontent}-c207="" class="mb=4">Accepted: ${formatDate(outcomeTimestamp)}</p>`
-    } else if (status === 'rejected') {
-        outcomeHtml = `<p ${ngcontent}-c207="" class="mb=4">Rejected: ${formatDate(outcomeTimestamp)}</p>`
-    } else {
-        outcomeHtml = `<p ${ngcontent}-c207="" class="mb=4"> </p>`
-    }
-
-    detailsPane.innerHTML = `
-        <div ${ngcontent}-c207="" class="w-full h-full">
-            <div ${ngcontent}-c207="" class="card details-pane dark:bg-gray-800">
-            <div ${ngcontent}-c207="">
-                <div ${ngcontent}-c207="" class="details-header">
-                    <div ${ngcontent}-c207="">
-                        <h4 ${ngcontent}-c207="" >${title}</h4>
-                    </div>
-                </div>
-                <p ${ngcontent}-c207="" class="mb=4">Submitted: ${formatDate(submittedTimestamp)}</p>
-                ${outcomeHtml}
-                <img ${ngcontent}-c207="" role="button" tabindex="0" alt="" wf-image-modal="" class="wf-image-modal details-pane__image" src="${imageUrl}">
-            </div>
-            </div>
+    function createImageOverlay_bkp(imageUrl) {
+        const overlayDiv = document.createElement('div');
+        overlayDiv.classList.add('cdk-overlay-photos-container');
+        overlayDiv.innerHTML = `
+      <div class="cdk-overlay-backdrop wf-image-modal-backdrop cdk-overlay-backdrop-showing"></div>
+      <div class="cdk-global-overlay-wrapper">
+        <div class="cdk-overlay-pane wf-image-modal-panel">
+          <mat-dialog-container>
+            <wf-image-dialog>
+              <div class="fixed inset-0 flex items-center justify-center cursor-pointer">
+                <img class="max-h-full object-contain cursor-pointer" src="${imageUrl}=s0">
+              </div>
+              <button class="absolute p-4 text-white dark:text-white" type="button">
+                <mat-icon class="material-icons">clear</mat-icon>
+              </button>
+            </wf-image-dialog>
+          </mat-dialog-container>
         </div>
+      </div>
     `;
+
+        // Append the overlayDiv to the body or a specific container
+        document.body.appendChild(overlayDiv);
+
+        // Add event listener to the overlay backdrop
+        const overlayBackdrop = document.querySelector('.cdk-global-overlay-wrapper');
+        if (overlayBackdrop) {
+            overlayBackdrop.addEventListener('click', clearOverlay);
+        }
+
+        // Add a click event listener to the image element
+        const imageElement = document.querySelector('.max-h-full');
+        imageElement.addEventListener('click', function () {
+            window.open(`${imageUrl}=s0`, '_blank');
+        });
+    }
+
+    function clearOverlay() {
+        const existingOverlayContainer = document.querySelector('.cdk-overlay-photos-container');
+        if (existingOverlayContainer) {
+            existingOverlayContainer.remove();
+        }
+    }
+
+    function createPhotoDetailsPane(imgUrl) {
+        // Find the corresponding photoSubmission based on the imgUrl
+        const photoSubmission = photoSubmissions.find(submission => submission.imageUrl === imgUrl);
+
+        const l10n = getL10N();
+
+        // Clear existing details pane if present
+        const existingPhotoDetailsPane = document.querySelector('.wfpc-details-pane');
+        if (existingPhotoDetailsPane) {
+            existingPhotoDetailsPane.remove();
+        }
+
+        // Extract information from the photoSubmission object
+        const { title, submission, status, imageUrl } = photoSubmission;
+        const submittedTimestamp = photoSubmission.submitted.timestamp;
+        const outcomeTimestamp = photoSubmission.outcome ? photoSubmission.outcome.timestamp : null;
+
+        const guid = photoSubmission.lightship.guid || '';
+        const description = photoSubmission.lightship.description || '';
+
+        const city = photoSubmission.lightship.city || '';
+        const state = photoSubmission.lightship.state || '';
+        const address = `${city && state ? `${city}, ${state}` : city || state}`;
+
+        const lat = photoSubmission.lightship.lat;
+        const lng = photoSubmission.lightship.lng;
+        const coordinates = (lat && lng) ? `${lat.toFixed(6)},${lng.toFixed(6)}` : '';
+
+        // Create the details pane structure
+        const detailsPane = document.createElement('photo-details-pane');
+        detailsPane.classList.add('wfpc-details-pane');
+
+        const detailsPaneButtonsContainer = document.createElement('photo-details-menu');
+        detailsPaneButtonsContainer.classList.add('wfpc-details-buttons-div');
+
+        if (status === 'rejected') {
+            const appealButton = document.createElement('button');
+            appealButton.classList.add('wf-button', 'wf-button--accent');
+            appealButton.textContent = l10n['nominations.item.appeal'];
+            appealButton.addEventListener('click', function () {
+                handleAppealButton(photoSubmission);
+            });
+            detailsPaneButtonsContainer.appendChild(appealButton);
+        }
+
+        const matchPhotosButton = document.createElement('button');
+        matchPhotosButton.classList.add('wf-button');
+        matchPhotosButton.style.marginLeft = '0.8rem';
+        matchPhotosButton.textContent = strings[language].linkPhotos;
+        matchPhotosButton.addEventListener('click', function () {
+            createMatchPhotoOverlay(photoSubmission);
+        });
+        detailsPaneButtonsContainer.appendChild(matchPhotosButton);
+
+        const editMetadataButton = document.createElement('button');
+        editMetadataButton.classList.add('wf-button');
+        editMetadataButton.style.marginLeft = '0.8rem';
+        editMetadataButton.textContent = strings[language].editData;
+        editMetadataButton.addEventListener('click', function () {
+            createMetadataEditOverlay(photoSubmission);
+        });
+        detailsPaneButtonsContainer.appendChild(editMetadataButton);
+
+        const importButton = document.createElement('button');
+        importButton.classList.add('wf-button');
+        importButton.style.marginLeft = '0.8rem';
+        importButton.textContent = strings[language].importData;
+        importButton.addEventListener('click', function () {
+            createImportDataOverlay(photoSubmission);
+        });
+        detailsPaneButtonsContainer.appendChild(importButton);
+
+        detailsPane.appendChild(detailsPaneButtonsContainer);
+
+        const detailsPaneInner = document.createElement('div');
+        detailsPaneInner.classList.add('wfpc-details-pane-card', 'card', 'dark:bg-gray-800');
+
+        detailsPane.appendChild(detailsPaneInner);
+
+        // Create the header div containing the title
+        const detailsHeaderDiv = document.createElement('div');
+        detailsHeaderDiv.classList.add('wfpc-details-header');
+
+        const innerHeaderDiv = document.createElement('div');
+
+        const h4Element = document.createElement('h4');
+        h4Element.textContent = title;
+
+        if (coordinates) {
+            const intelLink = document.createElement('a');
+            intelLink.setAttribute('href', `https://intel.ingress.com/?ll=${coordinates}&z=16`);
+            intelLink.setAttribute('target', '_blank');
+            intelLink.setAttribute('title', 'Open in Intel');
+            h4Element.setAttribute('style', 'color: rgba(59,130,246,var(--tw-text-opacity)) !important;');
+
+            intelLink.appendChild(h4Element);
+            innerHeaderDiv.appendChild(intelLink);
+        } else {
+            innerHeaderDiv.appendChild(h4Element);
+        }
+
+        detailsHeaderDiv.appendChild(innerHeaderDiv);
+        detailsPaneInner.appendChild(detailsHeaderDiv);
+
+        // Create the address and coordinates text (if data is present)
+        const addressParagraph = document.createElement('p');
+        addressParagraph.classList.add('wfpc-details-address');
+
+        if (address) {
+            addressParagraph.textContent = `${address} `;
+        }
+
+        if (coordinates) {
+            addressParagraph.textContent += `(${coordinates})`;
+            addressParagraph.style.cursor = 'pointer';
+            addressParagraph.setAttribute('title', 'Copy coordinates to clipboard');
+            addressParagraph.addEventListener('click', () => {
+                navigator.clipboard.writeText(coordinates);
+            });
+        }
+
+        detailsPaneInner.appendChild(addressParagraph);
+
+        // Create the outcome coloured box
+        let statusClass = status === 'pending' ? 'queue' : status;
+
+        const tagSetElement = document.createElement('app-nomination-tag-set');
+        tagSetElement.setAttribute('class', 'flex flex-row');
+        const tagElement = document.createElement('app-nomination-tag');
+        const divElement = document.createElement('div');
+        divElement.setAttribute('class', 'nomination-tag');
+        const spanElement = document.createElement('span');
+        spanElement.setAttribute('class', `nomination-tag--${statusClass}`);
+
+        const outcomeText = status === "pending"
+        ? strings[language].pending
+        : status === "accepted"
+        ? l10n['nominations.status.accepted']
+        : status === "rejected"
+        ? l10n['nominations.status.notaccepted']
+        : strings[language].pending; // Default text if none of the conditions match
+        spanElement.textContent = outcomeText;
+
+        divElement.appendChild(spanElement);
+        tagElement.appendChild(divElement);
+        tagSetElement.appendChild(tagElement);
+
+        const outcomeDisplayDiv = document.createElement('div');
+        outcomeDisplayDiv.classList.add('wfpc-details-outcome-div');
+
+        outcomeDisplayDiv.appendChild(tagSetElement);
+        detailsPaneInner.appendChild(outcomeDisplayDiv);
+
+        // Create the drop down for the submitted date and decision date
+        // Utilise same system as Nomination Status History for consistency.
+        const wfpcDropdown = document.createElement('div');
+        wfpcDropdown.setAttribute('class', 'wfpcDropdown');
+
+        const wfpcDDLeftBox = document.createElement('a');
+        wfpcDDLeftBox.setAttribute('class', 'wfpcDDLeftBox');
+        wfpcDDLeftBox.textContent = '▶';
+
+        const wfpcDDRightBox = document.createElement('div');
+        wfpcDDRightBox.setAttribute('class', 'wfpcDDRightBox');
+
+        const wfpcOneLineParagraph = document.createElement('p');
+        wfpcOneLineParagraph.setAttribute('class', 'wfpcOneLine');
+        wfpcOneLineParagraph.style.display = 'block';
+
+        const wfpcInnerDiv = document.createElement('div');
+        wfpcInnerDiv.setAttribute('class', 'wfpcInner');
+        wfpcInnerDiv.style.display = 'none';
+
+        if (status === 'pending') {
+            wfpcOneLineParagraph.textContent = `${formatDate(submittedTimestamp)} - ${strings[language].submitted}`;
+            wfpcInnerDiv.innerHTML = `<p>${formatDate(submittedTimestamp)} - ${strings[language].submitted}</p>`;
+        } else if (status === 'accepted') {
+            wfpcOneLineParagraph.textContent = `${formatDate(outcomeTimestamp)} - ${l10n['nominations.status.accepted']}`;
+            wfpcInnerDiv.innerHTML = `<p>${formatDate(submittedTimestamp)} - ${strings[language].submitted}</p>
+                                   <p>${formatDate(outcomeTimestamp)} - ${l10n['nominations.status.accepted']}</p>`;
+        } else if (status === 'rejected') {
+            wfpcOneLineParagraph.textContent = `${formatDate(outcomeTimestamp)} - ${l10n['nominations.status.notaccepted']}`;
+            wfpcInnerDiv.innerHTML = `<p>${formatDate(submittedTimestamp)} - ${strings[language].submitted}</p>
+                                   <p>${formatDate(outcomeTimestamp)} - ${l10n['nominations.status.notaccepted']}</p>`;
+        }
+
+        wfpcDDRightBox.appendChild(wfpcOneLineParagraph);
+        wfpcDDRightBox.appendChild(wfpcInnerDiv);
+
+        wfpcDropdown.appendChild(wfpcDDLeftBox);
+        wfpcDropdown.appendChild(wfpcDDRightBox);
+
+        outcomeDisplayDiv.appendChild(wfpcDropdown);
+
+        wfpcDropdown.addEventListener('click', () => {
+            wfpcOneLineParagraph.style.display = (wfpcOneLineParagraph.style.display === 'none') ? 'block' : 'none';
+            wfpcInnerDiv.style.display = (wfpcInnerDiv.style.display === 'none') ? 'block' : 'none';
+            wfpcDDLeftBox.textContent = (wfpcDDLeftBox.textContent === '▶') ? '▼' : '▶';
+        });
+
+        // Create and append the image element
+        const imageElement = document.createElement('img');
+        imageElement.classList.add('wfpc-details-image');
+        imageElement.setAttribute('role', 'button');
+        imageElement.setAttribute('src', imageUrl);
+        imageElement.addEventListener('click', function () {
+            createImageOverlay(imageUrl);
+        });
+
+        detailsPaneInner.appendChild(imageElement);
+
+        // Create the description section if it exists
+        if (description) {
+            const descriptionSection = document.createElement('div');
+            descriptionSection.classList.add('wfpc-details-description-div');
+
+            const descriptionHeader = document.createElement('h5');
+            descriptionHeader.classList.add('wfpc-details-description-header');
+            descriptionHeader.textContent = l10n['nominations.item.description'];
+
+            const descriptionDiv = document.createElement('div');
+            descriptionDiv.textContent = description;
+
+            descriptionSection.appendChild(descriptionHeader);
+            descriptionSection.appendChild(descriptionDiv);
+
+            detailsPaneInner.appendChild(descriptionSection);
+        }
 
         // Find the parent of wf-page-header
         const pageHeaderParent = document.querySelector('wf-page-header').parentNode;
 
         // Attach the details pane as the next sibling of the parent
         pageHeaderParent.parentNode.insertBefore(detailsPane, pageHeaderParent.nextSibling);
-
-        // Get the elements with the class 'details-pane__image'
-        const imageElements = document.querySelectorAll('.details-pane__image');
-
-        // Add a click event listener to each image element
-        imageElements.forEach(imageElement => {
-            imageElement.addEventListener('click', function () {
-                // Get the imageUrl from the 'src' attribute of the clicked image
-                const imageUrl = this.getAttribute('src');
-
-                // Call createImageOverlay with the imageUrl
-                createImageOverlay(imageUrl);
-            });
-        });
     }
 
-function formatDate(timestamp) {
-    if (!timestamp) return '-';
+    // Function to create metadata edit overlay
+    function createMetadataEditOverlay(submission) {
+        const l10n = getL10N();
 
-    const date = new Date(timestamp);
-    const options = { year: 'numeric', month: 'short', day: 'numeric' };
-    return date.toLocaleDateString(undefined, options);
-}
+        const {
+            title = '',
+            status = '',
+            submittedTimestamp = '',
+            outcomeTimestamp = '',
+            lightship: {
+                description = '',
+                lat = '',
+                lng = '',
+                city = '',
+                state = ''
+            } = {}
+        } = submission;
 
-// Function to append custom styles
-function appendCustomStyles() {
-    const styleElement = document.createElement('style');
-    styleElement.textContent = `
+        const latRounded = (lat) ? lat.toFixed(6) : '';
+        const lngRounded = (lng) ? lng.toFixed(6) : ''
 
-    .hidden-list {
-    display: none !important;
-}
-            .photoTopButton {
-                background-color: #e5e5e5;
-                border: none;
-                color: #ff4713;
-                padding: 10px 10px;
-                margin: 10px;
-                text-align: center;
-                text-decoration: none;
-                display: inline-block;
-                font-size: 16px;
-                cursor: pointer;
-            }
-            .photoMethodButton {
-                background-color: #e5e5e5;
-                border: none;
-                padding: 10px 10px;
-                cursor: pointer;
-                width: 100%;
-                background-size: 30px;
-                background-position: 15px;
-                background-repeat: no-repeat;
-                margin-bottom: 10px;
-            }
-            .photoMethodButton .photoMethodTitle {
-                color: #ff4713;
-                font-size: 16px;
-            }
-            .photoMethodButton .photoMethodDesc {
-                font-size: 12px;
-            }
-            .photoCancelButton {
-                color: #000000;
-            }
-            .photoGAScriptTable {
-                width: 100%;
-            }
-            .photoGAScriptTable td {
-                border: none;
-            }
-            .photoGAScriptTable input {
-                background-color: #ddd;
-                width: 100%;
-                padding: 5px;
-            }
-            .dark .photoGAScriptTable input {
-                background-color: #222;
-            }
+        // Create content for the overlay
+        function createOverlayContent() {
+            const appNominationsSortModal = document.createElement('app-nominations-sort-modal');
 
-            .dark .photoTopButton {
-                background-color: #404040;
-                color: #20B8E3;
-            }
-            .dark .photoCancelButton {
-                color: #ff0000;
-            }
-            .dark .photoMethodButton {
-                background-color: #404040;
-            }
-            .dark .photoMethodButton .photoMethodTitle {
-                color: #20B8E3;
-            }
+            // Create div for Wayspot details
+            const wayspotDetailsDiv = document.createElement('div');
+            wayspotDetailsDiv.classList.add('details-div');
+            wayspotDetailsDiv.classList.add('mt-2');
 
-            .photoImportBg {
-                position: fixed;
-                top: 0;
-                left: 0;
-                height: 100vh;
-                width: 100vw;
-                background-color: rgba(0,0,0,0.5);
-                z-index: 100000;
-            }
-            .photoImportInner {
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                transform: translateX(-50%) translateY(-50%);
-                width: calc(100vw - 50px);
-                height: calc(100vh - 50px);
-                overflow-x: hidden;
-                overflow-y: scroll;
-                background-color: #fff;
-                padding: 20px;
-                max-width: 900px;
-                max-height: 500px;
-            }
-            .photoImportMethod {
-                max-width: 500px;
-                height: initial;
-            }
-            .photoImportGAScriptOptions {
-                max-width: 700px;
-                height: initial;
-            }
-            .dark .photoImportInner {
-                background-color: #333;
-            }
-            .photoImportInner h3 {
-                font-weight: bold;
-                margin: 10px auto;
-            }
-            .photoImportInner > p {
-                margin: 10px auto;
-            }
-            .photoImportLoading {
-                text-align: center;
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                transform: translateX(-50%) translateY(-50%);
-                padding: 20px;
-                background-color: #fff;
-            }
-            .dark .photoImportLoading {
-                background-color: #333;
-            }
-            .photoImportLoading h2 {
-                margin-bottom: 10px;
-            }
-            .photoImportEntry {
-                margin: 10px 0;
+            // Create header
+            const header = document.createElement('h4');
+            header.textContent = strings[language].editData;
+            header.classList.add('mb-4');
+            wayspotDetailsDiv.appendChild(header);
+
+            // Usage
+            const wayspotDetailsTable = document.createElement('table');
+            const wayspotDetailsTbody = document.createElement('tbody');
+
+            // Row 1
+            wayspotDetailsTbody.appendChild(createTableRow([
+                document.createTextNode(`${l10n['nominations.item.title']}${strings[language].formSeparator}`),
+                createInputElement('input', 'text', 'title', title)
+            ], 3));
+
+            // Row 2
+            wayspotDetailsTbody.appendChild(createTableRow([
+                document.createTextNode(`${l10n['nominations.item.description']}${strings[language].formSeparator}`),
+                createInputElement('textarea', '', 'description', description, 3)
+            ], 4));
+
+            // Row 3
+            wayspotDetailsTbody.appendChild(createTableRow([
+                document.createTextNode(`${strings[language].latitude}${strings[language].formSeparator}`),
+                createInputElement('input', 'number', 'latitude', latRounded),
+                document.createTextNode(`${strings[language].longitude}${strings[language].formSeparator}`),
+                createInputElement('input', 'number', 'longitude', lngRounded)
+            ]));
+
+            // Row 4
+            wayspotDetailsTbody.appendChild(createTableRow([
+                document.createTextNode(`${strings[language].city}${strings[language].formSeparator}`),
+                createInputElement('input', 'text', 'city', city),
+                document.createTextNode(`${strings[language].state}${strings[language].formSeparator}`),
+                createInputElement('input', 'text', 'state', state)
+            ]));
+
+            wayspotDetailsTable.appendChild(wayspotDetailsTbody);
+            wayspotDetailsDiv.appendChild(wayspotDetailsTable);
+
+            // Create buttons div
+            const buttonsContainerDiv = createButtonsContainer('metadata_cancel', l10n['nominations.btns.cancel'], 'metadata_accept', l10n['settings.button.save'], function() {
+                handleWayspotDataSaveButton(submission);
+            });
+
+            // Append Wayspot and Photo details divs, buttons div to app-nominations-sort-modal
+            appNominationsSortModal.appendChild(wayspotDetailsDiv);
+            appNominationsSortModal.appendChild(buttonsContainerDiv);
+
+            return appNominationsSortModal;
+        }
+
+        // Use the createOverlayContainer function with the callback
+        const newOverlayContainer = createOverlayContainer('550px', createOverlayContent);
+
+        // Append the new overlay container to the end of the body
+        document.body.appendChild(newOverlayContainer);
+    }
+
+    // Helper function to create a table row in details table
+    function createTableRow(cells, colspan) {
+        const row = document.createElement('tr');
+
+        cells.forEach((cell, index) => {
+            const cellElement = document.createElement('td');
+            cellElement.classList.add('wfpc-table-cell');
+
+            // Set colspan for the input cells in the first and second rows
+            if (colspan && (index === 1 || index === 3)) {
+                cellElement.colSpan = colspan;
             }
 
-.mat-dialog-container{display:block;padding:24px;border-radius:4px;box-sizing:border-box;overflow:auto;outline:0;width:100%;height:100%;min-height:inherit;max-height:inherit}.cdk-high-contrast-active .mat-dialog-container{outline:solid 1px}.mat-dialog-content{display:block;margin:0 -24px;padding:0 24px;max-height:65vh;overflow:auto;-webkit-overflow-scrolling:touch}.mat-dialog-title{margin:0 0 20px;display:block}.mat-dialog-actions{padding:8px 0;display:flex;flex-wrap:wrap;min-height:52px;align-items:center;box-sizing:content-box;margin-bottom:-24px}.mat-dialog-actions[align=end]{justify-content:flex-end}.mat-dialog-actions[align=center]{justify-content:center}.mat-dialog-actions .mat-button-base+.mat-button-base,.mat-dialog-actions .mat-mdc-button-base+.mat-mdc-button-base{margin-left:8px}[dir=rtl] .mat-dialog-actions .mat-button-base+.mat-button-base,[dir=rtl] .mat-dialog-actions .mat-mdc-button-base+.mat-mdc-button-base{margin-left:0;margin-right:8px}
+            cellElement.appendChild(cell);
+            row.appendChild(cellElement);
+        });
+
+        return row;
+    }
+
+    // Helper function to create input element
+    function createInputElement(input, type, id, value, rows) {
+        const inputElement = document.createElement(input);
+        inputElement.type = type;
+        inputElement.id = id;
+        inputElement.value = value;
+        inputElement.classList.add('wfpc-input', 'border-black');
+
+        if (input === 'textarea') {
+            inputElement.rows = rows;
+        }
+
+        return inputElement;
+    }
+
+    // Helper function to create a row in details div
+    function createRow(...rowInputs) {
+        const rowDiv = document.createElement('div');
+        rowDiv.classList.add('details-row', 'flex', 'flex-row', 'mt-2');
+
+        rowInputs.forEach(({ labelText, inputElement }) => {
+            const labelDiv = document.createElement('div');
+            labelDiv.classList.add('details-label');
+            labelDiv.textContent = labelText;
+
+            const inputDiv = document.createElement('div');
+            inputDiv.classList.add('details-input');
+
+            // Ensure inputElement is a valid node before appending
+            if (inputElement instanceof Node) {
+                inputDiv.appendChild(inputElement);
+            } else {
+                console.error('Invalid inputElement:', inputElement);
+            }
+
+            rowDiv.appendChild(labelDiv);
+            rowDiv.appendChild(inputDiv);
+        });
+
+        return rowDiv;
+    }
+
+    // Function to handle saving Wayspot data
+    function handleWayspotDataSaveButton(thisSubmission) {
+        // Get input values
+        const titleInput = document.getElementById('title');
+        const descriptionInput = document.getElementById('description');
+        const latitudeInput = document.getElementById('latitude');
+        const longitudeInput = document.getElementById('longitude');
+        const cityInput = document.getElementById('city');
+        const stateInput = document.getElementById('state');
+
+        // Save inputs to thisSubmission.lightship
+        thisSubmission.lightship.title = titleInput.value || '';
+        thisSubmission.lightship.description = descriptionInput.value || '';
+        thisSubmission.lightship.lat = latitudeInput.value ? parseFloat(latitudeInput.value) : '';
+        thisSubmission.lightship.lng = longitudeInput.value ? parseFloat(longitudeInput.value) : '';
+        thisSubmission.lightship.city = cityInput.value || '';
+        thisSubmission.lightship.state = stateInput.value || '';
+
+        // Set lastImported timestamp
+        thisSubmission.lightship._lastImported = Date.now();
+
+        // Call functions
+        synchronizeLightshipData(thisSubmission);
+        clearOverlay();
+    }
+
+    // Function to process imported data
+    function processImportedData(thisSubmission, json) {
+        // Check if the textarea is empty
+        if (json.trim() === '') {
+            // If empty, directly clear the overlay
+            clearOverlay();
+            return;
+        }
+
+        try {
+            // Try to parse the JSON data
+            const importedData = JSON.parse(json);
+
+            // Check if importedData is an object
+            if (typeof importedData === 'object' && importedData !== null) {
+                // Check for the existence of specific fields and assign them if they exist
+                thisSubmission.lightship.guid = importedData.guid || thisSubmission.lightship.guid;
+                thisSubmission.lightship.title = importedData.title || thisSubmission.lightship.title;
+                thisSubmission.lightship.description = importedData.description || thisSubmission.lightship.description;
+                thisSubmission.lightship.lat = importedData.lat || thisSubmission.lightship.lat;
+                thisSubmission.lightship.lng = importedData.lng || thisSubmission.lightship.lng;
+                thisSubmission.lightship.city = importedData.city || thisSubmission.lightship.city;
+                thisSubmission.lightship.state = importedData.state || thisSubmission.lightship.state;
+                thisSubmission.lightship.country = importedData.country || thisSubmission.lightship.country;
+                thisSubmission.lightship._lastImported = Date.now();
+
+                // Call synchronizeLightshipData
+                synchronizeLightshipData(thisSubmission);
+
+                // Clear the overlay
+                clearOverlay();
+            } else {
+                // Display a warning message if the parsed data is not an object
+                alert('Invalid JSON format. Please provide a valid JSON object.');
+            }
+        } catch (error) {
+            // Handle any parsing errors
+            console.error('Error parsing JSON:', error);
+            alert('Error parsing JSON. Please provide valid JSON data.');
+        }
+    }
+
+    function handleAppealButton(submission) {
+        const {
+            title = '[Title]',
+            lightship: {
+                lat = '',
+                lng = '',
+                city = '[City]',
+                country = '[Country]',
+            } = {}
+        } = submission;
+
+        const coordinates = (lat && lng) ? `${lat.toFixed(6)},${lng.toFixed(6)}` : '[Lat/Long]';
+
+        const appealString = `Title of the Wayspot: ${title}
+
+Location: ${coordinates}
+
+City: ${city}
+
+Country: ${country}
+
+Screenshot of the Rejection Email: [Attach Screenshot]
+
+Photos to support your claim: [Attach photo]
+
+Additional information: [If you have more explanations, add them here]`;
+
+        navigator.clipboard.writeText(appealString);
+
+        window.open('https://community.wayfarer.nianticlabs.com/post/discussion/wayspot-photo', '_blank')
+    }
+
+    function formatDate(timestamp) {
+        if (!timestamp) return '-';
+
+        const date = new Date(timestamp);
+        const options = { year: 'numeric', month: 'short', day: 'numeric' };
+        return date.toLocaleDateString(undefined, options);
+    }
+
+    // Imports css associated with the filter overlay
+    // This is normally generated the first time you click the filter button
+    function appendFilterCssStyles() {
+        const styleElement = document.createElement('style');
+        styleElement.textContent = `
+  .mat-dialog-container {
+    display: block;
+    padding: 24px;
+    border-radius: 4px;
+    box-sizing: border-box;
+    overflow: auto;
+    outline: 0;
+    width: 100%;
+    height: 100%;
+    min-height: inherit;
+    max-height: inherit
+  }
+
+  .cdk-high-contrast-active .mat-dialog-container {
+    outline: solid 1px
+  }
+
+  .mat-dialog-content {
+    display: block;
+    margin: 0 -24px;
+    padding: 0 24px;
+    max-height: 65vh;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch
+  }
+
+  .mat-dialog-title {
+    margin: 0 0 20px;
+    display: block
+  }
+
+  .mat-dialog-actions {
+    padding: 8px 0;
+    display: flex;
+    flex-wrap: wrap;
+    min-height: 52px;
+    align-items: center;
+    box-sizing: content-box;
+    margin-bottom: -24px
+  }
+
+  .mat-dialog-actions[align=end] {
+    justify-content: flex-end
+  }
+
+  .mat-dialog-actions[align=center] {
+    justify-content: center
+  }
+
+  .mat-dialog-actions .mat-button-base+.mat-button-base,
+  .mat-dialog-actions .mat-mdc-button-base+.mat-mdc-button-base {
+    margin-left: 8px
+  }
+
+  [dir=rtl] .mat-dialog-actions .mat-button-base+.mat-button-base,
+  [dir=rtl] .mat-dialog-actions .mat-mdc-button-base+.mat-mdc-button-base {
+    margin-left: 0;
+    margin-right: 8px
+  }
+
   .sort-modal__statuses[${ngcontent}-c190] {
     display: flex;
     flex-direction: column;
@@ -2384,244 +3942,408 @@ function appendCustomStyles() {
 
   .mat-checkbox-checkmark-path {
     stroke-dashoffset: 22.910259;
-    stroke-dasharray: 22.910259;
-    stroke-width: 2.1333333333px
+      stroke-dasharray: 22.910259;
+      stroke-width: 2.1333333333px
   }
 
-  .cdk-high-contrast-black-on-white .mat-checkbox-checkmark-path {
-    stroke: #000 !important
+      .cdk-high-contrast-black-on-white .mat-checkbox-checkmark-path {
+          stroke: #000 !important
+      }
+
+      .mat-checkbox-mixedmark {
+          width: calc(100% - 6px);
+          height: 2px;
+          opacity: 0;
+          transform: scaleX(0) rotate(0deg);
+          border-radius: 2px
+      }
+
+      .cdk-high-contrast-active .mat-checkbox-mixedmark {
+          height: 0;
+          border-top: solid 2px;
+          margin-top: 2px
+      }
+
+      .mat-checkbox-label-before .mat-checkbox-inner-container {
+          order: 1;
+          margin-left: 8px;
+          margin-right: auto
+      }
+
+      [dir=rtl] .mat-checkbox-label-before .mat-checkbox-inner-container {
+          margin-left: auto;
+          margin-right: 8px
+      }
+
+      .mat-checkbox-checked .mat-checkbox-checkmark {
+          opacity: 1
+      }
+
+      .mat-checkbox-checked .mat-checkbox-checkmark-path {
+          stroke-dashoffset: 0
+      }
+
+      .mat-checkbox-checked .mat-checkbox-mixedmark {
+          transform: scaleX(1) rotate(-45deg)
+      }
+
+      .mat-checkbox-indeterminate .mat-checkbox-checkmark {
+          opacity: 0;
+          transform: rotate(45deg)
+      }
+
+      .mat-checkbox-indeterminate .mat-checkbox-checkmark-path {
+          stroke-dashoffset: 0
+      }
+
+      .mat-checkbox-indeterminate .mat-checkbox-mixedmark {
+          opacity: 1;
+          transform: scaleX(1) rotate(0deg)
+      }
+
+      .mat-checkbox-unchecked .mat-checkbox-background {
+          background-color: transparent
+      }
+
+      .mat-checkbox-disabled {
+          cursor: default
+      }
+
+      .cdk-high-contrast-active .mat-checkbox-disabled {
+          opacity: .5
+      }
+
+      .mat-checkbox-anim-unchecked-checked .mat-checkbox-background {
+          animation: 180ms linear 0ms mat-checkbox-fade-in-background
+      }
+
+      .mat-checkbox-anim-unchecked-checked .mat-checkbox-checkmark-path {
+          animation: 180ms linear 0ms mat-checkbox-unchecked-checked-checkmark-path
+      }
+
+      .mat-checkbox-anim-unchecked-indeterminate .mat-checkbox-background {
+          animation: 180ms linear 0ms mat-checkbox-fade-in-background
+      }
+
+      .mat-checkbox-anim-unchecked-indeterminate .mat-checkbox-mixedmark {
+          animation: 90ms linear 0ms mat-checkbox-unchecked-indeterminate-mixedmark
+      }
+
+      .mat-checkbox-anim-checked-unchecked .mat-checkbox-background {
+          animation: 180ms linear 0ms mat-checkbox-fade-out-background
+      }
+
+      .mat-checkbox-anim-checked-unchecked .mat-checkbox-checkmark-path {
+          animation: 90ms linear 0ms mat-checkbox-checked-unchecked-checkmark-path
+      }
+
+      .mat-checkbox-anim-checked-indeterminate .mat-checkbox-checkmark {
+          animation: 90ms linear 0ms mat-checkbox-checked-indeterminate-checkmark
+      }
+
+      .mat-checkbox-anim-checked-indeterminate .mat-checkbox-mixedmark {
+          animation: 90ms linear 0ms mat-checkbox-checked-indeterminate-mixedmark
+      }
+
+      .mat-checkbox-anim-indeterminate-checked .mat-checkbox-checkmark {
+          animation: 500ms linear 0ms mat-checkbox-indeterminate-checked-checkmark
+      }
+
+      .mat-checkbox-anim-indeterminate-checked .mat-checkbox-mixedmark {
+          animation: 500ms linear 0ms mat-checkbox-indeterminate-checked-mixedmark
+      }
+
+      .mat-checkbox-anim-indeterminate-unchecked .mat-checkbox-background {
+          animation: 180ms linear 0ms mat-checkbox-fade-out-background
+      }
+
+      .mat-checkbox-anim-indeterminate-unchecked .mat-checkbox-mixedmark {
+          animation: 300ms linear 0ms mat-checkbox-indeterminate-unchecked-mixedmark
+      }
+
+      .mat-checkbox-input {
+          bottom: 0;
+          left: 50%
+      }
+
+              .mat-checkbox .mat-checkbox-ripple {
+                  position: absolute;
+                  left: calc(50% - 20px);
+                  top: calc(50% - 20px);
+                  height: 40px;
+                  width: 40px;
+                  z-index: 1;
+                  pointer-events: none
+              }
+          `;
+
+        document.head.appendChild(styleElement);
+    }
+
+    function appendCustomCssStyles() {
+        const styleElement = document.createElement('style');
+        styleElement.textContent = `
+  .hidden-list {
+    display: none !important;
   }
 
-  .mat-checkbox-mixedmark {
-    width: calc(100% - 6px);
-    height: 2px;
-    opacity: 0;
-    transform: scaleX(0) rotate(0deg);
-    border-radius: 2px
+  .photoTopButton {
+    background-color: #e5e5e5;
+    border: none;
+    color: #ff4713;
+    padding: 10px 10px;
+    margin: 10px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 16px;
+    cursor: pointer;
   }
 
-  .cdk-high-contrast-active .mat-checkbox-mixedmark {
-    height: 0;
-    border-top: solid 2px;
-    margin-top: 2px
-  }
-
-  .mat-checkbox-label-before .mat-checkbox-inner-container {
-    order: 1;
-    margin-left: 8px;
-    margin-right: auto
-  }
-
-  [dir=rtl] .mat-checkbox-label-before .mat-checkbox-inner-container {
-    margin-left: auto;
-    margin-right: 8px
-  }
-
-  .mat-checkbox-checked .mat-checkbox-checkmark {
-    opacity: 1
-  }
-
-  .mat-checkbox-checked .mat-checkbox-checkmark-path {
-    stroke-dashoffset: 0
-  }
-
-  .mat-checkbox-checked .mat-checkbox-mixedmark {
-    transform: scaleX(1) rotate(-45deg)
-  }
-
-  .mat-checkbox-indeterminate .mat-checkbox-checkmark {
-    opacity: 0;
-    transform: rotate(45deg)
-  }
-
-  .mat-checkbox-indeterminate .mat-checkbox-checkmark-path {
-    stroke-dashoffset: 0
-  }
-
-  .mat-checkbox-indeterminate .mat-checkbox-mixedmark {
-    opacity: 1;
-    transform: scaleX(1) rotate(0deg)
-  }
-
-  .mat-checkbox-unchecked .mat-checkbox-background {
-    background-color: transparent
-  }
-
-  .mat-checkbox-disabled {
-    cursor: default
-  }
-
-  .cdk-high-contrast-active .mat-checkbox-disabled {
-    opacity: .5
-  }
-
-  .mat-checkbox-anim-unchecked-checked .mat-checkbox-background {
-    animation: 180ms linear 0ms mat-checkbox-fade-in-background
-  }
-
-  .mat-checkbox-anim-unchecked-checked .mat-checkbox-checkmark-path {
-    animation: 180ms linear 0ms mat-checkbox-unchecked-checked-checkmark-path
-  }
-
-  .mat-checkbox-anim-unchecked-indeterminate .mat-checkbox-background {
-    animation: 180ms linear 0ms mat-checkbox-fade-in-background
-  }
-
-  .mat-checkbox-anim-unchecked-indeterminate .mat-checkbox-mixedmark {
-    animation: 90ms linear 0ms mat-checkbox-unchecked-indeterminate-mixedmark
-  }
-
-  .mat-checkbox-anim-checked-unchecked .mat-checkbox-background {
-    animation: 180ms linear 0ms mat-checkbox-fade-out-background
-  }
-
-  .mat-checkbox-anim-checked-unchecked .mat-checkbox-checkmark-path {
-    animation: 90ms linear 0ms mat-checkbox-checked-unchecked-checkmark-path
-  }
-
-  .mat-checkbox-anim-checked-indeterminate .mat-checkbox-checkmark {
-    animation: 90ms linear 0ms mat-checkbox-checked-indeterminate-checkmark
-  }
-
-  .mat-checkbox-anim-checked-indeterminate .mat-checkbox-mixedmark {
-    animation: 90ms linear 0ms mat-checkbox-checked-indeterminate-mixedmark
-  }
-
-  .mat-checkbox-anim-indeterminate-checked .mat-checkbox-checkmark {
-    animation: 500ms linear 0ms mat-checkbox-indeterminate-checked-checkmark
-  }
-
-  .mat-checkbox-anim-indeterminate-checked .mat-checkbox-mixedmark {
-    animation: 500ms linear 0ms mat-checkbox-indeterminate-checked-mixedmark
-  }
-
-  .mat-checkbox-anim-indeterminate-unchecked .mat-checkbox-background {
-    animation: 180ms linear 0ms mat-checkbox-fade-out-background
-  }
-
-  .mat-checkbox-anim-indeterminate-unchecked .mat-checkbox-mixedmark {
-    animation: 300ms linear 0ms mat-checkbox-indeterminate-unchecked-mixedmark
-  }
-
-  .mat-checkbox-input {
-    bottom: 0;
-    left: 50%
-  }
-
-  .mat-checkbox .mat-checkbox-ripple {
-    position: absolute;
-    left: calc(50% - 20px);
-    top: calc(50% - 20px);
-    height: 40px;
-    width: 40px;
-    z-index: 1;
-    pointer-events: none
-  }
-
-  .details-pane[${ngcontent}-c207] {
-    display: flex;
-    height: 100%;
+  .photoMethodButton {
+    background-color: #e5e5e5;
+    border: none;
+    padding: 10px 10px;
+    cursor: pointer;
     width: 100%;
-    flex-direction: column;
-    padding: 2rem
+    background-size: 30px;
+    background-position: 15px;
+    background-repeat: no-repeat;
+    margin-bottom: 10px;
   }
 
-  .details-pane[${ngcontent}-c207]>div[${ngcontent}-c207],
-  .details-pane[${ngcontent}-c207]>h4[${ngcontent}-c207],
-  .details-pane[${ngcontent}-c207]>img[${ngcontent}-c207],
-  .details-pane[${ngcontent}-c207]>p[${ngcontent}-c207] {
-    margin-bottom: 1rem
+  .photoMethodButton .photoMethodTitle {
+    color: #ff4713;
+    font-size: 16px;
   }
 
-  .details-pane__section[${ngcontent}-c207] {
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between
+  .photoMethodButton .photoMethodDesc {
+    font-size: 12px;
   }
 
-  .details-pane__section[${ngcontent}-c207] h5[${ngcontent}-c207] {
-    margin-bottom: .5rem;
-    font-size: .875rem;
-    line-height: 1.25rem;
-    --tw-text-opacity: 1;
-    color: rgba(115, 115, 115, var(--tw-text-opacity))
+  .photoCancelButton {
+    color: #000000;
   }
 
-  .nightwind[${ngcontent}-c207] .details-pane__section[${ngcontent}-c207] h5[${ngcontent}-c207] {
-    transition-duration: .3s;
-    transition-property: background-color, border-color, color, fill, stroke
+  .photoGAScriptTable {
+    width: 100%;
   }
 
-  .dark[${ngcontent}-c207] .details-pane__section[${ngcontent}-c207] h5[${ngcontent}-c207] {
-    color: rgba(163, 163, 163, var(--tw-text-opacity))
+  .photoGAScriptTable td {
+    border: none;
   }
 
-  .dark[${ngcontent}-c207] .details-pane__section[${ngcontent}-c207] h5.nightwind-prevent[${ngcontent}-c207],
-  .dark[${ngcontent}-c207] .nightwind-prevent-block[${ngcontent}-c207] .details-pane__section[${ngcontent}-c207] h5[${ngcontent}-c207] {
-    color: rgba(115, 115, 115, var(--tw-text-opacity))
+  .photoGAScriptTable input {
+    background-color: #ddd;
+    width: 100%;
+    padding: 5px;
   }
 
-  .details-pane__map[${ngcontent}-c207] {
-    display: flex;
-    flex-grow: 1;
-    max-width: 100%;
-    min-height: 30rem
+  .dark .photoGAScriptTable input {
+    background-color: #222;
   }
 
-  .details-pane__image[${ngcontent}-c207] {
-    margin-left: auto;
-    margin-right: auto;
-    border-radius: .25rem;
-    max-height: 50vh
+  .dark .photoTopButton {
+    background-color: #404040;
+    color: #20B8E3;
   }
 
-  .details-header[${ngcontent}-c207] {
-    margin-top: 1rem;
-    margin-bottom: 2rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between
+  .dark .photoCancelButton {
+    color: #ff0000;
   }
 
-  [{$nghost}-c205] {
-    display: flex;
-    flex-direction: column
+  .dark .photoMethodButton {
+    background-color: #404040;
   }
 
-  [{$nghost}-c205]>[${ngcontent}-c205]:not([hidden])~[${ngcontent}-c205]:not([hidden]) {
-    --tw-space-y-reverse: 0;
-    margin-top: calc(1rem * calc(1 - var(--tw-space-y-reverse)));
-    margin-bottom: calc(1rem * var(--tw-space-y-reverse))
+  .dark .photoMethodButton .photoMethodTitle {
+    color: #20B8E3;
   }
 
-  @media (min-width:640px) {
-    [{$nghost}-c205] {
-      flex-direction: row
-    }
+  .photoImportBg {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    width: 100vw;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 100000;
+  }
 
-    [{$nghost}-c205]>[${ngcontent}-c205]:not([hidden])~[${ngcontent}-c205]:not([hidden]) {
-      --tw-space-y-reverse: 0;
-      margin-top: calc(0px * calc(1 - var(--tw-space-y-reverse)));
-      margin-bottom: calc(0px * var(--tw-space-y-reverse))
-    }
+  .photoImportInner {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translateX(-50%) translateY(-50%);
+    width: calc(100vw - 50px);
+    height: calc(100vh - 50px);
+    overflow-x: hidden;
+    overflow-y: scroll;
+    background-color: #fff;
+    padding: 20px;
+    max-width: 900px;
+    max-height: 500px;
+  }
 
-    [{$nghost}-c205]>[${ngcontent}-c205]:not([hidden])~[${ngcontent}-c205]:not([hidden]) {
-      --tw-space-x-reverse: 0;
-      margin-right: calc(1rem * var(--tw-space-x-reverse));
-      margin-left: calc(1rem * calc(1 - var(--tw-space-x-reverse)))
-    }
+  .photoImportMethod {
+    max-width: 500px;
+    height: initial;
+  }
 
-    [{$nghost}-c205] button[${ngcontent}-c205]:not(:first-child) {
-      margin-left: 1rem
-    }
+  .photoImportGAScriptOptions {
+    max-width: 700px;
+    height: initial;
+  }
+
+  .dark .photoImportInner {
+    background-color: #333;
+  }
+
+  .photoImportInner h3 {
+    font-weight: bold;
+    margin: 10px auto;
+  }
+
+  .photoImportInner>p {
+    margin: 10px auto;
+  }
+
+  .photoImportLoading {
+    text-align: center;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translateX(-50%) translateY(-50%);
+    padding: 20px;
+    background-color: #fff;
+  }
+
+  .dark .photoImportLoading {
+    background-color: #333;
+  }
+
+  .photoImportLoading h2 {
+    margin-bottom: 10px;
+  }
+
+  .photoImportEntry {
+    margin: 10px 0;
   }
 
   .wf-image-modal {
     cursor: pointer
   }
+
+  .wfpcDropdown {
+     cursor: pointer;
+  }
+  .wfpcDropdown .wfpcInner {
+     display: none;
+  }
+  .wfpcDropdown .wfpcDDLeftBox {
+     float: left;
+     margin-right: 7px;
+     display: block;
+  }
+  .wfpcDropdown .wfpcDDRightBox {
+     float: right;
+  }
+  .wfpc-details-image {
+    margin-bottom: 1rem;
+    margin-left: auto;
+    margin-right: auto;
+    border-radius: 0.25rem;
+    max-height: 50vh;
+    cursor: pointer;
+  }
+  .wfpc-details-pane {
+    position: relative;
+    margin-top: 4rem;
+    margin-left: 1rem;
+    width: 100%;
+    max-width: 42rem;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 20;
+  }
+  .wfpc-details-header {
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .wfpc-details-address {
+    margin-bottom: 1rem!important;
+    margin: 0;
+  }
+  .wfpc-details-description-div {
+    margin-bottom: 1rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .wfpc-details-description-header {
+    margin-bottom: 0.5rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    --tw-text-opacity: 1;
+    color: rgba(115, 115, 115, var(--tw-text-opacity));
+  }
+  .wfpc-details-buttons-div {
+    display: flex !important;
+    margin-bottom: 1.5rem !important;
+    justify-content: flex-end !important;
+  }
+  .wfpc-details-pane-card {
+    display: flex;
+    height: 100%;
+    width: 100%;
+    flex-direction: column;
+    padding: 2rem;
+  }
+  .wfpc-details-outcome-div {
+    margin-bottom: 1rem;
+    justify-content: space-between!important;
+    flex-direction: row!important;
+    display: flex!important;
+  }
+  .wfpc-search-header {
+    font-size: .75rem!important;
+    line-height: 1rem!important;
+    width: min-content!important;
+    left: 0.75rem!important;
+    top: 0.5rem!important;
+    position: relative!important;
+    background-color: #fff; /* Default background color */
+
+    /* Dark mode styles */
+    .dark & {
+        background-color: #424242;
+    }
+
+    opacity: 1; /* Fully opaque */
+  }
+  .wfpc-input {
+    padding-left: 0.5rem!important;
+    padding-right: 0.5rem!important;
+    padding-top: 0.25rem!important;
+    padding-bottom: 0.25rem!important;
+    background-color: initial!important;
+    --tw-border-opacity: 1!important;
+    border-width: 1px!important;
+    border-radius: 0.375rem!important;
+    width: 100%!important;
+  }
+  .wfpc-table-cell {
+    border-width: 0px!important;
+    text-align: right;
+    vertical-align: middle;
+  }
     `;
 
-        // Append the style element to the document head
         document.head.appendChild(styleElement);
     }
 }
