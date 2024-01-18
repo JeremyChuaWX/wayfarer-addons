@@ -2118,7 +2118,6 @@ function init() {
             const buttonsContainerDiv = createButtonsContainer('filter_cancel', l10n['nominations.btns.cancel'], 'filter_accept', l10n['nominations.btns.filter'], handleFilterButtonClick);
 
             // Append header, content, and buttons divs to app-nominations-sort-modal
-            appNominationsSortModal.appendChild(groupingDiv);
             appNominationsSortModal.appendChild(arrangeDiv);
             appNominationsSortModal.appendChild(sortDiv);
             appNominationsSortModal.appendChild(buttonsContainerDiv);
