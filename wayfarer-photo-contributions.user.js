@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.1.0
+// @version      0.1.1
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -785,33 +785,49 @@ function init() {
                         continue;
                     }
 
-                    const subject = email.getHeader('Subject');
-                    const date = email.getHeader('Date');
-                    const from = email.getHeader('From');
-                    const importedDate = email.importedDate;
-                    const textHtml = email.getBody('text/html');
-                    const textPlain = email.getBody('text/plain');
-
-                    const emailInfo = {
-                        messageId,
-                        subject,
-                        date,
-                        from,
-                        importedDate,
-                        textHtml,
-                        textPlain,
-                    };
+                    const emailInfo = parseEmailData(email);
 
                     unprocessedEmails.push(emailInfo);
                 }
 
                 extractDataFromEmails(unprocessedEmails);
+
+                windowRef.wft_plugins_api.emailImport.addListener('wayfarer-photo-contributions.user.js', {
+                    onEmailImported: async email => {
+                        const unprocessedEmails = [];
+                        const emailInfo = parseEmailData(email);
+                        unprocessedEmails.push(emailInfo);
+                        await extractDataFromEmails(unprocessedEmails);
+                    }
+                });
             } else {
                 console.error('window.wft_plugins_api.emailImport is not defined.');
             }
         } catch (error) {
             console.error('Error retrieving email instances:', error);
         }
+    }
+
+    function parseEmailData(email) {
+        const messageId = email.messageID;
+        const subject = email.getHeader('Subject');
+        const date = email.getHeader('Date');
+        const from = email.getHeader('From');
+        const importedDate = email.importedDate;
+        const textHtml = email.getBody('text/html');
+        const textPlain = email.getBody('text/plain');
+
+        const emailInfo = {
+            messageId,
+            subject,
+            date,
+            from,
+            importedDate,
+            textHtml,
+            textPlain,
+        };
+
+        return emailInfo;
     }
 
     // Function to change the text content of wf-page-header, add a class, hide the next sibling,
@@ -936,8 +952,6 @@ function init() {
         let skippedMalformedEmailsCount = 0;
         let emailsToBeProcessedCount = 0;
 
-        console.log(`Photo Contributions: Received ${emails.length} from email API database.`);
-
         for (let i = emails.length - 1; i >= 0; i--) {
             const email = emails[i];
 
@@ -990,7 +1004,7 @@ function init() {
         });
 
         if (emailsToBeProcessedCount > 0) {
-            console.log(`Photo Contributions: Found ${emailsToBeProcessedCount} new photo email(s) for analysis: `, emailData);
+            // console.log(`Photo Contributions: Found ${emailsToBeProcessedCount} new photo email(s) for analysis: `, emailData);
         }
         if (skippedDuplicateEmailsCount > 0) {
             console.log(`Photo Contributions: Skipped ${skippedDuplicateEmailsCount} email(s) because they are a duplicate or the email details are already assigned to a photo.`);
@@ -1491,7 +1505,15 @@ function init() {
                 timestamp: null,
                 title: null,
             },
-            outcome: {
+            outcome: (status === 'accepted' || status === 'rejected') ? {
+                id: email.id,
+                messageId: email.messageId,
+                template: email.template,
+                timestamp: email.timestamp,
+                title: email.title,
+                result: status,
+                submittedDate: email.submittedDate,
+            } : {
                 id: null,
                 messageId: null,
                 template: null,
@@ -1538,8 +1560,6 @@ function init() {
                 }
             }
         });
-
-                const structuredClone3 = JSON.parse(JSON.stringify(photoSubmissions));
 
         // Match emails to Wayspots using unique photo ID from emails
         // Template: Ingress Prime
@@ -1629,7 +1649,7 @@ function init() {
         // Template: Ingress Redacted rejection
         for (let i = photoSubmissions.length - 1; i >= 0; i--) {
             const submission = photoSubmissions[i];
-            if (submission.outcome.result === 'rejected' && !submission.matched) {
+            if (submission.outcome.result === 'rejected' && !submission.matched && submission.outcome.template === 'Ingress Redacted') {
 
                 const matchingSubmission = photoSubmissions.find(sub =>
                                                                  sub.status === 'pending' &&
