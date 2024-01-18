@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.1.1
+// @version      0.1.2
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -952,6 +952,9 @@ function init() {
         let skippedMalformedEmailsCount = 0;
         let emailsToBeProcessedCount = 0;
 
+        console.log('Starting function wtih : ', emails);
+        console.log(`Photo Contributions: Received ${emails.length} from email API database.`);
+
         for (let i = emails.length - 1; i >= 0; i--) {
             const email = emails[i];
 
@@ -1004,7 +1007,7 @@ function init() {
         });
 
         if (emailsToBeProcessedCount > 0) {
-            // console.log(`Photo Contributions: Found ${emailsToBeProcessedCount} new photo email(s) for analysis: `, emailData);
+            console.log(`Photo Contributions: Found ${emailsToBeProcessedCount} new photo email(s) for analysis: `, emailData);
         }
         if (skippedDuplicateEmailsCount > 0) {
             console.log(`Photo Contributions: Skipped ${skippedDuplicateEmailsCount} email(s) because they are a duplicate or the email details are already assigned to a photo.`);
@@ -1013,6 +1016,7 @@ function init() {
             console.log(`Photo Contributions: Skipped ${skippedMalformedEmailsCount} email(s) because the email didn't match a known email template.`);
         }
 
+        console.log(emailData);
         matchEmailsToWayspots(emailData);
         createAllPhotoListItems();
         sortAndFilterPhotoSubmissions();
@@ -2070,21 +2074,6 @@ function init() {
         // Create content for the overlay
         function createOverlayContent() {
             const appNominationsSortModal = document.createElement('app-nominations-sort-modal');
-
-            // Create div for 'Grouping' section of filter overlay
-            const groupingDiv = document.createElement('div');
-            const groupingHeader = document.createElement('h4');
-            groupingHeader.classList.add('mb-2');
-            groupingHeader.textContent = "Grouping";
-            groupingDiv.appendChild(groupingHeader);
-
-            // Create ratio buttons for 'Grouping' section of filter overlay
-            const groupingRadioGroup = createRadioGroup('grouping');
-            const radioMerged = createRadioButton('photo-radio-merged', "Display photos for the same Wayspot as a combined entry.", 'MERGED', 'grouping');
-            const radioSeparate = createRadioButton('photo-radio-separate', "Display photos for the same Wayspot as separate entries.", 'SEPARATE', 'grouping');
-            groupingRadioGroup.appendChild(radioMerged);
-            groupingRadioGroup.appendChild(radioSeparate);
-            groupingDiv.appendChild(groupingRadioGroup);
 
             // Create div for 'Arrange' section of filter overlay
             const arrangeDiv = document.createElement('div');
