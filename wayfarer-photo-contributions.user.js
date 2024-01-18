@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.1.2
+// @version      0.1.3
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -27,6 +27,8 @@ function init() {
     let ngcontent;
     let photoListItems;
 
+    let holdProcessing = false;
+
     let filterSettings = {
         pending: true,
         accepted: true,
@@ -34,6 +36,9 @@ function init() {
     };
 
     let currentDisplay = 'wayspots';
+
+    let groupingSetting;
+    initializeGroupingSetting();
 
     let currentSearchTerm = '';
     let arrangementSettings = 'RECENT';
@@ -62,6 +67,9 @@ function init() {
             state: 'State',
             importData: 'Import Wayspot Data',
             importDataExplanation: 'Manually import Wayspot data in JSON format from external sources such as Ingress IITC.',
+            settingsHeader: 'Grouping of Photo Contributions',
+            settingsExplanation1: 'When turned on, the Wayfarer Photo Contributions plug-in will display all of the photos for the same Wayspot as a single entry on the Contribution Management page. This will require user input to manually link the photos together.',
+            settingsExplanation2: 'When turned off, each photo will be displayed in the Contribution Management page as an individual entry, even if photos have been linked together as belonging to the same Wayspot.',
         },
         ja: {
             switchToPhotos: '写真に切り替える',
@@ -81,6 +89,9 @@ function init() {
             state: '州',
             importData: 'Wayspotデータのインポート',
             importDataExplanation: 'Wayspot データを Ingress IITC などの外部ソースから JSON 形式で手動インポートします。',
+            settingsHeader: '写真投稿のグループ化',
+            settingsExplanation1: 'プラグイン Wayfarer Photo Contributions をオンにすると、投稿管理ページに同じWayspotのすべての写真が1つの項目として表示されます。この場合、写真を手動でリンクさせるためのユーザー入力が必要になります。',
+            settingsExplanation2: 'オフにすると、同じWayspotに属する写真としてリンクされている場合でも、各写真は個別のエントリーとして投稿管理ページに表示されます。',
         },
         ko: {
             switchToPhotos: '사진으로 전환',
@@ -100,6 +111,9 @@ function init() {
             state: '주',
             importData: 'Wayspot 데이터 가져오기',
             importDataExplanation: 'Ingress IITC와 같은 외부 소스에서 JSON 형식의 Wayspot 데이터를 수동으로 가져옵니다.',
+            settingsHeader: '사진 기여 그룹화',
+            settingsExplanation1: '이 기능을 켜면, Wafarer Photo Contributions 플러그인이 동일한 Wayspot에 대한 모든 사진을 기여 관리 페이지에 단일 항목으로 표시합니다. 이 경우 사진을 수동으로 연결하려면 사용자의 입력이 필요합니다.',
+            settingsExplanation2: '이 기능을 끄면 사진이 동일한 Wayspot에 속하는 것으로 서로 연결되어 있더라도 각 사진이 기여도 관리 페이지에 개별 항목으로 표시됩니다.',
         },
         pt: {
             switchToPhotos: 'Mudar para fotos',
@@ -119,6 +133,9 @@ function init() {
             state: 'Estado',
             importData: 'Importar dados do Wayspot',
             importDataExplanation: 'Importe manualmente os dados do Wayspot no formato JSON de fontes externas, como o Ingress IITC.',
+            settingsHeader: 'Agrupamento de contribuições de fotos',
+            settingsExplanation1: 'Quando ativado, o plug-in Wayfarer Photos Contributions exibirá todas as fotos para o mesmo Wayspot como uma única entrada na página Gerenciamento de contribuições. Isso exigirá a entrada do usuário para vincular manualmente as fotos.',
+            settingsExplanation2: 'Quando desativado, cada foto será exibida na página Gerenciamento de contribuições como uma entrada individual, mesmo que as fotos tenham sido vinculadas como pertencentes ao mesmo Wayspot.',
         },
         cs: {
             switchToPhotos: 'Přepněte na Fotky',
@@ -138,6 +155,9 @@ function init() {
             state: 'Stát',
             importData: 'Importovat data Wayspot',
             importDataExplanation: 'Ručně importujte data Wayspot ve formátu JSON z externích zdrojů, například Ingress IITC.',
+            settingsHeader: 'Seskupení příspěvků fotografií',
+            settingsExplanation1: 'Je-li zapnut, zobrazí zásuvný modul Wayfarer Photos Contributions všechny fotografie pro stejný Wayspot jako jedinou položku na stránce Správa příspěvků. To bude vyžadovat vstup uživatele, aby fotografie ručně spojil dohromady.',
+            settingsExplanation2: 'Je-li vypnut, každá fotografie se na stránce Správa příspěvků zobrazí jako samostatná položka, i když byly fotografie spojeny dohromady jako patřící ke stejnému Wayspotu.',
         },
         es: {
             switchToPhotos: 'Cambiar a fotos',
@@ -157,6 +177,9 @@ function init() {
             state: 'Estado',
             importData: 'Importar datos Wayspot',
             importDataExplanation: 'Importe manualmente datos Wayspot en formato JSON desde fuentes externas como Ingress IITC.',
+            settingsHeader: 'Agrupación de contribuciones de fotos',
+            settingsExplanation1: 'Cuando está activado, el complemento Wayfarer Photos Contributions mostrará todas las fotos del mismo Wayspot como una única entrada en la página de gestión de contribuciones. Esto requerirá la intervención del usuario para vincular manualmente las fotos.',
+            settingsExplanation2: 'Si está desactivado, cada foto se mostrará en la página de gestión de contribuciones como una entrada individual, incluso si las fotos se han vinculado entre sí como pertenecientes al mismo punto de acceso.',
         },
         de: {
             switchToPhotos: 'Zu Fotos wechseln',
@@ -176,6 +199,9 @@ function init() {
             state: 'Staat',
             importData: 'Wayspot-Daten importieren',
             importDataExplanation: 'Manuelles Importieren von Wayspot-Daten im JSON-Format aus externen Quellen wie Ingress IITC.',
+            settingsHeader: 'Gruppierung von Fotobeiträgen',
+            settingsExplanation1: 'Wenn diese Funktion aktiviert ist, zeigt das Wayfarer Photos Contributions Plug-in alle Fotos für denselben Wayspot als einen einzigen Eintrag auf der Seite Contribution Management an. Dies erfordert eine Benutzereingabe, um die Fotos manuell miteinander zu verknüpfen.',
+            settingsExplanation2: 'Wenn das Plug-in ausgeschaltet ist, wird jedes Foto auf der Seite Beitragsverwaltung als einzelner Eintrag angezeigt, auch wenn die Fotos mit demselben Wayspot verknüpft wurden.',
         },
         fr: {
             switchToPhotos: 'Vers les photos',
@@ -195,6 +221,9 @@ function init() {
             state: 'État',
             importData: 'Importer des données Wayspot',
             importDataExplanation: 'Importer manuellement des données Wayspot au format JSON à partir de sources externes telles que Ingress IITC.',
+            settingsHeader: 'Grouping of Photo Contributions',
+            settingsExplanation1: 'When turned on, the Wayfarer Photo Contributions plug-in will display all of the photos for the same Wayspot as a single entry on the Contribution Management page. This will require user input to manually link the photos together.',
+            settingsExplanation2: 'When turned off, each photo will be displayed in the Contribution Management page as an individual entry, even if photos have been linked together as belonging to the same Wayspot.',
         },
         it: {
             switchToPhotos: 'Passa alle foto',
@@ -214,6 +243,9 @@ function init() {
             state: 'Stato',
             importData: 'Importazione di dati Wayspot',
             importDataExplanation: 'Importa manualmente i dati Wayspot in formato JSON da fonti esterne come Ingress IITC.',
+            settingsHeader: 'Regroupement des contributions photos',
+            settingsExplanation1: "Lorsqu'il est activé, le plug-in Wayfarer Photos Contributions affiche toutes les photos d'un même point d'accès sous la forme d'une entrée unique sur la page de gestion des contributions. Cela nécessitera une intervention de l'utilisateur pour relier manuellement les photos entre elles.",
+            settingsExplanation2: "Lorsqu'il est désactivé, chaque photo sera affichée dans la page de gestion des contributions comme une entrée individuelle, même si les photos ont été reliées entre elles comme appartenant au même Wayspot.",
         },
         in: {
             switchToPhotos: 'Beralih ke foto',
@@ -233,6 +265,9 @@ function init() {
             state: 'Negara Bagian',
             importData: 'Mengimpor Data Wayspot',
             importDataExplanation: 'Mengimpor data Wayspot secara manual dalam format JSON dari sumber eksternal seperti Ingress IITC.',
+            settingsHeader: 'Pengelompokan Kontribusi Foto',
+            settingsExplanation1: 'Ketika diaktifkan, plug-in Kontribusi Foto Wayfarer akan menampilkan semua foto untuk Wayspot yang sama sebagai satu entri pada halaman Manajemen Kontribusi. Hal ini akan membutuhkan masukan pengguna untuk menautkan foto-foto tersebut secara manual.',
+            settingsExplanation2: 'Ketika dimatikan, setiap foto akan ditampilkan di halaman Manajemen Kontribusi sebagai entri individual, meskipun foto-foto tersebut telah ditautkan bersama sebagai bagian dari Wayspot yang sama.',
         },
         nl: {
             switchToPhotos: `Wisselen naar foto's`,
@@ -252,6 +287,9 @@ function init() {
             state: 'Staat',
             importData: 'Wayspot Data Importeren',
             importDataExplanation: 'Importeer handmatig Wayspot data in JSON formaat van externe bronnen zoals Ingress IITC.',
+            settingsHeader: 'Groeperen van fotobijdragen',
+            settingsExplanation1: "Als de plug-in Wayfarer Foto's Bijdragen is ingeschakeld, worden alle foto's voor dezelfde Wayspot als één item weergegeven op de Bijdragenbeheer pagina. Dit vereist gebruikersinvoer om de foto's handmatig aan elkaar te koppelen.",
+            settingsExplanation2: "Als deze optie is uitgeschakeld, wordt elke foto op de Contribution Management pagina weergegeven als een individuele invoer, zelfs als foto's aan elkaar zijn gekoppeld als behorend tot dezelfde Wayspot.",
         },
         no: {
             switchToPhotos: 'Bytt til bilder',
@@ -271,6 +309,9 @@ function init() {
             state: 'Delstat',
             importData: 'Importere Wayspot-data',
             importDataExplanation: 'Importer Wayspot-data manuelt i JSON-format fra eksterne kilder som Ingress IITC.',
+            settingsHeader: 'Gruppering av fotobidrag',
+            settingsExplanation1: 'Når denne funksjonen er slått på, vil Wayfarer Photos Contributions-plugin-modulen vise alle bildene for samme Wayspot som én enkelt oppføring på Contribution Management-siden. Dette krever at brukeren manuelt kobler bildene sammen.',
+            settingsExplanation2: 'Når den er slått av, vil hvert bilde vises på siden for bidragsadministrasjon som en individuell oppføring, selv om bildene er koblet sammen som tilhørende samme Wayspot.',
         },
         pl: {
             switchToPhotos: 'Przełącz na zdjęcia',
@@ -290,6 +331,9 @@ function init() {
             state: 'Stan',
             importData: 'Importowanie danych Wayspot',
             importDataExplanation: 'Ręcznie importuj dane Wayspot w formacie JSON z zewnętrznych źródeł, takich jak Ingress IITC.',
+            settingsHeader: 'Grupowanie wkładów zdjęciowych',
+            settingsExplanation1: 'Po włączeniu, wtyczka Wayfarer Photos Contributions wyświetli wszystkie zdjęcia dla tego samego Wayspota jako pojedynczy wpis na stronie Contribution Management. Będzie to wymagało ręcznego połączenia zdjęć przez użytkownika.',
+            settingsExplanation2: 'Po jej wyłączeniu, każde zdjęcie będzie wyświetlane na stronie Contribution Management jako osobny wpis, nawet jeśli zdjęcia zostały połączone jako należące do tego samego punktu trasy.',
         },
         ru: {
             switchToPhotos: 'Переключиться на фотографии',
@@ -309,6 +353,9 @@ function init() {
             state: 'Штат',
             importData: 'Импорт данных Wayspot',
             importDataExplanation: 'Ручной импорт данных Wayspot в формате JSON из внешних источников, таких как Ingress IITC.',
+            settingsHeader: 'Группировка фотовкладов',
+            settingsExplanation1: 'При включении плагин Wayfarer Photos Contributions отображает все фотографии для одной точки Wayspot в виде одной записи на странице управления вкладами. При этом пользователю потребуется вручную связать фотографии вместе.',
+            settingsExplanation2: 'Если плагин выключен, каждая фотография будет отображаться на странице управления вкладами как отдельная запись, даже если фотографии были связаны вместе как относящиеся к одному Wayspot.',
         },
         sv: {
             switchToPhotos: 'Byt till foton',
@@ -328,6 +375,9 @@ function init() {
             state: 'Delstat',
             importData: 'Importera Wayspot-data',
             importDataExplanation: 'Importera Wayspot-data manuellt i JSON-format från externa källor som Ingress IITC.',
+            settingsHeader: 'Gruppering av fotobidrag',
+            settingsExplanation1: 'När den är aktiverad kommer insticksprogrammet Wayfarer Photo Contributions att visa alla foton för samma Wayspot som en enda post på sidan Contribution Management. Detta kräver att användaren manuellt länkar samman bilderna.',
+            settingsExplanation2: 'När den är avstängd kommer varje foto att visas på sidan Bidragshantering som en enskild post, även om foton har länkats ihop som tillhörande samma Wayspot.',
         },
         th: {
             switchToPhotos: 'สลับไปที่รูปถ่าย',
@@ -347,6 +397,9 @@ function init() {
             state: 'สถานะ',
             importData: 'นำเข้าข้อมูล Wayspot',
             importDataExplanation: 'นำเข้าข้อมูล Wayspot ด้วยตนเองในรูปแบบ JSON จากแหล่งภายนอก เช่น Ingress IITC',
+            settingsHeader: 'การจัดกลุ่มผลงานภาพถ่าย',
+            settingsExplanation1: 'เมื่อเปิดใช้งาน ปลั๊กอิน Wayfarer Photo Contributions จะแสดงภาพถ่ายทั้งหมดสำหรับ Wayspot เดียวกันเป็นรายการเดียวบนหน้าการจัดการการมีส่วนร่วม ซึ่งจะต้องมีการป้อนข้อมูลจากผู้ใช้เพื่อเชื่อมโยงรูปภาพเข้าด้วยกันด้วยตนเอง',
+            settingsExplanation2: 'เมื่อปิด รูปภาพแต่ละรูปจะแสดงในหน้าการจัดการการมีส่วนร่วมเป็นรายการเดี่ยว แม้ว่ารูปภาพจะเชื่อมโยงเข้าด้วยกันเป็นของ Wayspot เดียวกันก็ตาม',
         },
         zh_TW: {
             switchToPhotos: '切換到照片',
@@ -366,6 +419,9 @@ function init() {
             state: '狀態',
             importData: '匯入 Wayspot 數據',
             importDataExplanation: '從 Ingress IITC 等外部來源手動匯入 JSON 格式的 Wayspot 資料。',
+            settingsHeader: '照片貢獻分組',
+            settingsExplanation1: '開啟後，Wayfarer Photo Contributions 外掛程式將在「貢獻管理」頁面上將同一 Wayspot 的所有照片顯示為單一條目。 這將需要用戶輸入來手動將照片連結在一起。',
+            settingsExplanation2: '關閉後，每張照片都將作為單獨的條目顯示在「貢獻管理」頁面中，即使照片已連結在一起屬於同一 Wayspot。',
         },
         bn: {
             switchToPhotos: 'ছবিতে স্যুইচ করুন',
@@ -385,6 +441,9 @@ function init() {
             state: 'অবস্থা',
             importData: 'Wayspot ডেটা আমদানি করুন',
             importDataExplanation: 'Ingress IITC এর মতো বাহ্যিক উত্স থেকে JSON ফর্ম্যাটে ম্যানুয়ালি Wayspot ডেটা আমদানি করুন৷',
+            settingsHeader: 'ফটো অবদানের গ্রুপিং',
+            settingsExplanation1: 'চালু করা হলে, Wayfarer Photo Contributions প্ল্যাগ-ইন কন্ট্রিবিউশন ম্যানেজমেন্ট পৃষ্ঠায় একক এন্ট্রি হিসাবে একই Wayspot-এর সমস্ত ফটো প্রদর্শন করবে। ফটোগুলিকে ম্যানুয়ালি লিঙ্ক করার জন্য ব্যবহারকারীর ইনপুটের প্রয়োজন হবে৷',
+            settingsExplanation2: 'যখন বন্ধ করা হয়, প্রতিটি ফটো একটি পৃথক এন্ট্রি হিসাবে অবদান ব্যবস্থাপনা পৃষ্ঠায় প্রদর্শিত হবে, এমনকি ফটোগুলি একই Wayspot-এর অন্তর্গত হিসাবে একসাথে লিঙ্ক করা থাকলেও৷',
         },
         hi: {
             switchToPhotos: 'फ़ोटो पर स्विच करें',
@@ -404,6 +463,9 @@ function init() {
             state: 'राज्य',
             importData: 'वेस्पॉट डेटा आयात करें',
             importDataExplanation: 'Ingress IITC जैसे बाहरी स्रोतों से JSON प्रारूप में वेस्पॉट डेटा को मैन्युअल रूप से आयात करें।',
+            settingsHeader: 'फोटो योगदान का समूहन',
+            settingsExplanation1: 'चालू होने पर, वेफ़रर फोटो कंट्रीब्यूशन प्लग-इन एक ही वेस्पॉट के लिए सभी फ़ोटो को कंट्रीब्यूशन मैनेजमेंट पेज पर एकल प्रविष्टि के रूप में प्रदर्शित करेगा। इसके लिए फ़ोटो को मैन्युअल रूप से एक साथ लिंक करने के लिए उपयोगकर्ता इनपुट की आवश्यकता होगी।',
+            settingsExplanation2: 'बंद होने पर, प्रत्येक फ़ोटो को योगदान प्रबंधन पृष्ठ में एक व्यक्तिगत प्रविष्टि के रूप में प्रदर्शित किया जाएगा, भले ही फ़ोटो को एक ही वेस्पॉट से संबंधित होने के कारण एक साथ लिंक किया गया हो।',
         },
         mr: {
             switchToPhotos: 'फोटोंवर स्विच करा',
@@ -423,6 +485,9 @@ function init() {
             state: 'राज्य',
             importData: 'वेस्पॉट डेटा आयात करा',
             importDataExplanation: 'Ingress IITC सारख्या बाह्य स्त्रोतांकडून JSON फॉरमॅटमध्ये वेस्पॉट डेटा मॅन्युअली इंपोर्ट करा.',
+            settingsHeader: 'फोटो योगदानांचे गट करणे',
+            settingsExplanation1: 'चालू केल्यावर, Wayfarer Photo Contributions प्लग-इन योगदान व्यवस्थापन पृष्ठावरील एकाच एंट्रीच्या रूपात समान वेस्पॉटसाठी सर्व फोटो प्रदर्शित करेल. फोटो एकत्र जोडण्यासाठी वापरकर्ता इनपुटची आवश्यकता असेल.',
+            settingsExplanation2: 'बंद केल्यावर, प्रत्येक फोटो योगदान व्यवस्थापन पृष्ठावर वैयक्तिक एंट्री म्हणून प्रदर्शित केला जाईल, जरी फोटो एकाच वेस्पॉटशी संबंधित म्हणून एकत्र जोडले गेले असले तरीही.',
         },
         ta: {
             switchToPhotos: 'புகைப்படங்களுக்கு மாறவும்',
@@ -442,6 +507,9 @@ function init() {
             state: 'மாநிலம்',
             importData: 'Wayspot தரவை இறக்குமதி செய்யவும்',
             importDataExplanation: 'Ingress IITC போன்ற வெளிப்புற மூலங்களிலிருந்து JSON வடிவத்தில் Wayspot தரவை கைமுறையாக இறக்குமதி செய்யவும்.',
+            settingsHeader: 'புகைப்படப் பங்களிப்புகளின் குழுவாக்கம்',
+            settingsExplanation1: 'இயக்கப்பட்டிருக்கும் போது, Wayfarer Photo Contributions செருகுநிரலானது, ஒரே Wayspotக்கான அனைத்துப் புகைப்படங்களையும் பங்களிப்பு மேலாண்மைப் பக்கத்தில் ஒரே பதிவாகக் காண்பிக்கும். புகைப்படங்களை கைமுறையாக ஒன்றாக இணைக்க பயனர் உள்ளீடு தேவைப்படும்.',
+            settingsExplanation2: 'அணைக்கப்படும் போது, ஒவ்வொரு புகைப்படமும் ஒரே Wayspot க்கு சொந்தமானவை என ஒன்றாக இணைக்கப்பட்டிருந்தாலும், பங்களிப்பு மேலாண்மை பக்கத்தில் தனிப்பட்ட உள்ளீட்டாக காட்டப்படும்.',
         },
         te: {
             switchToPhotos: 'ఫోటోలను ఒకదానితో ఒకటి లింక్ చేయండి',
@@ -461,6 +529,9 @@ function init() {
             state: 'రాష్ట్రం',
             importData: 'వేస్‌పాట్ డేటాను దిగుమతి చేయండి',
             importDataExplanation: 'Ingress IITC వంటి బాహ్య మూలాల నుండి JSON ఆకృతిలో వేస్‌పాట్ డేటాను మాన్యువల్‌గా దిగుమతి చేయండి.',
+            settingsHeader: 'ఫోటో సహకారాల సమూహనం',
+            settingsExplanation1: 'ఆన్ చేసినప్పుడు, Wayfarer ఫోటో కంట్రిబ్యూషన్స్ ప్లగ్-ఇన్ కంట్రిబ్యూషన్ మేనేజ్‌మెంట్ పేజీలో ఒకే ఎంట్రీగా ఒకే వేస్పాట్ కోసం అన్ని ఫోటోలను ప్రదర్శిస్తుంది. ఇది ఫోటోలను మాన్యువల్‌గా లింక్ చేయడానికి వినియోగదారు ఇన్‌పుట్ అవసరం.',
+            settingsExplanation2: 'ఆపివేయబడినప్పుడు, ఫోటోలు ఒకే వేస్‌పాట్‌కు చెందినవిగా కలిసి లింక్ చేయబడినప్పటికీ, ప్రతి ఫోటో సహకార నిర్వహణ పేజీలో వ్యక్తిగత ఎంట్రీగా ప్రదర్శించబడుతుంది.',
         },
         tl: {
             switchToPhotos: 'Lumipat sa mga larawan',
@@ -480,6 +551,9 @@ function init() {
             state: 'Estado',
             importData: 'Mag-import ng Data ng Wayspot',
             importDataExplanation: 'Manu-manong mag-import ng data ng Wayspot sa JSON na format mula sa mga external na source gaya ng INGRESS IITC.',
+            settingsHeader: 'Pagpapangkat ng mga Kontribusyon sa Larawan',
+            settingsExplanation1: 'Kapag naka-on, ipapakita ng Wayfarer Photo Contributions plug-in ang lahat ng larawan para sa parehong Wayspot bilang isang entry sa page ng Contribution Management. Mangangailangan ito ng input ng user upang manu-manong i-link ang mga larawan nang magkasama.',
+            settingsExplanation2: 'Kapag naka-off, ang bawat larawan ay ipapakita sa pahina ng Pamamahala ng Kontribusyon bilang isang indibidwal na entry, kahit na ang mga larawan ay na-link nang magkasama bilang kabilang sa parehong Wayspot.',
         },
         tr: {
             switchToPhotos: 'Fotoğraflara geç',
@@ -499,8 +573,25 @@ function init() {
             state: 'Eyalet',
             importData: 'Wayspot Verilerini İçe Aktar',
             importDataExplanation: 'Wayspot verilerini Ingress IITC gibi harici kaynaklardan JSON formatında manuel olarak içe aktarın.',
+            settingsHeader: 'Fotoğraf Katkılarının Gruplandırılması',
+            settingsExplanation1: 'Wayfarer Photo Contributions eklentisi açıldığında, aynı Wayspot için tüm fotoğraflar Katkı Yönetimi sayfasında tek bir giriş olarak görüntülenecektir. Bu, fotoğrafları manuel olarak birbirine bağlamak için kullanıcı girişi gerektirecektir.',
+            settingsExplanation2: "Kapatıldığında, fotoğraflar aynı Wayspot'a ait olarak birbirine bağlanmış olsa bile, her fotoğraf Katkı Yönetimi sayfasında ayrı bir giriş olarak görüntülenecektir.",
         }
     };
+
+    // Function to check localStorage for wfpc_grouping_setting and assign the value to groupingSetting
+    function initializeGroupingSetting() {
+        console.log('the grouping setting is being overwritten by initializeGroupingSetting()!! It was ', groupingSetting)
+        const storedSetting = localStorage.getItem('wfpc_grouping_setting');
+        groupingSetting = storedSetting === 'true';
+
+        // If there is no value saved in localStorage, default to true
+        if (storedSetting === null) {
+            groupingSetting = true;
+        }
+        console.log('after overwriting it is now', groupingSetting)
+    }
+
 
     const getL10N = () => {
         const i18n = JSON.parse(localStorage['@transloco/translations']);
@@ -526,6 +617,10 @@ function init() {
             } else if (url == '/api/v1/vault/review') {
                 if (method == 'GET') {
                     this.addEventListener('load', parseReview, false);
+                }
+            } else if (url == '/api/v1/vault/settings') {
+                if (method == 'GET') {
+                    this.addEventListener('load', interceptSettings, false);
                 }
             }
             open.apply(this, arguments);
@@ -593,6 +688,20 @@ function init() {
             if (!json) return;
             if (!json.result || !json.result.language) return;
             language = json.result.language;
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    function interceptSettings() {
+        try {
+            console.log('~~~~~ MODIFY SETTINGS ~~~~~');
+            const response = this.response;
+            const json = JSON.parse(response);
+            if (!json) return;
+
+            // FEATURE TO BE ADDED IN FUTURE RELEASE
+            // modifySettingsPage();
         } catch (e) {
             console.error(e);
         }
@@ -793,6 +902,14 @@ function init() {
                 extractDataFromEmails(unprocessedEmails);
 
                 windowRef.wft_plugins_api.emailImport.addListener('wayfarer-photo-contributions.user.js', {
+                    onImportStarted: async () => {
+                        holdProcessing = true;
+                    },
+                    onImportCompleted: async () => {
+                        holdProcessing = false;
+                        createAllPhotoListItems();
+                        sortAndFilterPhotoSubmissions();
+                    },
                     onEmailImported: async email => {
                         const unprocessedEmails = [];
                         const emailInfo = parseEmailData(email);
@@ -861,6 +978,151 @@ function init() {
         }
         queryLoop();
     });
+
+    function modifySettingsPage() {
+        return new Promise(async (resolve, reject) => {
+            try {
+                // Wait for any element with class settings__item to be present
+                const settingsItem = await awaitElement(() => document.querySelector('.settings__item'));
+
+                // Find the parent of the settings__item element
+                const parentDiv = settingsItem.parentElement;
+
+                console.log('ParentDiv: ', parentDiv);
+                // Create a new div element for the settings item
+                const newSettingsItem = document.createElement('div');
+                newSettingsItem.classList.add('settings__item', 'settings-item');
+
+                // Create and append the header div
+                const headerDiv = document.createElement('div');
+                headerDiv.classList.add('settings-item__header');
+
+                // Create and append the title div
+                const titleDiv = document.createElement('div');
+                titleDiv.textContent = 'Grouping of Photo Contributions';
+
+                // Create and append the toggle container div
+                const toggleContainerDiv = document.createElement('div');
+
+                // Create and append the wf-slide-toggle element
+                const wfSlideToggle = document.createElement('wf-slide-toggle');
+                wfSlideToggle.setAttribute('color', 'primary');
+
+                // Create and append the mat-slide-toggle element
+                const matSlideToggle = document.createElement('mat-slide-toggle');
+                matSlideToggle.classList.add('mat-slide-toggle', 'mat-primary');
+                matSlideToggle.setAttribute('id', 'photo-grouping-slide-toggle');
+                matSlideToggle.setAttribute('tabindex', '-1');
+
+                // Create and append the label element
+                const labelElement = document.createElement('label');
+                labelElement.classList.add('mat-slide-toggle-label');
+                labelElement.setAttribute('for', 'photo-grouping-toggle-input');
+
+                // Create and append the mat-slide-toggle-bar element
+                const matSlideToggleBar = document.createElement('div');
+                matSlideToggleBar.classList.add('mat-slide-toggle-bar', 'mat-slide-toggle-bar-no-side-margin');
+
+                // Create and append the input element
+                const inputElement = document.createElement('input');
+                inputElement.setAttribute('type', 'checkbox');
+                inputElement.setAttribute('role', 'switch');
+                inputElement.classList.add('mat-slide-toggle-input', 'cdk-visually-hidden');
+                inputElement.setAttribute('id', 'photo-grouping-toggle-input');
+                inputElement.setAttribute('tabindex', '0');
+                inputElement.setAttribute('aria-checked', 'false');
+                inputElement.addEventListener('change', toggleGroupingSettings);
+
+                // Create and append the mat-slide-toggle-thumb-container element
+                const thumbContainer = document.createElement('div');
+                thumbContainer.classList.add('mat-slide-toggle-thumb-container');
+
+                // Create and append the mat-slide-toggle-thumb element
+                const thumbElement = document.createElement('div');
+                thumbElement.classList.add('mat-slide-toggle-thumb');
+
+                // Create and append the mat-ripple element
+                const rippleElement = document.createElement('div');
+                rippleElement.classList.add('mat-ripple', 'mat-slide-toggle-ripple', 'mat-focus-indicator');
+
+                // Create and append the mat-ripple-element element
+                const rippleChildElement = document.createElement('div');
+                rippleChildElement.classList.add('mat-ripple-element', 'mat-slide-toggle-persistent-ripple');
+
+                // Create and append the span element for mat-slide-toggle-content
+                const spanElement = document.createElement('span');
+                spanElement.classList.add('mat-slide-toggle-content');
+
+                // Create and append the span element with display none
+                const hiddenSpanElement = document.createElement('span');
+                hiddenSpanElement.style.display = 'none';
+                hiddenSpanElement.innerHTML = '&nbsp;';
+
+                // Append the created elements to their respective parents
+                thumbContainer.appendChild(thumbElement);
+                thumbContainer.appendChild(rippleElement);
+                rippleElement.appendChild(rippleChildElement);
+                matSlideToggleBar.appendChild(inputElement);
+                matSlideToggleBar.appendChild(thumbContainer);
+                labelElement.appendChild(matSlideToggleBar);
+                labelElement.appendChild(spanElement);
+                spanElement.appendChild(hiddenSpanElement);
+                matSlideToggle.appendChild(labelElement);
+                wfSlideToggle.appendChild(matSlideToggle);
+                toggleContainerDiv.appendChild(wfSlideToggle);
+
+                headerDiv.appendChild(titleDiv);
+                headerDiv.appendChild(toggleContainerDiv);
+                // Create and append the value div
+                const valueDiv = document.createElement('div');
+                valueDiv.classList.add('settings-item__value');
+
+                // Create and append the description div
+                const descriptionDiv = document.createElement('div');
+                descriptionDiv.classList.add('settings-item__description');
+
+                // Create and append the first description paragraph
+                const descriptionParagraph1 = document.createElement('div');
+                descriptionParagraph1.textContent = 'When turned on, the Wayfarer Photo Contributions plug-in will display all of the photos for the same Wayspot as a single entry on the Contribution Management page. This will require user input to manually link the photos together.';
+
+                // Create and append the second description paragraph with margin-top class
+                const descriptionParagraph2 = document.createElement('div');
+                descriptionParagraph2.classList.add('mt-2');
+                descriptionParagraph2.textContent = 'When turned off, each photo will be displayed in the Contribution Management page as an individual entry, even if photos have been linked together as belonging to the same Wayspot.';
+
+                // Append the created elements to the descriptionDiv
+                descriptionDiv.appendChild(descriptionParagraph1);
+                descriptionDiv.appendChild(descriptionParagraph2);
+
+                // Append the child div elements to the newSettingsItem
+                newSettingsItem.appendChild(headerDiv);
+                newSettingsItem.appendChild(valueDiv);
+                newSettingsItem.appendChild(descriptionDiv);
+
+                // Insert the newSettingsItem as the fourth child in the parent div
+                parentDiv.insertBefore(newSettingsItem, parentDiv.children[3]);
+
+                setGroupingSettings();
+
+                function setGroupingSettings() {
+                    inputElement.setAttribute('aria-checked', groupingSetting.toString());
+                    matSlideToggle.classList.toggle('mat-checked', groupingSetting);
+                    valueDiv.textContent = groupingSetting ? 'On' : 'Off';
+                }
+
+                function toggleGroupingSettings() {
+                    groupingSetting = !groupingSetting;
+                    localStorage.setItem('wfpc_grouping_setting', groupingSetting);
+                    setGroupingSettings()
+                }
+
+                resolve();
+            } catch (error) {
+                console.error('Error modifying settings page:', error);
+                reject(error);
+            }
+        });
+    }
 
     function modifyExistingNominationsList() {
         // Find the existing button
@@ -1016,10 +1278,12 @@ function init() {
             console.log(`Photo Contributions: Skipped ${skippedMalformedEmailsCount} email(s) because the email didn't match a known email template.`);
         }
 
-        console.log(emailData);
         matchEmailsToWayspots(emailData);
-        createAllPhotoListItems();
-        sortAndFilterPhotoSubmissions();
+
+        if (!holdProcessing) {
+            createAllPhotoListItems();
+            sortAndFilterPhotoSubmissions();
+        }
     }
 
     function extractTimestampFromEmail(email) {
@@ -2125,7 +2389,7 @@ function init() {
             return appNominationsSortModal;
         }
 
-        const newOverlayContainer = createOverlayContainer('550px', createOverlayContent);
+        const newOverlayContainer = createOverlayContainer('300px', createOverlayContent);
 
         // Append the new overlay container to the end of the body
         document.body.appendChild(newOverlayContainer);
