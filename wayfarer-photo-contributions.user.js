@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.1.3
+// @version      0.1.4
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -581,7 +581,6 @@ function init() {
 
     // Function to check localStorage for wfpc_grouping_setting and assign the value to groupingSetting
     function initializeGroupingSetting() {
-        console.log('the grouping setting is being overwritten by initializeGroupingSetting()!! It was ', groupingSetting)
         const storedSetting = localStorage.getItem('wfpc_grouping_setting');
         groupingSetting = storedSetting === 'true';
 
@@ -589,7 +588,6 @@ function init() {
         if (storedSetting === null) {
             groupingSetting = true;
         }
-        console.log('after overwriting it is now', groupingSetting)
     }
 
 
@@ -695,7 +693,6 @@ function init() {
 
     function interceptSettings() {
         try {
-            console.log('~~~~~ MODIFY SETTINGS ~~~~~');
             const response = this.response;
             const json = JSON.parse(response);
             if (!json) return;
@@ -988,7 +985,6 @@ function init() {
                 // Find the parent of the settings__item element
                 const parentDiv = settingsItem.parentElement;
 
-                console.log('ParentDiv: ', parentDiv);
                 // Create a new div element for the settings item
                 const newSettingsItem = document.createElement('div');
                 newSettingsItem.classList.add('settings__item', 'settings-item');
@@ -1214,8 +1210,7 @@ function init() {
         let skippedMalformedEmailsCount = 0;
         let emailsToBeProcessedCount = 0;
 
-        console.log('Starting function wtih : ', emails);
-        console.log(`Photo Contributions: Received ${emails.length} from email API database.`);
+        console.log(`Photo Contributions: Received ${emails.length} new emails from email API database.`);
 
         for (let i = emails.length - 1; i >= 0; i--) {
             const email = emails[i];
@@ -1268,9 +1263,6 @@ function init() {
             return { ...rest };
         });
 
-        if (emailsToBeProcessedCount > 0) {
-            console.log(`Photo Contributions: Found ${emailsToBeProcessedCount} new photo email(s) for analysis: `, emailData);
-        }
         if (skippedDuplicateEmailsCount > 0) {
             console.log(`Photo Contributions: Skipped ${skippedDuplicateEmailsCount} email(s) because they are a duplicate or the email details are already assigned to a photo.`);
         }
@@ -1349,12 +1341,12 @@ function init() {
                 //bn: {
                 //  title: / /,
                 //  body: / /,
-                //  acceptString: ''
+                //  acceptanceText: ''
                 //},
                 //cs: {
                 //  title: / /,
                 //  body: / /,
-                //  acceptString: ''
+                //  acceptanceText: ''
                 //},
                 de: {
                     title: /Entscheidung zu deinem Upload für den Wayspot (?<title>.+)/,
@@ -1364,17 +1356,17 @@ function init() {
                 //es: {
                 //  title: / /,
                 //  body: / /,
-                //  acceptString: ''
+                //  acceptanceText: ''
                 //},
                 //fr: {
                 //  title: / /,
                 //  body: / /,
-                //  acceptString: ''
+                //  acceptanceText: ''
                 //},
                 //hi: {
                 //  title: / /,
                 //  body: / /,
-                //  acceptString: ''
+                //  acceptanceText: ''
                 //},
                 it: {
                     title: /Proposta di contenuti multimediali di Niantic Wayspot decisa per (?<title>.+)/,
@@ -1384,22 +1376,22 @@ function init() {
                 //jp: {
                 //  title: / /,
                 //  body: / /,
-                //  acceptString: ''
+                //  acceptanceText: ''
                 //},
                 //ko: {
                 //  title: / /,
                 //  body: / /,
-                //  acceptString: ''
+                //  acceptanceText: ''
                 //},
                 //mr: {
                 //  title: / /,
                 //  body: / /,
-                //  acceptString: ''
+                //  acceptanceText: ''
                 //},
                 //nl: {
                 //  title: / /,
                 //  body: / /,
-                //  acceptString: ''
+                //  acceptanceText: ''
                 //},
                 no: {
                     title: /En avgjørelse er tatt for Niantic Wayspot-medieinnholdet som er sendt inn for (?<title>.+)/,
@@ -1409,43 +1401,43 @@ function init() {
                 //pl: {
                 //  title: / /,
                 //  body: / /,
-                //  acceptString: ''
+                //  acceptanceText: ''
                 //},
                 //pt: {
                 //  title: / /,
                 //  body: / /,
-                //  acceptString: ''
+                //  acceptanceText: ''
                 //},
                 //ru: {
                 //  title: / /,
                 //  body: / /,
-                //  acceptString: ''
+                //  acceptanceText: ''
                 //},
                 //sv: {
                 //  title: / /,
                 //  body: / /,
-                //  acceptString: ''
+                //  acceptanceText: ''
                 //},
                 //ta: {
                 //  title: / /,
                 //  body: / /,
-                //  acceptString: ''
+                //  acceptanceText: ''
                 //},
                 //te: {
                 //  title: / /,
                 //  body: / /,
-                //  acceptString: ''
+                //  acceptanceText: ''
                 //},
                 //th: {
                 //  title: / /,
                 //  body: / /,
-                //  acceptString: ''
+                //  acceptanceText: ''
                 //},
-                //zh: {
-                //  title: / /,
-                //  body: / /,
-                //  acceptString: ''
-                //}
+                zh: {
+                  title: /社群已對你為 (?<title>.+) 提交的 Niantic Wayspot 媒體做出決定/,
+                  body: /感謝你在 (?<year>\d{4})-(?<month>\d{1,2})-(?<day>\d{1,2}) 為 (?<title>.+) 提交 Wayspot Photo/,
+                  acceptanceText: '恭喜，社群已決定 接受你提交的 Wayspot Photo'
+                }
             }
 
             // Process Wayfarer Submitted emails.
@@ -1576,7 +1568,7 @@ function init() {
                         email.id = idMatch.groups.id;
                     }
 
-                    if (emailText.includes(langTemplates.acceptanceText)) {
+                    if (emailText.normalize().includes(langTemplates.acceptanceText.normalize())) {
                         email.status = 'accepted';
                     } else {
                         email.status = 'rejected';
@@ -1721,7 +1713,7 @@ function init() {
                 ta: [],
                 te: [],
                 th: ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'],
-                zh: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']
+                zh: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
             };
 
             const day = parseInt(dayString, 10);
