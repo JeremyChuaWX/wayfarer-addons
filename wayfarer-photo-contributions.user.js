@@ -1,15 +1,16 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.1.4
+// @version      0.2.0
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
+// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
 // ==/UserScript==
 
 // Copyright 2024 tntnnbltn
-// This file is not part of the Wayfarer Addons collection but it should be.
+// This file is not part of the Wayfarer Addons collection but it should be. :lbvs:
 
 // This script is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -221,9 +222,9 @@ function init() {
             state: 'État',
             importData: 'Importer des données Wayspot',
             importDataExplanation: 'Importer manuellement des données Wayspot au format JSON à partir de sources externes telles que Ingress IITC.',
-            settingsHeader: 'Grouping of Photo Contributions',
-            settingsExplanation1: 'When turned on, the Wayfarer Photo Contributions plug-in will display all of the photos for the same Wayspot as a single entry on the Contribution Management page. This will require user input to manually link the photos together.',
-            settingsExplanation2: 'When turned off, each photo will be displayed in the Contribution Management page as an individual entry, even if photos have been linked together as belonging to the same Wayspot.',
+            settingsHeader: 'Regroupement des contributions photos',
+            settingsExplanation1: "Lorsqu'il est activé, le plug-in Wayfarer Photos Contributions affiche toutes les photos d'un même point d'accès sous la forme d'une entrée unique sur la page de gestion des contributions. Cela nécessitera une intervention de l'utilisateur pour relier manuellement les photos entre elles.",
+            settingsExplanation2: "Lorsqu'il est désactivé, chaque photo sera affichée dans la page de gestion des contributions comme une entrée individuelle, même si les photos ont été reliées entre elles comme appartenant au même Wayspot.",
         },
         it: {
             switchToPhotos: 'Passa alle foto',
@@ -243,9 +244,9 @@ function init() {
             state: 'Stato',
             importData: 'Importazione di dati Wayspot',
             importDataExplanation: 'Importa manualmente i dati Wayspot in formato JSON da fonti esterne come Ingress IITC.',
-            settingsHeader: 'Regroupement des contributions photos',
-            settingsExplanation1: "Lorsqu'il est activé, le plug-in Wayfarer Photos Contributions affiche toutes les photos d'un même point d'accès sous la forme d'une entrée unique sur la page de gestion des contributions. Cela nécessitera une intervention de l'utilisateur pour relier manuellement les photos entre elles.",
-            settingsExplanation2: "Lorsqu'il est désactivé, chaque photo sera affichée dans la page de gestion des contributions comme une entrée individuelle, même si les photos ont été reliées entre elles comme appartenant au même Wayspot.",
+            settingsHeader: 'Raggruppamento dei contributi fotografici',
+            settingsExplanation1: "Se attivato, il plug-in Contributi fotografici del Wayfarer visualizza tutte le foto dello stesso Wayspot come un'unica voce nella pagina di gestione dei contributi. Ciò richiede l'intervento dell'utente per collegare manualmente le foto tra loro.",
+            settingsExplanation2: "Quando è disattivato, ogni foto verrà visualizzata nella pagina di gestione dei contributi come voce singola, anche se le foto sono state collegate insieme come appartenenti allo stesso Wayspot.",
         },
         in: {
             switchToPhotos: 'Beralih ke foto',
@@ -697,8 +698,7 @@ function init() {
             const json = JSON.parse(response);
             if (!json) return;
 
-            // FEATURE TO BE ADDED IN FUTURE RELEASE
-            // modifySettingsPage();
+            modifySettingsPage();
         } catch (e) {
             console.error(e);
         }
@@ -883,11 +883,22 @@ function init() {
                 }
 
                 for await (const email of windowRef.wft_plugins_api.emailImport.iterate()) {
+
+                    try {
+                        const messageClassify = email.classify();
+
+                        // Skip emails which are not photo emails
+                        if (messageClassify.type !== 'PHOTO_RECEIVED' && messageClassify.type !== 'PHOTO_DECIDED') {
+                            continue;
+                        }
+                    } catch (error) {
+                        console.error('Error retrieving email class:', error);
+                    }
+
                     const messageId = email.messageID;
 
-                    // Check if the messageId exists in the list of existingMessageIds
+                    // Skip emails which we already have data for in the Photo Contributions plug-in
                     if (existingMessageIds.includes(messageId)) {
-                        // Skip processing for this email
                         continue;
                     }
 
@@ -926,16 +937,24 @@ function init() {
         const messageId = email.messageID;
         const subject = email.getHeader('Subject');
         const date = email.getHeader('Date');
+        const received = email.getHeader('Received', true);
+        const xReceived = email.getHeader('X-Received', true);
         const from = email.getHeader('From');
         const importedDate = email.importedDate;
         const textHtml = email.getBody('text/html');
         const textPlain = email.getBody('text/plain');
 
+        const classify = email.classify
+        const language = classify.language
+
         const emailInfo = {
             messageId,
             subject,
             date,
+            received,
+            xReceived,
             from,
+            language,
             importedDate,
             textHtml,
             textPlain,
@@ -995,7 +1014,7 @@ function init() {
 
                 // Create and append the title div
                 const titleDiv = document.createElement('div');
-                titleDiv.textContent = 'Grouping of Photo Contributions';
+                titleDiv.textContent = strings[language].settingsHeader;
 
                 // Create and append the toggle container div
                 const toggleContainerDiv = document.createElement('div');
@@ -1079,12 +1098,12 @@ function init() {
 
                 // Create and append the first description paragraph
                 const descriptionParagraph1 = document.createElement('div');
-                descriptionParagraph1.textContent = 'When turned on, the Wayfarer Photo Contributions plug-in will display all of the photos for the same Wayspot as a single entry on the Contribution Management page. This will require user input to manually link the photos together.';
+                descriptionParagraph1.textContent = strings[language].settingsExplanation1;
 
                 // Create and append the second description paragraph with margin-top class
                 const descriptionParagraph2 = document.createElement('div');
                 descriptionParagraph2.classList.add('mt-2');
-                descriptionParagraph2.textContent = 'When turned off, each photo will be displayed in the Contribution Management page as an individual entry, even if photos have been linked together as belonging to the same Wayspot.';
+                descriptionParagraph2.textContent = strings[language].settingsExplanation2;
 
                 // Append the created elements to the descriptionDiv
                 descriptionDiv.appendChild(descriptionParagraph1);
@@ -1117,6 +1136,18 @@ function init() {
                 console.error('Error modifying settings page:', error);
                 reject(error);
             }
+        });
+    }
+
+    function updateGroupedItemsCss() {
+        const showGroupTag = groupingSetting === true;
+
+        document.querySelectorAll('.wfpc-groupPhotoItemTag').forEach(tag => {
+            tag.style.display = showGroupTag ? 'inline-block' : 'none';
+        });
+
+        document.querySelectorAll('.wfpc-singlePhotoItemTag').forEach(tag => {
+            tag.style.display = showGroupTag ? 'none' : 'inline-block';
         });
     }
 
@@ -1210,7 +1241,7 @@ function init() {
         let skippedMalformedEmailsCount = 0;
         let emailsToBeProcessedCount = 0;
 
-        console.log(`Photo Contributions: Received ${emails.length} new emails from email API database.`);
+        console.log(`Photo Contributions: Received ${emails.length} from email API database.`);
 
         for (let i = emails.length - 1; i >= 0; i--) {
             const email = emails[i];
@@ -1263,6 +1294,9 @@ function init() {
             return { ...rest };
         });
 
+        if (emailsToBeProcessedCount > 0) {
+            console.log(`Photo Contributions: Found ${emailsToBeProcessedCount} new photo email(s) for analysis: `, emailData);
+        }
         if (skippedDuplicateEmailsCount > 0) {
             console.log(`Photo Contributions: Skipped ${skippedDuplicateEmailsCount} email(s) because they are a duplicate or the email details are already assigned to a photo.`);
         }
@@ -1279,11 +1313,52 @@ function init() {
     }
 
     function extractTimestampFromEmail(email) {
-        const date = new Date(email.date);
-        email.timestamp = date.getTime();
+        // Attempt to extract the timestamp from the received and x-received headers.
+        // This is more accurate than using the date field as it may include milliseconds
+        const regex1 = /\b([A-Za-z]{3},.*[+-]\d{4}(\s\([A-Z]+\))?)/;
+        const regex2 = /\b(\d{4}-\d{2}-\d{2}\s.*\s[+-]\d{4}\s)/;
+
+        // Function to extract timestamp from the last item of an array of strings
+        function extractTimestampFromArray(arr) {
+            const lastItem = arr[arr.length - 1];
+            const match = regex1.exec(lastItem) || regex2.exec(lastItem);
+            return match ? new Date(match[1]).getTime() : null;
+        }
+
+        // Function to adjust timestamp for rounding
+        function adjustTimestampForRounding(timestamp) {
+            const lastThreeDigits = timestamp.toString().slice(-3);
+            return lastThreeDigits === '000' ? timestamp + 1000 : timestamp;
+        }
+
+        // Extract timestamps from email.received and email.xReceived
+        const timestampReceived = extractTimestampFromArray(email.received);
+        const timestampXReceived = extractTimestampFromArray(email.xReceived);
+
+        // Compare and use the adjusted lowest timestamp for comparison
+        if (timestampReceived !== null || timestampXReceived !== null) {
+            const adjustedTimestampReceived = adjustTimestampForRounding(timestampReceived || Infinity);
+            const adjustedTimestampXReceived = adjustTimestampForRounding(timestampXReceived || Infinity);
+
+            // Use if-else statement to determine the smallest adjusted timestamp
+            if (adjustedTimestampReceived < adjustedTimestampXReceived) {
+                // Save the original timestamp for the smaller adjusted timestamp
+                email.timestamp = timestampReceived;
+                email.comparisonTimestamp = adjustedTimestampReceived;
+            } else {
+                // Save the original timestamp for the smaller adjusted timestamp
+                email.timestamp = timestampXReceived;
+                email.comparisonTimestamp = adjustedTimestampXReceived;
+            }
+        } else {
+            // If no matches for either, use the new Date(email.date)
+            const date = new Date(email.date);
+            // Save the original timestamp
+            email.timestamp = date.getTime();
+        }
 
         const importedDate = new Date(email.importedDate);
-        email.importedTimestamp = date.getTime();
+        email.importedTimestamp = importedDate.getTime();
     }
 
     function extractImageFromEmail(email) {
@@ -1326,7 +1401,7 @@ function init() {
                 pt: /Agradecemos o envio de Photo para o Niantic Wayspot (?<title>.+)!/,
                 ru: /Спасибо! Получено: Photo Niantic Wayspot для (?<title>.+)/,
                 sv: /Tack! Niantic Wayspot Photo togs emot för (?<title>.+)!/,
-                ta: /धन्यवाद! (?<title>.+) साठी Niantic वेस्पॉट Photo प्राप्त झाले!/,
+                ta: /நன்றி! (?<title>.+) -க்கான Niantic Wayspot Photo பெறப்பட்டது!/,
                 te: /ధన్యవాదాలు! (?<title>.+)! కొరకు Niantic Wayspot Photo అందుకున్నాము!/,
                 th: /ขอบคุณ! ได้รับ Niantic Wayspot Photo สำหรับ (?<title>.+) แล้ว!/,
                 zh: /感謝你！ 我們已收到 (?<title>.+) 的 Niantic Wayspot Photo/
@@ -1343,11 +1418,11 @@ function init() {
                 //  body: / /,
                 //  acceptanceText: ''
                 //},
-                //cs: {
-                //  title: / /,
-                //  body: / /,
-                //  acceptanceText: ''
-                //},
+                cs: {
+                  title: /Rozhodnutí o odeslání obrázku Niantic Wayspotu (?<title>.+)/,
+                  body: /děkujeme za odeslání návrhu pro položku Photo Wayspotu (?<title>.+) ze dne (?<day>\d{1,2})\.(?<month>\d{1,2})\.(?<year>\d{4})/,
+                  acceptanceText: ''
+                },
                 de: {
                     title: /Entscheidung zu deinem Upload für den Wayspot (?<title>.+)/,
                     body: /danke, dass du am (?<day>\d{1,2})\.(?<month>\d{2})\.(?<year>\d{4}) den Upload Photo für den Wayspot (?<title>.*) eingereicht hast/,
@@ -1363,26 +1438,26 @@ function init() {
                 //  body: / /,
                 //  acceptanceText: ''
                 //},
-                //hi: {
-                //  title: / /,
-                //  body: / /,
-                //  acceptanceText: ''
-                //},
+                hi: {
+                  title: /(?<title>.+) के लिए तह Niantic Wayspot मीडिया सबमिशन/,
+                  body: /प्रिय (?<username>.+),([^]+?)(?<title>.+) पर (?<month>\w{3}) (?<day>\d{1,2}), (?<year>\d{4}) लिए आपके Wayspot Photo सबमिशन के लिए धन्यवाद।/,
+                  acceptanceText: ''
+                },
                 it: {
                     title: /Proposta di contenuti multimediali di Niantic Wayspot decisa per (?<title>.+)/,
                     body: /grazie per la proposta di contenuti multimediali Photo di Wayspot per (?<title>.+) in data (?<day>\d{1,2})-(?<month>\w{3})-(?<year>\d{4})/,
                     acceptanceText: 'Congratulazioni, la tua proposta di Photo di Wayspot è stata accettata dalla comunità Wayfarer',
                 },
-                //jp: {
-                //  title: / /,
-                //  body: / /,
-                //  acceptanceText: ''
-                //},
-                //ko: {
-                //  title: / /,
-                //  body: / /,
-                //  acceptanceText: ''
-                //},
+                jp: {
+                  title: /Niantic Wayspotのメディア申請「(?<title>.+)」が決定しました/,
+                  body: /(?<year>\d{4})\/(?<month>\d{2})\/(?<day>\d{1,2})にWayspot Photo「(?<title>.+)」に関して申請していただき、ありがとうございました/,
+                  acceptanceText: 'おめでとうございます。コミュニティはあなたのWayspot Photo申請を承認しました'
+                },
+                ko: {
+                  title: /^(?<title>.+)에 대한 Niantic Wayspot 미디어 제안 결정 완료/,
+                  body: /(?<year>\d{4})\. (?<month>\d{1,2})\. (?<day>\d{1,2})에 (?<title>.+)에 대한 Wayspot Photo 미디어를 제출해 주셔서 감사합니다/,
+                  acceptanceText: '기쁘게도, 커뮤니티에서 제안하신 Wayspot Photo 제안을 승인했습니다'
+                },
                 //mr: {
                 //  title: / /,
                 //  body: / /,
@@ -1518,6 +1593,7 @@ function init() {
                     subject: /你投稿的照片通過審核了/,
                     body: /我們已完成下列照片的審核[:：] (?<title>.+)/,
                     submissionDate: /提交日期\s*[:：]\s*(?<year>\d{4})-(?<month>\d{1,2})-(?<day>\d{1,2})/,
+                    acceptanceText: '現已反映在寶可補給站/道館上',
                     id: /ID: (?<id>\S+)/,
                 }
             };
@@ -1694,24 +1770,24 @@ function init() {
         function convertDateComponents(lang, dayString, monthString, yearString) {
             const months = {
                 en: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
-                bn: [],
-                cs: [],
+                bn: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
+                cs: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'],
                 de: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'],
                 es: ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sept', 'oct', 'nov', 'dic'],
                 fr: ['janv', 'févr', 'mars', 'avr', 'mai', 'juin', 'juil', 'août', 'sept', 'oct', 'nov', 'déc'],
                 hi: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
                 it: ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'],
                 jp: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'],
-                ko: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'],
-                mr: [],
+                ko: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'],
+                mr: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
                 nl: ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'],
                 no: ['jan', 'feb', 'mar', 'apr', 'mai', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'des'],
-                pl: [],
+                pl: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'],
                 pt: ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'],
                 ru: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'],
                 sv: ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'],
-                ta: [],
-                te: [],
+                ta: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
+                te: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
                 th: ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'],
                 zh: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
             };
@@ -1912,8 +1988,9 @@ function init() {
             if (submission.outcome.result === 'rejected' && !submission.matched && submission.outcome.template === 'Ingress Redacted') {
 
                 const matchingSubmission = photoSubmissions.find(sub =>
-                                                                 sub.status === 'pending' &&
                                                                  sub.submitted.title === submission.outcome.title &&
+                                                                 sub.status === 'pending' &&
+                                                                 !sub.matched &&
                                                                  sub.submitted.timestamp < submission.outcome.timestamp
                                                                 );
 
@@ -2064,8 +2141,11 @@ function init() {
     function sortAndFilterPhotoSubmissions() {
         // Filter photoListItems based on filterSettings and currentSearchTerm
         const filteredPhotoListItems = photoListItems.filter((item) => {
-            const matchesFilterSettings =
-                  (filterSettings.pending && item.status === 'pending') ||
+            const matchesFilterSettings = groupingSetting
+            ? (filterSettings.pending && item.pendingCount > 0) ||
+                  (filterSettings.accepted && item.acceptedCount > 0) ||
+                  (filterSettings.rejected && item.rejectedCount > 0)
+            : (filterSettings.pending && item.status === 'pending') ||
                   (filterSettings.accepted && item.status === 'accepted') ||
                   (filterSettings.rejected && item.status === 'rejected');
 
@@ -2073,7 +2153,9 @@ function init() {
             const searchTitle = item.searchTitle.toLowerCase();
             const matchesSearch = !trimmedSearchTerm || searchTitle.includes(trimmedSearchTerm);
 
-            return matchesFilterSettings && matchesSearch;
+            const matchesGroup = groupingSetting ? item.group : true;
+
+            return matchesFilterSettings && matchesSearch && matchesGroup;
         });
 
         // Sort the remaining values
@@ -2099,6 +2181,8 @@ function init() {
             photosListBox.removeEventListener('click', handlePhotosListBoxClick);
             photosListBox.addEventListener('click', handlePhotosListBoxClick);
         }
+
+        updateGroupedItemsCss();
 
         // Set the height for the photo-scroll-spacer element to match the number of submissions
         const photoScrollSpacer = document.getElementById('photo-scroll-spacer');
@@ -2131,7 +2215,7 @@ function init() {
             }
 
             // Extract the imgUrl associated with the clicked item (assuming it's the first child)
-            const imgUrl = clickedItem.querySelector('.w-24').src;
+            const imgUrl = clickedItem.querySelector('.wfpc-photo-list-image').src;
 
             // Create the photo details pane using the imgUrl
             createPhotoDetailsPane(imgUrl);
@@ -2142,30 +2226,68 @@ function init() {
         photoListItems = [];
 
         photoSubmissions.forEach((submission) => {
-            if (submission.submitted.timestamp !== null) {
-                const sortTitle = submission.title;
-                const status = submission.status;
-
-                let submittedTitle = submission.submitted.title === sortTitle ? '' : submission.submitted.title || '';
-                let outcomeTitle = submission.outcome.title === sortTitle ? '' : submission.outcome.title || '';
-
-                const searchTitle = [sortTitle, submittedTitle, outcomeTitle].join(' / ');
-
-                const timestamp = submission.submitted.timestamp;
-                const html = createPhotosListHtml(submission);
-
-                photoListItems.push({
-                    sortTitle,
-                    status,
-                    searchTitle,
-                    timestamp,
-                    html
-                });
+            const photoListItem = createPhotoListItem(submission);
+            if (photoListItem !== null) {
+                photoListItems.push(photoListItem);
             }
         });
     }
 
-    function createPhotosListHtml(photoSubmission) {
+    function createPhotoListItem(submission) {
+        if (submission.submitted.timestamp === null) {
+            return null; // Skip submissions with null timestamps
+        }
+
+        const sortTitle = submission.title;
+        const status = submission.status;
+
+        let submittedTitle = submission.submitted.title === sortTitle ? '' : submission.submitted.title || '';
+        let outcomeTitle = submission.outcome.title === sortTitle ? '' : submission.outcome.title || '';
+
+        const searchTitle = [sortTitle, submittedTitle, outcomeTitle].join(' / ');
+
+        let linkedSubmissions;
+        let groupData;
+
+        const imageUrl = submission.imageUrl;
+
+        // Create data for grouped display if the submission is not linked to anything
+        if (!submission.linkedTo) {
+            linkedSubmissions = findLinkedPhotoSubmissions(submission);
+
+            // Count the number of nominations in the group by status
+            const statusCounts = {};
+
+            linkedSubmissions.forEach(linkedSubmission => {
+                const linkedStatus = linkedSubmission.status;
+                statusCounts[linkedStatus] = (statusCounts[linkedStatus] || 0) + 1;
+            });
+
+            groupData = {
+                acceptedCount: statusCounts.accepted || 0,
+                rejectedCount: statusCounts.rejected || 0,
+                pendingCount: statusCounts.pending || 0,
+            };
+        }
+
+        const html = createPhotosListHtml(submission, groupData);
+
+        // Determine whether the submission is linked or not and set the 'group' property accordingly
+        const group = !submission.linkedTo;
+
+        return {
+            sortTitle,
+            status,
+            searchTitle,
+            imageUrl,
+            timestamp: submission.submitted.timestamp,
+            html: html,
+            group: group,
+            ...groupData,
+        };
+    }
+
+    function createPhotosListHtml(photoSubmission, groupData) {
         const l10n = getL10N();
 
         const {
@@ -2181,58 +2303,93 @@ function init() {
         const state = photoSubmission.lightship.state || '';
         const address = `${city && state ? `${city}, ${state}` : city || state}`;
 
-        const outcomeClass = status === "pending"
-        ? "queue"
-        : status === "accepted"
-        ? "accepted"
-        : status === "rejected"
-        ? "rejected"
-        : "queue"; // Default class if none of the conditions match
+        const outcomeClass = (() => {
+            switch (status) {
+                case "pending":
+                    return "queue";
+                case "accepted":
+                    return "accepted";
+                case "rejected":
+                    return "rejected";
+            }
+        })();
 
-        const outcomeText = status === "pending"
-        ? strings[language].pending
-        : status === "accepted"
-        ? l10n['nominations.status.accepted']
-        : status === "rejected"
-        ? l10n['nominations.status.notaccepted']
-        : strings[language].pending; // Default text if none of the conditions match
+        const outcomeText = (() => {
+            switch (status) {
+                case "pending":
+                    return strings[language].pending;
+                case "accepted":
+                    return l10n['nominations.status.accepted'];
+                case "rejected":
+                    return l10n['nominations.status.notaccepted'];
+            }
+        })();
+
+        const acceptedCount = groupData && groupData.acceptedCount ? groupData.acceptedCount : 0;
+        const rejectedCount = groupData && groupData.rejectedCount ? groupData.rejectedCount : 0;
+        const pendingCount = groupData && groupData.pendingCount ? groupData.pendingCount : 0;
+
+        const totalCount = acceptedCount + rejectedCount + pendingCount;
 
         // Determine if the sash icon should be added
-        const includeSashIcon = photoSubmission.status === "accepted";
+        const includeSashIcon = photoSubmission.status === "accepted" || acceptedCount > 0;
 
         // Add the sash icon HTML if needed
         const sashIconHTML = includeSashIcon
-        ? `<img src="/img/sash.svg" class="relative -top-5 left-4">`
+        ? `<img src="/img/sash.svg" class="wfpc-photo-list-sash">`
         : "";
 
+        // Determine the count strings
+        const acceptedCountHTML = acceptedCount > 0 ? `<span class="nomination-tag--accepted wfpc-groupPhotoItemTag">${totalCount > 1 ? `${acceptedCount}× ` : ''}${l10n['nominations.status.accepted']}</span>` : '';
+        const rejectedCountHTML = rejectedCount > 0 ? `<span class="nomination-tag--rejected wfpc-groupPhotoItemTag">${totalCount > 1 ? `${rejectedCount}× ` : ''}${l10n['nominations.status.notaccepted']}</span>` : '';
+        const pendingCountHTML = pendingCount > 0 ? `<span class="nomination-tag--queue wfpc-groupPhotoItemTag">${totalCount > 1 ? `${pendingCount}× ` : ''}${strings[language].pending}</span>` : '';
+
         const htmlContent = `
-        <app-nominations-list-item ${ngcontent}-c202="">
-          <div class="nominations-item">
-            <img class="w-24 h-20 rounded mr-4 object-cover" src="${imageUrl}">
-            <div class="flex flex-col h-full w-full py-3 justify-between">
-              <div class="flex flex-row justify-between">
-                <div>
-                  <div class="flex flex-row items-center">
-                    <span class="font-bold">${title}</span>
-                  </div>
-                  <div class="text-xs">${address}</div>
-                </div> ${sashIconHTML}
-              </div>
-              <div class="flex flex-row justify-between items-center my-2">
-                <app-nomination-tag-set class="flex flex-wrap nominations-item__tags">
-                  <app-nomination-tag ${ngcontent}-c200="" class="mr-1">
-                    <div class="nomination-tag">
-                      <span class="nomination-tag--${outcomeClass}"> ${outcomeText} </span>
-                    </div>
-                  </app-nomination-tag>
-                </app-nomination-tag-set>
-                <div class="text-xs whitespace-nowrap">${formatDate(submittedTimestamp)}</div>
-              </div>
+    <app-nominations-list-item>
+      <div class="nominations-item">
+        <img class="wfpc-photo-list-image" src="${imageUrl}">
+        <div class="wfpc-photo-list-text-div">
+          <div class="wfpc-photo-list-text-inner-div">
+            <div>
+              <div class="font-bold">${title}</div>
+              <div class="text-xs">${address}</div>
+            </div> ${sashIconHTML}
+          </div>
+          <div class="flex flex-row justify-between items-center my-2">
+            <app-nomination-tag-set class="flex flex-wrap nominations-item__tags">
+              <app-nomination-tag class="mr-1">
+                <div class="nomination-tag">
+                  <span class="nomination-tag--${outcomeClass} wfpc-singlePhotoItemTag"> ${outcomeText} </span>
+                  ${acceptedCountHTML}
+                  ${rejectedCountHTML}
+                  ${pendingCountHTML}
+                </div>
+              </app-nomination-tag>
+            </app-nomination-tag-set>
+            <div class="text-xs whitespace-nowrap">${formatDate(submittedTimestamp)}
             </div>
           </div>
-        </app-nominations-list-item>
-    `
+        </div>
+      </div>
+    </app-nominations-list-item>
+    `;
+
         return htmlContent;
+    }
+
+    function updatePhotoListItem(submission) {
+        const existingIndex = photoListItems.findIndex(item => item.imageUrl === submission.imageUrl);
+
+        if (existingIndex !== -1) {
+            // PhotoListItem found, remove it
+            photoListItems.splice(existingIndex, 1);
+        }
+
+        // Create and add the updated PhotoListItem
+        const updatedPhotoListItem = createPhotoListItem(submission);
+        if (updatedPhotoListItem !== null) {
+            photoListItems.push(updatedPhotoListItem);
+        }
     }
 
     // Function to synchronise the search boxes
@@ -2670,7 +2827,7 @@ function init() {
             const headerDiv = document.createElement('div');
             const headerText = document.createElement('h4');
             headerText.classList.add('mb-2');
-            headerText.textContent = 'Link Photos';
+            headerText.textContent = strings[language].linkPhotos;
             headerDiv.appendChild(headerText);
 
             const headerExplanation = document.createElement('p');
@@ -2908,9 +3065,9 @@ function init() {
                     return photoSubmissions.find(submission => submission.imageUrl === image.src);
                 })];
 
-                // Find the oldest submission
-                const oldestSubmission = selectedSubmissions.reduce((oldest, current) => {
-                    return current.submitted.timestamp < oldest.submitted.timestamp ? current : oldest;
+                // Find the newest submission
+                const newestSubmission = selectedSubmissions.reduce((newest, current) => {
+                    return current.submitted.timestamp > newest.submitted.timestamp ? current : newest;
                 }, selectedSubmissions[0]);
 
                 // Clear linked status from all submissions
@@ -2924,7 +3081,7 @@ function init() {
                 // Add linking to the current selected submissions
                 // This is a reference to the oldest submission from the linked set.
                 selectedSubmissions.forEach(submission => {
-                    submission.linkedTo = oldestSubmission === submission ? undefined : oldestSubmission.imageUrl;
+                    submission.linkedTo = newestSubmission === submission ? undefined : newestSubmission.imageUrl;
                     if (selectedNominationImageUrl) {
                         submission.lightship.parentNomination = selectedNominationImageUrl;
                     }
@@ -2942,7 +3099,21 @@ function init() {
                     });
                 }
 
+                clearOverlay();
+
                 synchronizeLightshipData(thisSubmission);
+
+                // If grouping mode is on, then remove associated photo list items, recreate and resort the list.
+                // Not required if grouping mode is off.
+                if (groupingSetting = true) {
+                    const submissionsToUpdate = Array.from(new Set([...selectedSubmissions, ...linkedSubmissions]));
+
+                    submissionsToUpdate.forEach(submission => {
+                        updatePhotoListItem(submission);
+                    });
+
+                    sortAndFilterPhotoSubmissions()
+                }
             }
 
             clearOverlay();
@@ -3011,13 +3182,7 @@ function init() {
     // Function to ensure that all linked submissions inherit the same Lightship data
     function synchronizeLightshipData(thisSubmission) {
         // Determine the URL to which the submissions are linked
-        const linkingUrl = thisSubmission.linkedTo || thisSubmission.imageUrl;
-
-        // Find linked submissions
-        const linkedSubmissions = [
-            ...photoSubmissions.filter(submission => submission.linkedTo === linkingUrl),
-            ...photoSubmissions.filter(submission => submission.imageUrl === linkingUrl)
-        ];
+        const linkedSubmissions = findLinkedPhotoSubmissions(thisSubmission);
 
         let parentNomination;
         let nominationTimestamp;
@@ -3088,11 +3253,15 @@ function init() {
         });
 
         createPhotoDetailsPane(thisSubmission.imageUrl);
-        updatePhotoListItems(linkedSubmissions);
+        if (!groupingSetting) {
+            updatePhotoListItems(linkedSubmissions);
+        }
         savePhotoSubmissionsToIDB();
     }
 
-    // Updates the title and address of the photo list items after a change in details
+    // Updates the title and address of the photo list items after a change in details.
+    // Only required if grouping setting is false.
+    // Otherwise, the photo items get completely rewritten more extensively.
     function updatePhotoListItems(linkedSubmissions) {
         const photosListDiv = document.querySelector('.photos-list');
 
@@ -3125,44 +3294,20 @@ function init() {
         });
     }
 
-    function createImageOverlay(imageUrl) {
-        const overlayDiv = document.createElement('div');
-        overlayDiv.classList.add('cdk-overlay-photos-container');
-        overlayDiv.innerHTML = `
-      <div class="cdk-overlay-backdrop wf-image-modal-backdrop cdk-overlay-backdrop-showing"></div>
-      <div class="cdk-global-overlay-wrapper">
-        <div class="cdk-overlay-pane wf-image-modal-panel">
-          <mat-dialog-container>
-            <wf-image-dialog>
-              <div class="fixed inset-0 flex items-center justify-center cursor-pointer">
-                <img class="max-h-full object-contain cursor-pointer" src="${imageUrl}=s0">
-              </div>
-              <button class="absolute p-4 text-white dark:text-white" type="button">
-                <mat-icon class="material-icons">clear</mat-icon>
-              </button>
-            </wf-image-dialog>
-          </mat-dialog-container>
-        </div>
-      </div>
-    `;
+    function findLinkedPhotoSubmissions(thisSubmission) {
+        // Determine the URL to which the submissions are linked
+        const linkingUrl = thisSubmission.linkedTo || thisSubmission.imageUrl;
 
-        // Append the overlayDiv to the body or a specific container
-        document.body.appendChild(overlayDiv);
+        // Find linked submissions
+        const linkedSubmissions = [
+            ...photoSubmissions.filter(submission => submission.linkedTo === linkingUrl),
+            ...photoSubmissions.filter(submission => submission.imageUrl === linkingUrl)
+        ];
 
-        // Add event listener to the overlay backdrop
-        const overlayBackdrop = document.querySelector('.cdk-global-overlay-wrapper');
-        if (overlayBackdrop) {
-            overlayBackdrop.addEventListener('click', clearOverlay);
-        }
-
-        // Add a click event listener to the image element
-        const imageElement = document.querySelector('.max-h-full');
-        imageElement.addEventListener('click', function () {
-            window.open(`${imageUrl}=s0`, '_blank');
-        });
+        return linkedSubmissions;
     }
 
-    function createImageOverlay_bkp(imageUrl) {
+    function createImageOverlay(imageUrl) {
         const overlayDiv = document.createElement('div');
         overlayDiv.classList.add('cdk-overlay-photos-container');
         overlayDiv.innerHTML = `
@@ -3222,6 +3367,8 @@ function init() {
         const { title, submission, status, imageUrl } = photoSubmission;
         const submittedTimestamp = photoSubmission.submitted.timestamp;
         const outcomeTimestamp = photoSubmission.outcome ? photoSubmission.outcome.timestamp : null;
+
+        let currentImageUrl = imageUrl;
 
         const guid = photoSubmission.lightship.guid || '';
         const description = photoSubmission.lightship.description || '';
@@ -3329,91 +3476,217 @@ function init() {
 
         detailsPaneInner.appendChild(addressParagraph);
 
-        // Create the outcome coloured box
-        let statusClass = status === 'pending' ? 'queue' : status;
-
-        const tagSetElement = document.createElement('app-nomination-tag-set');
-        tagSetElement.setAttribute('class', 'flex flex-row');
-        const tagElement = document.createElement('app-nomination-tag');
-        const divElement = document.createElement('div');
-        divElement.setAttribute('class', 'nomination-tag');
-        const spanElement = document.createElement('span');
-        spanElement.setAttribute('class', `nomination-tag--${statusClass}`);
-
-        const outcomeText = status === "pending"
-        ? strings[language].pending
-        : status === "accepted"
-        ? l10n['nominations.status.accepted']
-        : status === "rejected"
-        ? l10n['nominations.status.notaccepted']
-        : strings[language].pending; // Default text if none of the conditions match
-        spanElement.textContent = outcomeText;
-
-        divElement.appendChild(spanElement);
-        tagElement.appendChild(divElement);
-        tagSetElement.appendChild(tagElement);
-
-        const outcomeDisplayDiv = document.createElement('div');
-        outcomeDisplayDiv.classList.add('wfpc-details-outcome-div');
-
-        outcomeDisplayDiv.appendChild(tagSetElement);
-        detailsPaneInner.appendChild(outcomeDisplayDiv);
-
-        // Create the drop down for the submitted date and decision date
-        // Utilise same system as Nomination Status History for consistency.
-        const wfpcDropdown = document.createElement('div');
-        wfpcDropdown.setAttribute('class', 'wfpcDropdown');
-
-        const wfpcDDLeftBox = document.createElement('a');
-        wfpcDDLeftBox.setAttribute('class', 'wfpcDDLeftBox');
-        wfpcDDLeftBox.textContent = '▶';
-
-        const wfpcDDRightBox = document.createElement('div');
-        wfpcDDRightBox.setAttribute('class', 'wfpcDDRightBox');
-
-        const wfpcOneLineParagraph = document.createElement('p');
-        wfpcOneLineParagraph.setAttribute('class', 'wfpcOneLine');
-        wfpcOneLineParagraph.style.display = 'block';
-
-        const wfpcInnerDiv = document.createElement('div');
-        wfpcInnerDiv.setAttribute('class', 'wfpcInner');
-        wfpcInnerDiv.style.display = 'none';
-
-        if (status === 'pending') {
-            wfpcOneLineParagraph.textContent = `${formatDate(submittedTimestamp)} - ${strings[language].submitted}`;
-            wfpcInnerDiv.innerHTML = `<p>${formatDate(submittedTimestamp)} - ${strings[language].submitted}</p>`;
-        } else if (status === 'accepted') {
-            wfpcOneLineParagraph.textContent = `${formatDate(outcomeTimestamp)} - ${l10n['nominations.status.accepted']}`;
-            wfpcInnerDiv.innerHTML = `<p>${formatDate(submittedTimestamp)} - ${strings[language].submitted}</p>
-                                   <p>${formatDate(outcomeTimestamp)} - ${l10n['nominations.status.accepted']}</p>`;
-        } else if (status === 'rejected') {
-            wfpcOneLineParagraph.textContent = `${formatDate(outcomeTimestamp)} - ${l10n['nominations.status.notaccepted']}`;
-            wfpcInnerDiv.innerHTML = `<p>${formatDate(submittedTimestamp)} - ${strings[language].submitted}</p>
-                                   <p>${formatDate(outcomeTimestamp)} - ${l10n['nominations.status.notaccepted']}</p>`;
-        }
-
-        wfpcDDRightBox.appendChild(wfpcOneLineParagraph);
-        wfpcDDRightBox.appendChild(wfpcInnerDiv);
-
-        wfpcDropdown.appendChild(wfpcDDLeftBox);
-        wfpcDropdown.appendChild(wfpcDDRightBox);
-
-        outcomeDisplayDiv.appendChild(wfpcDropdown);
-
-        wfpcDropdown.addEventListener('click', () => {
-            wfpcOneLineParagraph.style.display = (wfpcOneLineParagraph.style.display === 'none') ? 'block' : 'none';
-            wfpcInnerDiv.style.display = (wfpcInnerDiv.style.display === 'none') ? 'block' : 'none';
-            wfpcDDLeftBox.textContent = (wfpcDDLeftBox.textContent === '▶') ? '▼' : '▶';
-        });
-
         // Create and append the image element
         const imageElement = document.createElement('img');
         imageElement.classList.add('wfpc-details-image');
         imageElement.setAttribute('role', 'button');
         imageElement.setAttribute('src', imageUrl);
         imageElement.addEventListener('click', function () {
-            createImageOverlay(imageUrl);
+            createImageOverlay(currentImageUrl);
         });
+
+        // Find linked submissions
+        const linkedSubmissions = findLinkedPhotoSubmissions(photoSubmission);
+
+        // Check if groupingSetting is true
+        if (groupingSetting && linkedSubmissions.length > 1) {
+            linkedSubmissions.sort((a, b) => b.submitted.timestamp - a.submitted.timestamp);
+
+            // Create an image carousel
+            const carouselImagesContainer = document.createElement('div');
+            carouselImagesContainer.classList.add('wfpc-details-carousel-container');
+
+            // Create a container for each linked submission
+            linkedSubmissions.forEach(linkedSubmission => {
+
+                // Container for each linked submission
+                const linkedSubmissionContainer = document.createElement('div');
+                linkedSubmissionContainer.classList.add('wfpc-linked-submission-container');
+
+                // Image element for the linked submission
+                const linkedImage = document.createElement('img');
+                linkedImage.classList.add('wfpc-details-carousel-image');
+                linkedImage.setAttribute('src', linkedSubmission.imageUrl);
+                linkedImage.style.maxHeight = '150px';
+                linkedImage.style.maxWidth = '300px';
+
+                linkedImage.addEventListener('click', () => {
+                    // Replace the current image with the clicked image
+                    currentImageUrl = linkedSubmission.imageUrl;
+                    imageElement.setAttribute('src', linkedSubmission.imageUrl);
+
+                    // Place border around currently selected image
+                    document.querySelectorAll('.wfpc-details-carousel-image').forEach(image => {
+                        image.classList.remove('wfpc-carousel-image-selected');
+                    });
+                    linkedImage.classList.add('wfpc-carousel-image-selected');
+
+                    // Replace existing outcomes dropdown
+                    const existingDropdown = document.querySelector('.wfpcDropdown');
+                    if (existingDropdown) {
+                        existingDropdown.remove();
+                    }
+                    createOutcomeDropdown(linkedSubmission);
+                });
+
+                linkedSubmissionContainer.appendChild(linkedImage);
+
+                // Create the outcome coloured box for the linked submission
+                let statusClass = linkedSubmission.status === 'pending' ? 'queue' : linkedSubmission.status;
+
+                const tagSetElement = document.createElement('app-nomination-tag-set');
+                tagSetElement.setAttribute('class', 'flex flex-row');
+                const tagElement = document.createElement('app-nomination-tag');
+                const divElement = document.createElement('div');
+                divElement.setAttribute('class', 'nomination-tag');
+                const spanElement = document.createElement('span');
+                spanElement.setAttribute('class', `nomination-tag--${statusClass}`);
+
+                const outcomeText = linkedSubmission.status === "pending"
+                ? strings[language].pending
+                : linkedSubmission.status === "accepted"
+                ? l10n['nominations.status.accepted']
+                : linkedSubmission.status === "rejected"
+                ? l10n['nominations.status.notaccepted']
+                : strings[language].pending; // Default text if none of the conditions match
+                spanElement.textContent = outcomeText;
+
+                divElement.appendChild(spanElement);
+                tagElement.appendChild(divElement);
+                tagSetElement.appendChild(tagElement);
+
+                const outcomeDisplayDiv = document.createElement('div');
+                outcomeDisplayDiv.classList.add('wfpc-details-outcome-div', 'mt-2');
+                outcomeDisplayDiv.appendChild(tagSetElement);
+
+                linkedSubmissionContainer.appendChild(outcomeDisplayDiv);
+
+                // Append the container for the linked submission to the carousel
+                carouselImagesContainer.appendChild(linkedSubmissionContainer);
+            });
+
+            detailsPaneInner.appendChild(carouselImagesContainer);
+        }
+
+        const outcomeDisplayDiv = document.createElement('div');
+        outcomeDisplayDiv.classList.add('wfpc-details-outcome-div');
+
+        detailsPaneInner.appendChild(outcomeDisplayDiv);
+
+        const tagSetElement = document.createElement('app-nomination-tag-set');
+        tagSetElement.setAttribute('class', 'flex flex-row');
+
+        if (!groupingSetting || linkedSubmissions.length === 1) {
+            // Create the outcome coloured box
+            let statusClass = status === 'pending' ? 'queue' : status;
+
+
+            const tagElement = document.createElement('app-nomination-tag');
+            const divElement = document.createElement('div');
+            divElement.setAttribute('class', 'nomination-tag');
+            const spanElement = document.createElement('span');
+            spanElement.setAttribute('class', `nomination-tag--${statusClass}`);
+
+            const outcomeText = status === "pending"
+            ? strings[language].pending
+            : status === "accepted"
+            ? l10n['nominations.status.accepted']
+            : status === "rejected"
+            ? l10n['nominations.status.notaccepted']
+            : strings[language].pending; // Default text if none of the conditions match
+            spanElement.textContent = outcomeText;
+
+            divElement.appendChild(spanElement);
+            tagElement.appendChild(divElement);
+            tagSetElement.appendChild(tagElement);
+        }
+
+        outcomeDisplayDiv.appendChild(tagSetElement);
+
+        function createOutcomeDropdown(submission) {
+            const status = submission.status;
+            const submittedDate = formatDate(submission.submitted.timestamp);
+            const outcomeDate = formatDate(submission.outcome.timestamp);
+
+            // Create the drop down for the submitted date and decision date
+            // Utilise same system as Nomination Status History for consistency.
+            const wfpcDropdown = document.createElement('div');
+            wfpcDropdown.setAttribute('class', 'wfpcDropdown');
+
+            const wfpcDDLeftBox = document.createElement('a');
+            wfpcDDLeftBox.setAttribute('class', 'wfpcDDLeftBox');
+            wfpcDDLeftBox.textContent = '▶';
+
+            const wfpcDDRightBox = document.createElement('div');
+            wfpcDDRightBox.setAttribute('class', 'wfpcDDRightBox');
+
+            const wfpcOneLineParagraph = document.createElement('p');
+            wfpcOneLineParagraph.setAttribute('class', 'wfpcOneLine');
+            wfpcOneLineParagraph.style.display = 'block';
+
+            if (status === 'pending') {
+                wfpcOneLineParagraph.textContent = `${submittedDate} - ${strings[language].submitted}`;
+            } else {
+                wfpcOneLineParagraph.textContent = `${outcomeDate} - ${l10n['nominations.status.accepted']}`;
+            }
+
+            wfpcDDRightBox.appendChild(wfpcOneLineParagraph);
+
+            const wfpcInnerDiv = document.createElement('div');
+            wfpcInnerDiv.setAttribute('class', 'wfpcInner');
+            wfpcInnerDiv.style.display = 'none';
+
+            const windowRef = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+
+            function createLinkElement(textContent, messageId, clickHandler) {
+                const linkElement = document.createElement('a');
+                linkElement.textContent = textContent;
+                linkElement.addEventListener('click', e => {
+                    e.stopPropagation();
+                    windowRef.wft_plugins_api.emailImport.get(messageId).then(eml => eml.display());
+                });
+                return linkElement;
+            }
+
+            if (windowRef.wft_plugins_api && windowRef.wft_plugins_api.emailImport) {
+                const submittedLink = createLinkElement(strings[language].submitted, submission.submitted.messageId);
+                const submittedLine = document.createElement('p');
+                submittedLine.appendChild(document.createTextNode(`${submittedDate} - `));
+                submittedLine.appendChild(submittedLink);
+                wfpcInnerDiv.appendChild(submittedLine);
+
+                if (status !== 'pending') {
+                    const outcomeText = status === 'accepted' ? l10n['nominations.status.accepted'] : l10n['nominations.status.notaccepted'];
+                    const outcomeLink = createLinkElement(outcomeText, submission.outcome.messageId);
+                    const outcomeLine = document.createElement('p');
+                    outcomeLine.appendChild(document.createTextNode(`${outcomeDate} - `));
+                    outcomeLine.appendChild(outcomeLink);
+                    wfpcInnerDiv.appendChild(outcomeLine);
+                }
+            } else {
+                wfpcInnerDiv.appendChild(document.createTextNode(`${submittedDate} - ${strings[language].submitted}`));
+
+                if (status !== 'pending') {
+                    const outcomeText = status === 'accepted' ? l10n['nominations.status.accepted'] : l10n['nominations.status.notaccepted'];
+                    wfpcInnerDiv.appendChild(document.createTextNode(`${outcomeDate} - ${outcomeText}`));
+                }
+            }
+
+            wfpcDDRightBox.appendChild(wfpcInnerDiv);
+
+            wfpcDropdown.appendChild(wfpcDDLeftBox);
+            wfpcDropdown.appendChild(wfpcDDRightBox);
+
+            outcomeDisplayDiv.appendChild(wfpcDropdown);
+
+            wfpcDropdown.addEventListener('click', () => {
+                wfpcOneLineParagraph.style.display = (wfpcOneLineParagraph.style.display === 'none') ? 'block' : 'none';
+                wfpcInnerDiv.style.display = (wfpcInnerDiv.style.display === 'none') ? 'block' : 'none';
+                wfpcDDLeftBox.textContent = (wfpcDDLeftBox.textContent === '▶') ? '▼' : '▶';
+            });
+        }
+
+        createOutcomeDropdown(photoSubmission);
 
         detailsPaneInner.appendChild(imageElement);
 
@@ -3440,6 +3713,14 @@ function init() {
 
         // Attach the details pane as the next sibling of the parent
         pageHeaderParent.parentNode.insertBefore(detailsPane, pageHeaderParent.nextSibling);
+
+        // Initialise highlighting of currently selected image from carousel
+        if (groupingSetting && linkedSubmissions.length > 1) {
+            const matchingImage = document.querySelector(`.wfpc-details-carousel-image[src="${currentImageUrl}"]`);
+            if (matchingImage) {
+                matchingImage.classList.add('wfpc-carousel-image-selected');
+            }
+        }
     }
 
     // Function to create metadata edit overlay
@@ -4605,6 +4886,60 @@ Additional information: [If you have more explanations, add them here]`;
     border-width: 0px!important;
     text-align: right;
     vertical-align: middle;
+  }
+  .wfpc-groupPhotoItemTag {
+    margin-right: 0.5rem !important;
+  }
+  .wfpc-singlePhotoItemTag {
+    margin-right: 0.5rem !important;
+  }
+  .wfpc-details-carousel-container {
+    display: flex;
+    overflow-x: auto;
+  }
+  .wfpc-details-carousel-image {
+    max-height: 120px;
+    max-width: 200px;
+    margin-right: 8px;
+  }
+  .wfpc-linked-submission-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+  .wfpc-photo-list-sash {
+    top: -1.25rem!important;
+    left: 1rem!important;
+    position: relative!important;
+  }
+  .wfpc-photo-list-image {
+    object-fit: cover!important;
+    border-radius: 0.25rem!important;
+    width: 6rem!important;
+    height: 5rem!important;
+    margin-right: 1rem!important;
+  }
+  .wfpc-photo-list-text-div {
+    padding-top: 0.75rem!important;
+    padding-bottom: 0.75rem!important;
+    justify-content: space-between!important;
+    display: flex!important;
+    flex-direction: column!important;
+    width: 100%!important;
+    height: 100%!important;
+  }
+  .wfpc-photo-list-text-inner-div {
+    display: flex!important;
+    flex-direction: row!important;
+    justify-content: space-between!important;
+  }
+  .wfpc-carousel-image-selected {
+    border-width: 4px;
+    --tw-border-opacity: 1;
+    border-color: rgba(239, 163, 142, var(--tw-border-opacity));
+    --tw-bg-opacity: 1;
+    background-color: rgba(229, 229, 229, var(--tw-bg-opacity));
   }
     `;
 
