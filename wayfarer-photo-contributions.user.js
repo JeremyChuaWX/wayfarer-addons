@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.2.0
+// @version      0.2.1
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -24,7 +24,6 @@
 function init() {
     const OBJECT_STORE_NAME = 'photoSubmissions';
     let nominations;
-    let ngcontent;
     let photoListItems;
 
     let holdProcessing = false;
@@ -962,8 +961,6 @@ function init() {
         return emailInfo;
     }
 
-    // Function to change the text content of wf-page-header, add a class, hide the next sibling,
-    // insert a new div, and identify the _ngcontent string
     async function modifyContributionsPage() {
         try {
             const pageHeader = await awaitElement(() => document.querySelector('wf-page-header'));
@@ -971,7 +968,6 @@ function init() {
             const nextSibling = pageHeader.nextSibling;
             if (nextSibling) {
                 nextSibling.classList.add('noms-list');
-                getNgContentString(nextSibling);
                 appendFilterCssStyles();
                 appendCustomCssStyles();
                 modifyExistingNominationsList();
@@ -1161,10 +1157,9 @@ function init() {
 
             // Create the new button
             const newButton = document.createElement('button');
-            newButton.className = 'wf-button nominations__reverse-btn wf-button--icon';
+            newButton.classList.add('wf-button', 'wfpc-photos-list-buttons', 'wf-button--icon');
             newButton.setAttribute('wf-button', '');
             newButton.setAttribute('wftype', 'icon');
-            newButton.setAttribute(`${ngcontent}-c208`, '');
             newButton.id = 'switch-to-photos-button';
 
             // Create the span element for the new button
@@ -1190,18 +1185,8 @@ function init() {
         }
     }
 
-    // Function to extract _ngcontent string from the element's attributes
-    function getNgContentString(element) {
-        for (const attribute of element.attributes) {
-            if (attribute.name.startsWith('_ngcontent-')) {
-                ngcontent = attribute.name.slice(0, -5);
-                return;
-            }
-        }
-    }
-
     function toggleDisplayedList() {
-        const photosListDiv = document.querySelector('.photos-list');
+        const photosListDiv = document.querySelector('.wfpc-photos-list');
         const nomsListDiv = document.querySelector('.noms-list');
 
         // Check the current visibility state of photos-list
@@ -2057,40 +2042,39 @@ function init() {
     function createPhotosDiv() {
         const l10n = getL10N();
         const photosListDiv = document.createElement('div');
-        photosListDiv.classList.add('flex', 'flex-row', 'photos-list', 'hidden-list');
-        photosListDiv.style.display = 'none !important';
+        photosListDiv.classList.add('wfpc-photos-list', 'hidden-list');
 
         // Constructing the HTML content
         const htmlContent = `
-   <div ${ngcontent}-c208="" class="w-full">
-      <div ${ngcontent}-c208="" class="flex flex-col mb-4">
-         <div ${ngcontent}-c208="" class="flex flex-row">
-            <app-nominations-search ${ngcontent}-c208="" class="flex-grow">
-               <div ${ngcontent}-c198="" class="flex flex-col"><span ${ngcontent}-c198="" class="relative top-2 left-3 text-xs bg-gray-100 w-min">${l10n['nominations.search.title']}</span><input ${ngcontent}-c198="" id="photos-search-input" type="text" class="w-full bg-transparent py-1 px-2 border border-black rounded-md"></div>
+   <div class="w-full">
+      <div class="flex flex-col mb-4">
+         <div class="flex flex-row">
+            <app-nominations-search class="flex-grow">
+               <div class="flex flex-col"><span class="relative top-2 left-3 text-xs bg-gray-100 w-min">${l10n['nominations.search.title']}</span><input id="photos-search-input" type="text" class="w-full bg-transparent py-1 px-2 border border-black rounded-md"></div>
                <!---->
             </app-nominations-search>
-            <button ${ngcontent}-c208="" wf-button="" wftype="icon" class="wf-button cursor-pointer self-end ml-4 wf-button--icon" id="photos-filter-button"><img ${ngcontent}-c208="" src="img/options.svg" alt="" class="dark:filter-icon"></button>
+            <button wf-button="" wftype="icon" class="wf-button cursor-pointer self-end ml-4 wf-button--icon" id="photos-filter-button"><img src="img/options.svg" alt="" class="dark:filter-icon"></button>
          </div>
-         <div ${ngcontent}-c208="" class="mt-2">
+         <div class="mt-2">
          <div class="flex flex-row">
-                     <button ${ngcontent}-c208="" wf-button="" wftype="icon" class="wf-button nominations__reverse-btn wf-button--icon" id="switch-to-nominations-button">
-               <span ${ngcontent}-c208="" class="text-xs" id="switch-to-nominations-text">[ ${strings[language].switchToNominations} ]</span>
+                     <button wf-button="" wftype="icon" class="wf-button wfpc-photos-list-buttons wf-button--icon" id="switch-to-nominations-button">
+               <span class="text-xs" id="switch-to-nominations-text">[ ${strings[language].switchToNominations} ]</span>
             </button>
-            <button ${ngcontent}-c208="" wf-button="" wftype="icon" class="wf-button nominations__reverse-btn wf-button--icon" id="photos-sort-button">
-               <span ${ngcontent}-c208="" class="text-xs" id="photo-sort-text">${l10n['nominations.filter.recent']}</span>
-               <mat-icon ${ngcontent}-c208="" role="img" class="mat-icon notranslate material-icons mat-icon-no-color" aria-hidden="true" data-mat-icon-type="font">expand_more</mat-icon>
+            <button wf-button="" wftype="icon" class="wf-button wfpc-photos-list-buttons wf-button--icon" id="photos-sort-button">
+               <span class="text-xs" id="photo-sort-text">${l10n['nominations.filter.recent']}</span>
+               <mat-icon role="img" class="mat-icon notranslate material-icons mat-icon-no-color" aria-hidden="true" data-mat-icon-type="font">expand_more</mat-icon>
             </button>
          </div>
          </div>
          <!---->
       </div>
-      <app-nominations-list ${ngcontent}-c208="" class="w-full">
-         <div ${ngcontent}-c202="">
-            <cdk-virtual-scroll-viewport ${ngcontent}-c202="" class="cdk-virtual-scroll-viewport nominations-list card cdk-virtual-scroll-orientation-vertical">
-               <div class="cdk-virtual-scroll-content-wrapper photos-list-box" style="transform: translateY(0px);">
+      <app-nominations-list class="w-full">
+         <div>
+            <cdk-virtual-scroll-viewport class="wfpc-cdk-virtual-scroll-viewport card">
+               <div class="wfpc-photos-list-box" style="transform: translateY(0px);">
                   <!---->
                </div>
-               <div class="cdk-virtual-scroll-spacer" id="photo-scroll-spacer"></div>
+               <div class="wfpc-cdk-virtual-scroll-spacer" id="photo-scroll-spacer"></div>
             </cdk-virtual-scroll-viewport>
          </div>
          <!----><!----><!----><!---->
@@ -2173,7 +2157,7 @@ function init() {
         const newPhotoListItemsHTML = sortedPhotoListItems.map(item => item.html).join('');
 
         // Replace photosListBox.innerHTML with the joined HTML
-        const photosListBox = document.getElementsByClassName("photos-list-box")[0];
+        const photosListBox = document.getElementsByClassName("wfpc-photos-list-box")[0];
 
         if (photosListBox) {
             photosListBox.innerHTML = newPhotoListItemsHTML;
@@ -2193,7 +2177,7 @@ function init() {
 
     function handlePhotosListBoxClick(event) {
         // Replace photosListBox.innerHTML with the joined HTML
-        const photosListBox = document.getElementsByClassName("photos-list-box")[0];
+        const photosListBox = document.getElementsByClassName("wfpc-photos-list-box")[0];
 
         const clickedItem = event.target.closest('app-nominations-list-item');
 
@@ -2513,7 +2497,6 @@ function init() {
             // Create checkbox container and checkboxes
             const checkboxContainerDiv = document.createElement('div');
             checkboxContainerDiv.classList.add('sort-modal__statuses', 'flex', 'flex-col');
-            checkboxContainerDiv.setAttribute(`${ngcontent}-c190`, '');
 
             const pendingCheckbox = createCheckbox('photo-filter-pending', strings[language].pending, 'pending');
             const acceptedCheckbox = createCheckbox('photo-filter-accepted', l10n['nominations.status.accepted'], 'accepted');
@@ -2604,9 +2587,8 @@ function init() {
 
     function createCheckbox(id, label, value) {
         const wfCheckbox = document.createElement('wf-checkbox');
-        wfCheckbox.setAttribute(`${ngcontent}-c190`, '');
         wfCheckbox.setAttribute('value', value);
-        wfCheckbox.classList.add('wf-checkbox');
+        wfCheckbox.classList.add('wfpc-checkbox');
 
         const matCheckbox = document.createElement('mat-checkbox');
         matCheckbox.classList.add('mat-checkbox', 'mat-accent');
@@ -2839,7 +2821,6 @@ function init() {
 
             // Create a search box
             const searchContainer = document.createElement('searchContainer');
-            searchContainer.setAttribute(`${ngcontent}-c198`, '');
             searchContainer.classList.add('flex', 'flex-col');
 
             const searchLabel = document.createElement('span');
@@ -3262,7 +3243,7 @@ function init() {
     // Only required if grouping setting is false.
     // Otherwise, the photo items get completely rewritten more extensively.
     function updatePhotoListItems(linkedSubmissions) {
-        const photosListDiv = document.querySelector('.photos-list');
+        const photosListDiv = document.querySelector('.wfpc-photos-list');
 
         linkedSubmissions.forEach(linkedSubmission => {
             const imageUrl = linkedSubmission.imageUrl;
@@ -4047,17 +4028,6 @@ Additional information: [If you have more explanations, add them here]`;
     margin-right: 8px
   }
 
-  .sort-modal__statuses[${ngcontent}-c190] {
-    display: flex;
-    flex-direction: column;
-    flex-wrap: wrap;
-    max-height: 12rem
-  }
-
-  .sort-modal__statuses[${ngcontent}-c190] wf-checkbox[${ngcontent}-c190] {
-    margin-bottom: .5rem
-  }
-
   .mat-radio-button {
     display: inline-block;
     -webkit-tap-highlight-color: transparent;
@@ -4630,154 +4600,9 @@ Additional information: [If you have more explanations, add them here]`;
   .hidden-list {
     display: none !important;
   }
-
-  .photoTopButton {
-    background-color: #e5e5e5;
-    border: none;
-    color: #ff4713;
-    padding: 10px 10px;
-    margin: 10px;
-    text-align: center;
-    text-decoration: none;
-    display: inline-block;
-    font-size: 16px;
-    cursor: pointer;
-  }
-
-  .photoMethodButton {
-    background-color: #e5e5e5;
-    border: none;
-    padding: 10px 10px;
-    cursor: pointer;
-    width: 100%;
-    background-size: 30px;
-    background-position: 15px;
-    background-repeat: no-repeat;
-    margin-bottom: 10px;
-  }
-
-  .photoMethodButton .photoMethodTitle {
-    color: #ff4713;
-    font-size: 16px;
-  }
-
-  .photoMethodButton .photoMethodDesc {
-    font-size: 12px;
-  }
-
-  .photoCancelButton {
-    color: #000000;
-  }
-
-  .photoGAScriptTable {
-    width: 100%;
-  }
-
-  .photoGAScriptTable td {
-    border: none;
-  }
-
-  .photoGAScriptTable input {
-    background-color: #ddd;
-    width: 100%;
-    padding: 5px;
-  }
-
-  .dark .photoGAScriptTable input {
-    background-color: #222;
-  }
-
-  .dark .photoTopButton {
-    background-color: #404040;
-    color: #20B8E3;
-  }
-
-  .dark .photoCancelButton {
-    color: #ff0000;
-  }
-
-  .dark .photoMethodButton {
-    background-color: #404040;
-  }
-
-  .dark .photoMethodButton .photoMethodTitle {
-    color: #20B8E3;
-  }
-
-  .photoImportBg {
-    position: fixed;
-    top: 0;
-    left: 0;
-    height: 100vh;
-    width: 100vw;
-    background-color: rgba(0, 0, 0, 0.5);
-    z-index: 100000;
-  }
-
-  .photoImportInner {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translateX(-50%) translateY(-50%);
-    width: calc(100vw - 50px);
-    height: calc(100vh - 50px);
-    overflow-x: hidden;
-    overflow-y: scroll;
-    background-color: #fff;
-    padding: 20px;
-    max-width: 900px;
-    max-height: 500px;
-  }
-
-  .photoImportMethod {
-    max-width: 500px;
-    height: initial;
-  }
-
-  .photoImportGAScriptOptions {
-    max-width: 700px;
-    height: initial;
-  }
-
-  .dark .photoImportInner {
-    background-color: #333;
-  }
-
-  .photoImportInner h3 {
-    font-weight: bold;
-    margin: 10px auto;
-  }
-
-  .photoImportInner>p {
-    margin: 10px auto;
-  }
-
-  .photoImportLoading {
-    text-align: center;
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translateX(-50%) translateY(-50%);
-    padding: 20px;
-    background-color: #fff;
-  }
-
-  .dark .photoImportLoading {
-    background-color: #333;
-  }
-
-  .photoImportLoading h2 {
-    margin-bottom: 10px;
-  }
-
-  .photoImportEntry {
-    margin: 10px 0;
-  }
-
   .wf-image-modal {
     cursor: pointer
   }
-
   .wfpcDropdown {
      cursor: pointer;
   }
@@ -4939,6 +4764,44 @@ Additional information: [If you have more explanations, add them here]`;
     border-color: rgba(239, 163, 142, var(--tw-border-opacity));
     --tw-bg-opacity: 1;
     background-color: rgba(229, 229, 229, var(--tw-bg-opacity));
+  }
+  .wfpc-photos-list {
+    display: flex!important;
+    flex-direction: row!important;
+  }
+  .wfpc-cdk-virtual-scroll-spacer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1px;
+    transform-origin: 0 0;
+  }
+  .wfpc-photos-list-box {
+    position: absolute;
+    top: 0;
+    left: 0;
+    contain: content;
+    min-width: 100%;
+  }
+  .wfpc-cdk-virtual-scroll-viewport {
+    height: 70vh;
+    width: 28rem;
+    overflow-y: auto;
+    --tw-shadow: 0 10px 15px -3px #0000001a, 0 4px 6px -2px #0000000d;
+    box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+    display: block;
+    position: relative;
+    overflow: auto;
+    contain: strict;
+    transform: translateZ(0);
+    will-change: scroll-position;
+  }
+  .wfpc-photos-list-buttons {
+    margin-left: auto;
+    cursor: pointer;
+  }
+  .wfpc-checkbox {
+    margin-bottom: 0.5rem;
   }
     `;
 
