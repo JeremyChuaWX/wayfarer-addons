@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.2.1
+// @version      0.2.2
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -249,24 +249,24 @@ function init() {
         in: {
             switchToPhotos: 'Beralih ke foto',
             switchToNominations: 'Beralih ke wayspot',
-            pending: 'Tertunda',
+            pending: 'Dalam Proses',
             submitted: 'Diserahkan',
-            linkPhotos: 'Tautkan Foto Bersama',
-            linkPhotosExplanation1: 'Gunakan fungsi ini untuk menautkan kiriman foto untuk Wayspot yang sama.',
-            linkPhotosExplanation2: 'Klik setiap foto yang ingin Anda hubungkan ke entri ini.',
-            submittedPhotos: 'Foto yang dikirimkan:',
-            submittedWayspots: 'Wayspot yang dikirimkan:',
-            editData: 'Mengedit Data Wayspot',
+            linkPhotos: 'Tautkan Foto',
+            linkPhotosExplanation1: 'Gunakan fungsi ini untuk menautkan foto/gambar nominasi untuk Wayspot yang sama.',
+            linkPhotosExplanation2: 'Tekan masing-masing foto/gambar yang ingin ditautkan pada nominasi ini.',
+            submittedPhotos: 'Foto/gambar yang diajukan:',
+            submittedWayspots: 'Wayspot yang diajukan:',
+            editData: 'Edit Data Wayspot',
             formSeparator: ':',
-            latitude: 'Lintang',
-            longitude: 'Bujur',
+            latitude: 'Garis Lintang',
+            longitude: 'Garis Bujur',
             city: 'Kota',
-            state: 'Negara Bagian',
-            importData: 'Mengimpor Data Wayspot',
-            importDataExplanation: 'Mengimpor data Wayspot secara manual dalam format JSON dari sumber eksternal seperti Ingress IITC.',
-            settingsHeader: 'Pengelompokan Kontribusi Foto',
-            settingsExplanation1: 'Ketika diaktifkan, plug-in Kontribusi Foto Wayfarer akan menampilkan semua foto untuk Wayspot yang sama sebagai satu entri pada halaman Manajemen Kontribusi. Hal ini akan membutuhkan masukan pengguna untuk menautkan foto-foto tersebut secara manual.',
-            settingsExplanation2: 'Ketika dimatikan, setiap foto akan ditampilkan di halaman Manajemen Kontribusi sebagai entri individual, meskipun foto-foto tersebut telah ditautkan bersama sebagai bagian dari Wayspot yang sama.',
+            state: 'Provinsi',
+            importData: 'Impor Data Wayspot',
+            importDataExplanation: 'Impor data Wayspot secara manual dalam bentuk JSON format dari sumber eksternal seperti Ingress IITC',
+            settingsHeader: 'Mengelompokan kontribusi Foto/Gambar',
+            settingsExplanation1: 'Jika dinyalakan, plug-in Kontribusi Foto/Gambar Wayspot akan menampilkan semua Foto/Gambar untuk Wayspot yang sama sebagai nominasi tunggal pada laman Manajemen Kontribusi. Hal ini akan memerlukan masukan pengguna untuk menautkan foto/gambar secara manual.',
+            settingsExplanation2: 'Jika dimatikan, masing-masing foto/gambar akan ditampilkan pada laman Manajemen Kontribusi sebagai masukan individu, bahkan jika foto/gambar tersebut telah ditautkan bersama untuk Wayspot yang sama.',
         },
         nl: {
             switchToPhotos: `Wisselen naar foto's`,
@@ -288,7 +288,7 @@ function init() {
             importDataExplanation: 'Importeer handmatig Wayspot data in JSON formaat van externe bronnen zoals Ingress IITC.',
             settingsHeader: 'Groeperen van fotobijdragen',
             settingsExplanation1: "Als de plug-in Wayfarer Foto's Bijdragen is ingeschakeld, worden alle foto's voor dezelfde Wayspot als één item weergegeven op de Bijdragenbeheer pagina. Dit vereist gebruikersinvoer om de foto's handmatig aan elkaar te koppelen.",
-            settingsExplanation2: "Als deze optie is uitgeschakeld, wordt elke foto op de Contribution Management pagina weergegeven als een individuele invoer, zelfs als foto's aan elkaar zijn gekoppeld als behorend tot dezelfde Wayspot.",
+            settingsExplanation2: "Als deze optie is uitgeschakeld, wordt elke foto op de Contribution Management pagina individueel weergegeven, zelfs als foto's aan dezelfde Wayspot zijn gekoppeld.",
         },
         no: {
             switchToPhotos: 'Bytt til bilder',
@@ -991,6 +991,8 @@ function init() {
     });
 
     function modifySettingsPage() {
+        const l10n = getL10N();
+
         return new Promise(async (resolve, reject) => {
             try {
                 // Wait for any element with class settings__item to be present
@@ -1117,7 +1119,7 @@ function init() {
                 function setGroupingSettings() {
                     inputElement.setAttribute('aria-checked', groupingSetting.toString());
                     matSlideToggle.classList.toggle('mat-checked', groupingSetting);
-                    valueDiv.textContent = groupingSetting ? 'On' : 'Off';
+                    valueDiv.textContent = groupingSetting ? l10n['global.on'] : l10n['global.off'];
                 }
 
                 function toggleGroupingSettings() {
@@ -3487,8 +3489,12 @@ function init() {
                 const linkedImage = document.createElement('img');
                 linkedImage.classList.add('wfpc-details-carousel-image');
                 linkedImage.setAttribute('src', linkedSubmission.imageUrl);
-                linkedImage.style.maxHeight = '150px';
-                linkedImage.style.maxWidth = '300px';
+
+                linkedImage.addEventListener('load', () => {
+                    console.log('image loaded');
+                    // Adjust the width based on the actual image width
+                    linkedImage.style.width = 'auto';
+                });
 
                 linkedImage.addEventListener('click', () => {
                     // Replace the current image with the clicked image
@@ -4722,8 +4728,9 @@ Additional information: [If you have more explanations, add them here]`;
     overflow-x: auto;
   }
   .wfpc-details-carousel-image {
-    max-height: 120px;
-    max-width: 200px;
+    height: 120px;
+    width: 120px;
+    max-width: 300px;
     margin-right: 8px;
   }
   .wfpc-linked-submission-container {
