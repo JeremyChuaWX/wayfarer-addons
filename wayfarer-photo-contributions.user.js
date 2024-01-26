@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.2.2
+// @version      0.2.3
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -206,23 +206,23 @@ function init() {
             switchToPhotos: 'Vers les photos',
             switchToNominations: 'Vers les Wayspots',
             pending: 'En attente',
-            submitted: 'Soumis',
-            linkPhotos: 'Relier des photos',
-            linkPhotosExplanation1: 'Utilisez cette fonction pour relier des photos soumises pour le même Wayspot.',
-            linkPhotosExplanation2: 'Cliquez sur chaque photo que vous souhaitez relier à cette entrée.',
-            submittedPhotos: 'Photos soumises :',
-            submittedWayspots: 'Wayspots soumis :',
-            editData: 'Modifier les données Wayspot',
+            submitted: 'Proposée',
+            linkPhotos: 'Lier des photos',
+            linkPhotosExplanation1: 'Utilisez cette fonction pour lier des photos soumises pour le même Wayspot.',
+            linkPhotosExplanation2: 'Cliquez sur chaque photo que vous souhaitez lier à cette entrée.',
+            submittedPhotos: 'Photos proposées :',
+            submittedWayspots: 'Wayspots proposés :',
+            editData: 'Modifier les données du Wayspot',
             formSeparator: ' :',
             latitude: 'Latitude',
             longitude: 'Longitude',
             city: 'Ville',
             state: 'État',
-            importData: 'Importer des données Wayspot',
+            importData: 'Importer les données du Wayspot',
             importDataExplanation: 'Importer manuellement des données Wayspot au format JSON à partir de sources externes telles que Ingress IITC.',
             settingsHeader: 'Regroupement des contributions photos',
-            settingsExplanation1: "Lorsqu'il est activé, le plug-in Wayfarer Photos Contributions affiche toutes les photos d'un même point d'accès sous la forme d'une entrée unique sur la page de gestion des contributions. Cela nécessitera une intervention de l'utilisateur pour relier manuellement les photos entre elles.",
-            settingsExplanation2: "Lorsqu'il est désactivé, chaque photo sera affichée dans la page de gestion des contributions comme une entrée individuelle, même si les photos ont été reliées entre elles comme appartenant au même Wayspot.",
+            settingsExplanation1: "Lorsqu'il est actif, le plug-in Wayfarer Photos Contributions affiche toutes les photos d'un même Wayspot sous la forme d'une entrée unique sur la page de gestion des contributions. Une intervention de l'utilisateur sera nécessaire pour lier les photos entre elles manuellement.",
+            settingsExplanation2: "Lorsqu'il est désactivé, chaque photo sera affichée dans la page de gestion des contributions comme une entrée individuelle, même si les photos ont été liées entre elles comme appartenant au même Wayspot.",
         },
         it: {
             switchToPhotos: 'Passa alle foto',
@@ -249,7 +249,7 @@ function init() {
         in: {
             switchToPhotos: 'Beralih ke foto',
             switchToNominations: 'Beralih ke wayspot',
-            pending: 'Dalam Proses',
+            pending: 'Tertangguh',
             submitted: 'Diserahkan',
             linkPhotos: 'Tautkan Foto',
             linkPhotosExplanation1: 'Gunakan fungsi ini untuk menautkan foto/gambar nominasi untuk Wayspot yang sama.',
@@ -338,23 +338,23 @@ function init() {
             switchToPhotos: 'Переключиться на фотографии',
             switchToNominations: 'Переключиться на Wayspots',
             pending: 'В процессе',
-            submitted: 'Поданный',
+            submitted: 'Предложено',
             linkPhotos: 'Связать фотографии вместе',
-            linkPhotosExplanation1: 'Используйте эту функцию, чтобы связать вместе фотографии, присланные для одного и того же Wayspot.',
-            linkPhotosExplanation2: 'Щелкните каждую фотографию, которую вы хотите связать с этой записью.',
-            submittedPhotos: 'Отправленные фотографии:',
-            submittedWayspots: 'Отправленные Wayspots:',
+            linkPhotosExplanation1: 'Используйте эту функцию, чтобы связать вместе фотографии, предложенные для одного и того же Wayspot.',
+            linkPhotosExplanation2: 'Кликните на каждую фотографию, которую вы хотите связать с этой записью.',
+            submittedPhotos: 'Предложенные фотографии:',
+            submittedWayspots: 'Предложенные Wayspots:',
             editData: 'Редактировать данные Wayspot',
             formSeparator: ':',
             latitude: 'Широта',
             longitude: 'Долгота',
             city: 'Город',
-            state: 'Штат',
+            state: 'Регион',
             importData: 'Импорт данных Wayspot',
             importDataExplanation: 'Ручной импорт данных Wayspot в формате JSON из внешних источников, таких как Ingress IITC.',
             settingsHeader: 'Группировка фотовкладов',
-            settingsExplanation1: 'При включении плагин Wayfarer Photos Contributions отображает все фотографии для одной точки Wayspot в виде одной записи на странице управления вкладами. При этом пользователю потребуется вручную связать фотографии вместе.',
-            settingsExplanation2: 'Если плагин выключен, каждая фотография будет отображаться на странице управления вкладами как отдельная запись, даже если фотографии были связаны вместе как относящиеся к одному Wayspot.',
+            settingsExplanation1: 'При включении плагин Wayfarer Photos Contributions отображает все фотографии для одной точки Wayspot в виде одной записи на странице управления предложениями. При этом пользователю потребуется вручную связать фотографии вместе.',
+            settingsExplanation2: 'Если плагин выключен, каждая фотография будет отображаться на странице управления предложениями как отдельная запись, даже если фотографии были связаны вместе как относящиеся к одному Wayspot.',
         },
         sv: {
             switchToPhotos: 'Byt till foton',
@@ -4773,7 +4773,7 @@ Additional information: [If you have more explanations, add them here]`;
     background-color: rgba(229, 229, 229, var(--tw-bg-opacity));
   }
   .wfpc-photos-list {
-    display: flex!important;
+    display: flex;
     flex-direction: row!important;
   }
   .wfpc-cdk-virtual-scroll-spacer {
