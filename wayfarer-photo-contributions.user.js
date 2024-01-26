@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.2.3
+// @version      0.2.4
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -1399,35 +1399,35 @@ function init() {
                     body: /Thank you for your Wayspot Photo submission for (?<title>.+) on (?<month>\w{3}) (?<day>\d{1,2}), (?<year>\d{4})/,
                     acceptanceText: 'Congratulations, the community has decided to accept your Wayspot Photo submission'
                 },
-                //bn: {
-                //  title: / /,
-                //  body: / /,
-                //  acceptanceText: ''
-                //},
+                bn: {
+                  title: /(?<title>.+)-এর জন্য Niantic Wayspot মিডিয়া জমা দেওয়ার সিদ্ধান্ত নেওয়া হয়েছে/,
+                  body: /(?<month>\w{3}) (?<day>\d{1,2}), (?<year>\d{4})-এ (?<title>.+)-এর জন্য আপনার Wayspot Photo জমা দেওয়ার জন্য আপনাকে ধন্যবাদ জানাই/,
+                  acceptanceText: 'অভিনন্দন, সম্প্রদায়ের সিদ্ধান্ত অনুসারে আপনার Wayspot Photo-এর সম্পাদনার জমাকরণ তারা স্বীকার করেছেন'
+                },
                 cs: {
                   title: /Rozhodnutí o odeslání obrázku Niantic Wayspotu (?<title>.+)/,
                   body: /děkujeme za odeslání návrhu pro položku Photo Wayspotu (?<title>.+) ze dne (?<day>\d{1,2})\.(?<month>\d{1,2})\.(?<year>\d{4})/,
-                  acceptanceText: ''
+                  acceptanceText: 'Gratulujeme, komunita se rozhodla přijmout vaáš příspěvek Photo pro Wayspot'
                 },
                 de: {
                     title: /Entscheidung zu deinem Upload für den Wayspot (?<title>.+)/,
                     body: /danke, dass du am (?<day>\d{1,2})\.(?<month>\d{2})\.(?<year>\d{4}) den Upload Photo für den Wayspot (?<title>.*) eingereicht hast/,
                     acceptanceText: 'Glückwunsch, die Community hat entschieden, deinen Upload Photo zu einem Wayspot zu akzeptieren',
                 },
-                //es: {
-                //  title: / /,
-                //  body: / /,
-                //  acceptanceText: ''
-                //},
-                //fr: {
-                //  title: / /,
-                //  body: / /,
-                //  acceptanceText: ''
-                //},
+                es: {
+                  title: /Decisión tomada sobre el envío de archivo de Wayspot de Niantic para (?<title>.+)/,
+                  body: /Gracias por el Photo del Wayspot para (?<title>.+) enviado el día (?<day>\d{1,2})-(?<month>\w{3})-(?<year>\d{4})/,
+                  acceptanceText: 'Enhorabuena, la comunidad ha decidido aceptar el envío de Photo de tu Wayspot'
+                },
+                fr: {
+                  title: /Résultat concernant le Wayspot Niantic (?<title>.+)/,
+                  body: /Merci pour votre contribution de Wayspot Photo pour (?<title>.+) le (?<day>\d{1,2}) (?<month>[a-zA-Zéû]{3,4})\.? (?<year>\d{4})/,
+                  acceptanceText: 'Félicitations, la communauté a décidé d’accepter votre proposition de Wayspot Photo'
+                },
                 hi: {
                   title: /(?<title>.+) के लिए तह Niantic Wayspot मीडिया सबमिशन/,
                   body: /प्रिय (?<username>.+),([^]+?)(?<title>.+) पर (?<month>\w{3}) (?<day>\d{1,2}), (?<year>\d{4}) लिए आपके Wayspot Photo सबमिशन के लिए धन्यवाद।/,
-                  acceptanceText: ''
+                  acceptanceText: 'बधाई, समुदाय ने को आपके Wayspot संपादन को स्वीकार करने का निर्णय लिया है'
                 },
                 it: {
                     title: /Proposta di contenuti multimediali di Niantic Wayspot decisa per (?<title>.+)/,
@@ -1444,56 +1444,56 @@ function init() {
                   body: /(?<year>\d{4})\. (?<month>\d{1,2})\. (?<day>\d{1,2})에 (?<title>.+)에 대한 Wayspot Photo 미디어를 제출해 주셔서 감사합니다/,
                   acceptanceText: '기쁘게도, 커뮤니티에서 제안하신 Wayspot Photo 제안을 승인했습니다'
                 },
-                //mr: {
-                //  title: / /,
-                //  body: / /,
-                //  acceptanceText: ''
-                //},
-                //nl: {
-                //  title: / /,
-                //  body: / /,
-                //  acceptanceText: ''
-                //},
+                mr: {
+                  title: /(?<title>.+) साठी Niantic वेस्पॉट मीडिया सबमिशनचा निर्णय घेतला/,
+                  body: /(?<month>\w{3}) (?<day>\d{1,2}), (?<year>\d{4}) रोजी (?<title>.+) साठी तुमच्या वेस्पॉट Photo सबमिशनबद्दल धन्यवाद/,
+                  acceptanceText: 'अभिनंदन, समुदायाने तुमचे Photo सबमिशन स्वीकारण्याचा निर्णय घेतला आहे'
+                },
+                nl: {
+                  title: /Besluit over Niantic Wayspot-media-inzending voor (?<title>.+)/,
+                  body: /Bedankt voor je Wayspot-Photo-inzending voor (?<title>.+) op (?<day>\d{1,2})-(?<month>\w{3})-(?<year>\d{4})/,
+                  acceptanceText: 'Gefeliciteerd, de gemeenschap heeft besloten om je Wayspot-Photo-inzending wel te accepteren'
+                },
                 no: {
                     title: /En avgjørelse er tatt for Niantic Wayspot-medieinnholdet som er sendt inn for (?<title>.+)/,
                     body: /Takk for Photo-innholdet for Wayspot-en (?<title>.+), som du sendte inn (?<day>\d{1,2})\.(?<month>\w{3})\.(?<year>\d{4})/,
                     acceptanceText: 'Gratulerer – brukerne har valgt å godta Photo-innholdet du sendte inn for Wayspot-en'
                 },
-                //pl: {
-                //  title: / /,
-                //  body: / /,
-                //  acceptanceText: ''
-                //},
-                //pt: {
-                //  title: / /,
-                //  body: / /,
-                //  acceptanceText: ''
-                //},
-                //ru: {
-                //  title: / /,
-                //  body: / /,
-                //  acceptanceText: ''
-                //},
-                //sv: {
-                //  title: / /,
-                //  body: / /,
-                //  acceptanceText: ''
-                //},
-                //ta: {
-                //  title: / /,
-                //  body: / /,
-                //  acceptanceText: ''
-                //},
-                //te: {
-                //  title: / /,
-                //  body: / /,
-                //  acceptanceText: ''
-                //},
-                //th: {
-                //  title: / /,
-                //  body: / /,
-                //  acceptanceText: ''
-                //},
+                pl: {
+                  title: /Decyzja na temat zgłoszenia materiałów do Wayspotu Niantic (?<title>.+)/,
+                  body: /Dziękujemy za zgłoszenie (?<year>\d{4})-(?<month>\d{2})-(?<day>\d{1,2}) materiałów Photo do Wayspotu „(?<title>.+)”/,
+                  acceptanceText: 'Gratulujemy, społeczność zdecydowała zaakceptować zgłoszenia materiałów Photo do Wayspotu'
+                },
+                pt: {
+                  title: /Decisão sobre o envio de mídia para o Niantic Wayspot (?<title>.+)/,
+                  body: /Agradecemos o seu envio de Photo para o Wayspot (?<title>.+) em (?<day>\d{1,2})\/(?<month>\w{3})\/(?<year>\d{4})/,
+                  acceptanceText: 'Parabéns, a comunidade decidiu aceitar o seu envio de Photo para o Wayspot'
+                },
+                ru: {
+                  title: /Вынесено решение по предложению по файлу для (?<title>.+)/,
+                  body: /Благодарим за заявку Wayfarer (Photo) для (?<title>.+), отправленную (?<day>\d{1,2})\.(?<month>\d{2})\.(?<year>\d{4})/,
+                  acceptanceText: 'Поздравляем, сообщество решило принять ваше предложение по файлу (Photo) для Wayspot'
+                },
+                sv: {
+                  title: /Niantic Wayspot-medieinlämning har beslutats om för (?<title>.+)/,
+                  body: /Tack för din Wayspot Photo-inlämning för (?<title>.+) den (?<year>\d{4})-(?<month>\w{3})-(?<day>\d{1,2})/,
+                  acceptanceText: 'Grattis måste vi meddela att vår community har beslutat att acceptera din Wayspot Photo-inlämning'
+                },
+                ta: {
+                  title: /(?<title>.+) -க்கான Niantic Wayspot மீடியா சமர்ப்பிப்பு பரிசீலிக்கப்பட்டது/,
+                  body: /நாளது தேதியில் (?<month>\w{3}) (?<day>\d{1,2}), (?<year>\d{4}), (?<title>.+) -க்கான உங்களது Wayspot Photo சமர்ப்பிப்பிற்கு நன்றி/,
+                  acceptanceText: 'வாழ்த்துக்கள், குழு உங்கள் Wayspot – Photo -ஐ - ஏற்றுக்கொள்வதாக முடிவு செய்திருக்கிறது'
+                },
+                te: {
+                  title: /(?<title>.+) కొరకు Niantic వేస్పాట్ మీడియా సమర్పణపై నిర్ణయం/,
+                  body: /(?<month>\w{3}) (?<day>\d{1,2}), (?<year>\d{4}) తేదీన (?<title>.+) కొరకు మీరు సమర్పించిన Photo ను బట్టి ధన్యవాదాలు/,
+                  acceptanceText: 'అభినందనలు, మీరు సమర్పించిన వేస్పాట్ Photo ను అంగీకరించడానికి ఉండటానికి కమ్యూనిటీ నిర్ణయించింది'
+                },
+                th: {
+                  title: /ผลการตัดสินการส่งมีเดีย Niantic Wayspot สำหรับ (?<title>.+)/,
+                  body: /ขอบคุณสำหรับการส่ง Wayspot Photo เรื่อง (?<title>.+) เมื่อวันที่ (?<day>\d{1,2}) (?<month>.*)? (?<year>\d{4})/,
+                  acceptanceText: 'ขอแสดงความยินดี ชุมชนได้ตัดสินใจ ยอมรับ Wayspot Photo ของคุณ'
+                },
                 zh: {
                   title: /社群已對你為 (?<title>.+) 提交的 Niantic Wayspot 媒體做出決定/,
                   body: /感謝你在 (?<year>\d{4})-(?<month>\d{1,2})-(?<day>\d{1,2}) 為 (?<title>.+) 提交 Wayspot Photo/,
@@ -1684,7 +1684,7 @@ function init() {
                 },
                 pt: {
                     title: /A análise da foto do Portal foi concluída(?:\s*:\s*(?<title>.+))?/,
-                    submissionDate: /Data de submissão:([^]+?)(?<day>\d{1,2})\/(?<month>[a-zA-Z]+)\/(?<year>\d{4})/,
+                    submissionDate: /Data de submissão:([^]+?)(?<day>\d{1,2})\/(?<month>[a-zA-Zéû]+)\/(?<year>\d{4})/,
                     id: /ID: (?<id>\S+)/,
                     acceptanceText: 'Bom trabalho, Agente'
                 },
