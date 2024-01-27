@@ -3491,7 +3491,6 @@ function init() {
                 linkedImage.setAttribute('src', linkedSubmission.imageUrl);
 
                 linkedImage.addEventListener('load', () => {
-                    console.log('image loaded');
                     // Adjust the width based on the actual image width
                     linkedImage.style.width = 'auto';
                 });
