@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.2.7
+// @version      0.2.8
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -760,7 +760,10 @@ function init() {
     function createNotification(title) {
         console.log(`Found a submitted photo during a Wayfarer review! Details for '${title}' have been synchronised to the Contributions Management page.`);
 
-        if (document.getElementById("wfpcNotify") === null) {
+        const existingWfpcNotify = document.getElementById("wfpcNotify");
+        const existingWfnshNotify = document.getElementById("wfnshNotify");
+
+        if (existingWfpcNotify === null && existingWfnshNotify === null) {
             let container = document.createElement("div");
             container.id = "wfpcNotify";
             document.getElementsByTagName("body")[0].appendChild(container);
@@ -770,9 +773,13 @@ function init() {
         notification.classList.add('wfpcNotification');
         notification.addEventListener('click', () => notification.parentNode.removeChild(notification));
         const content = document.createElement('p');
-        content.textContent = `Recognised submitted photo for ${title}. Updating Wayspot data.`;
+        content.textContent = `Recognised photo submission for ${title}. Updating Wayspot data.`;
         notification.appendChild(content);
-        awaitElement(() => document.getElementById('wfpcNotify')).then(ref => ref.appendChild(notification));
+        if (existingWfnshNotify) {
+            existingWfnshNotify.appendChild(notification);
+        } else {
+            awaitElement(() => document.getElementById('wfpcNotify')).then(ref => ref.appendChild(notification));
+        }
     }
 
     // Opens an IDB database connection.
@@ -1266,7 +1273,7 @@ function init() {
         let skippedMalformedEmailsCount = 0;
         let emailsToBeProcessedCount = 0;
 
-        console.log(`Photo Contributions: Received ${emails.length} from email API database.`);
+        // console.log(`Photo Contributions: Received ${emails.length} from email API database.`);
 
         for (let i = emails.length - 1; i >= 0; i--) {
             const email = emails[i];
@@ -1319,12 +1326,12 @@ function init() {
             return { ...rest };
         });
 
-        if (skippedDuplicateEmailsCount > 0) {
-            console.log(`Photo Contributions: Skipped ${skippedDuplicateEmailsCount} email(s) because they are a duplicate or the email details are already assigned to a photo.`);
-        }
-        if (skippedMalformedEmailsCount > 0) {
-            console.log(`Photo Contributions: Skipped ${skippedMalformedEmailsCount} email(s) because the email didn't match a known email template.`);
-        }
+        // if (skippedDuplicateEmailsCount > 0) {
+        //    console.log(`Photo Contributions: Skipped ${skippedDuplicateEmailsCount} email(s) because they are a duplicate or the email details are already assigned to a photo.`);
+        //}
+        //if (skippedMalformedEmailsCount > 0) {
+        //    console.log(`Photo Contributions: Skipped ${skippedMalformedEmailsCount} email(s) because the email didn't match a known email template.`);
+        //}
 
         matchEmailsToWayspots(emailData);
 
@@ -3964,8 +3971,8 @@ function init() {
         const fieldMappings = [
             { name: 'title', inputElement: document.getElementById('title') },
             { name: 'description', inputElement: document.getElementById('description') },
-            { name: 'latitude', inputElement: document.getElementById('latitude') },
-            { name: 'longitude', inputElement: document.getElementById('longitude') },
+            { name: 'lat', inputElement: document.getElementById('latitude') },
+            { name: 'lng', inputElement: document.getElementById('longitude') },
             { name: 'city', inputElement: document.getElementById('city') },
             { name: 'state', inputElement: document.getElementById('state') }
         ];
@@ -3975,6 +3982,13 @@ function init() {
             const oldLightship = { ...thisSubmission.lightship }; // Make a copy of the current lightship data
 
             thisSubmission.lightship[name] = inputElement.value || '';
+
+            // Convert lat and lng values to numbers
+            if (name === 'lat' || name === 'lng') {
+                thisSubmission.lightship[name] = parseFloat(inputElement.value) || 0;
+            } else {
+                thisSubmission.lightship[name] = inputElement.value || '';
+            }
 
             // Set a flag to indicate whether a field has been explicitly deleted
             thisSubmission.lightship.deletedFields = {};
