@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.2.5
+// @version      0.2.6
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -673,6 +673,10 @@ function init() {
                 extractLightshipDataFromReview(result);
                 return;
             }
+            if (result.type === 'PHOTO') {
+                extractLightshipDataFromPhotoReview(result);
+                return;
+            }
         } catch (e)    {
             console.log(e); // eslint-disable-line no-console
         }
@@ -703,15 +707,17 @@ function init() {
     }
 
     function extractLightshipDataFromReview(response) {
+        console.log('extracting data from review page');
         const imageUrl = response.imageUrl;
 
         // Check if the URL from response.imageUrl or response.parentNomination appears in photoSubmissions
-        const matchingSubmission = photoSubmissions.find(submission => submission.imageUrl === imageUrl || submission.parentNomination === imageUrl);
+        const matchingSubmission = photoSubmissions.find(submission => submission.imageUrl === imageUrl || submission.lightship.parentNomination === imageUrl);
 
-        if (matchingSubmission) {
+        if (imageUrl && matchingSubmission) {
             console.log('Found a submitted photo during a Wayfarer review! Details saved for ', response.title);
             // Update the matching submission with lightship data
             matchingSubmission.lightship = {
+                ...matchingSubmission.lightship, // Copy existing properties
                 guid: response.guid || null,
                 title: response.title || null,
                 description: response.description || null,
@@ -720,10 +726,54 @@ function init() {
                 _lastImported: new Date().getTime(),
             };
 
+            createNotification(response.title);
+
             matchingSubmission.submitted.edited = true;
 
-            synchronizeLightshipData(matchingSubmission);
+            synchronizeLightshipData(matchingSubmission, 'review');
         }
+    }
+
+    function extractLightshipDataFromPhotoReview(response) {
+        // Check if any of the newPhotos URLs appear in photoSubmissions
+        const matchingSubmission = photoSubmissions.find(submission =>
+                                                         response.newPhotos.some(photo => photo.value === submission.imageUrl || photo.value === submission.lightship.parentNomination)
+                                                        );
+
+        if (matchingSubmission) {
+            console.log('Found a submitted photo during a Wayfarer review! Details saved for ', response.title);    
+            // Update the matching submission with lightship data
+            matchingSubmission.lightship = {
+                ...matchingSubmission.lightship, // Copy existing properties
+                title: response.title || matchingSubmission.lightship.title || null, // Update title if available in response
+                description: response.description || matchingSubmission.lightship.description || null, // Update description if available in response
+                lat: response.lat || matchingSubmission.lightship.lat,
+                lng: response.lng || matchingSubmission.lightship.lng,
+                _lastImported: new Date().getTime(),
+            };
+
+            matchingSubmission.submitted.edited = true;
+
+            createNotification(response.title);
+
+            synchronizeLightshipData(matchingSubmission, 'review');
+        }
+    }
+
+    function createNotification(title) {
+        if (document.getElementById("wfpcNotify") === null) {
+            let container = document.createElement("div");
+            container.id = "wfpcNotify";
+            document.getElementsByTagName("body")[0].appendChild(container);
+        }
+
+        const notification = document.createElement('div');
+        notification.classList.add('wfpcNotification');
+        notification.addEventListener('click', () => notification.parentNode.removeChild(notification));
+        const content = document.createElement('p');
+        content.textContent = `Recognised submitted photo for ${title}. Updating Wayspot data.`;
+        notification.appendChild(content);
+        awaitElement(() => document.getElementById('wfpcNotify')).then(ref => ref.appendChild(notification));
     }
 
     // Opens an IDB database connection.
@@ -961,6 +1011,9 @@ function init() {
         return emailInfo;
     }
 
+    appendFilterCssStyles();
+    appendCustomCssStyles();
+
     async function modifyContributionsPage() {
         try {
             const pageHeader = await awaitElement(() => document.querySelector('wf-page-header'));
@@ -968,8 +1021,6 @@ function init() {
             const nextSibling = pageHeader.nextSibling;
             if (nextSibling) {
                 nextSibling.classList.add('noms-list');
-                appendFilterCssStyles();
-                appendCustomCssStyles();
                 modifyExistingNominationsList();
                 createPhotosDiv(nextSibling);
             }
@@ -1269,9 +1320,6 @@ function init() {
             return { ...rest };
         });
 
-        if (emailsToBeProcessedCount > 0) {
-            console.log(`Photo Contributions: Found ${emailsToBeProcessedCount} new photo email(s) for analysis: `, emailData);
-        }
         if (skippedDuplicateEmailsCount > 0) {
             console.log(`Photo Contributions: Skipped ${skippedDuplicateEmailsCount} email(s) because they are a duplicate or the email details are already assigned to a photo.`);
         }
@@ -3062,7 +3110,7 @@ function init() {
                 // No selected nominations, remove parentNomination from linked submissions
                 // Important to removing a linked Wayspot nomination
                 if (selectedNominations.length === 0) {
-                    linkedSubmissions.forEach(submission => {
+                    selectedSubmissions.forEach(submission => {
                         if (submission.lightship.parentNomination) {
                             delete submission.lightship.parentNomination;
                             submission.edited = true;
@@ -3072,7 +3120,7 @@ function init() {
 
                 clearOverlay();
 
-                synchronizeLightshipData(thisSubmission);
+                synchronizeLightshipData(thisSubmission, 'contributions');
 
                 // If grouping mode is on, then remove associated photo list items, recreate and resort the list.
                 // Not required if grouping mode is off.
@@ -3151,22 +3199,23 @@ function init() {
     }
 
     // Function to ensure that all linked submissions inherit the same Lightship data
-    function synchronizeLightshipData(thisSubmission) {
-        // Determine the URL to which the submissions are linked
+    function synchronizeLightshipData(thisSubmission, referredFrom) {
+        // Find all linked submissions to thisSubmission
         const linkedSubmissions = findLinkedPhotoSubmissions(thisSubmission);
 
         let parentNomination;
         let nominationTimestamp;
 
-        // Find corresponding nomination for parentNomination
-        if (thisSubmission.lightship && thisSubmission.lightship.parentNomination) {
-            parentNomination = nominations.find(nomination => nomination.imageUrl === thisSubmission.lightship.parentNomination);
+        // Attempt to find a parentNomination (i.e. submissions have been linked to a nomination from nomination list)
+        linkedSubmissions.forEach(submission => {
+            if (referredFrom === 'contributions' && submission.lightship.parentNomination) {
+                parentNomination = nominations.find(nomination => nomination.imageUrl === submission.lightship.parentNomination);
 
-            if (parentNomination) {
-                nominationTimestamp = Date.parse(parentNomination.day);
+                if (parentNomination) {
+                    nominationTimestamp = Date.parse(parentNomination.day);
+                }
             }
-        }
-
+        });
 
         // Helper function to find the lightship data with the most recent _lastImported timestamp
         function findMostRecentLightshipData(lightshipField) {
@@ -3192,16 +3241,52 @@ function init() {
 
         // Copy additional values if parentNomination exists
         if (parentNomination) {
-            lightshipData.description = parentNomination.description;
-            lightshipData.lat = parentNomination.lat;
-            lightshipData.lng = parentNomination.lng;
-            lightshipData.city = parentNomination.city;
-            lightshipData.state = parentNomination.state;
-            lightshipData._lastImported = nominationTimestamp;
+            // Only copy if the field is not already present in lightshipData or is null/undefined
+            // This prevents parentNomination overwriting more recent data (hopefully)
+            if (lightshipData.description === undefined || lightshipData.description === null) {
+                lightshipData.description = parentNomination.description;
+            }
+
+            if (lightshipData.lat === undefined || lightshipData.lat === null) {
+                lightshipData.lat = parentNomination.lat;
+            }
+
+            if (lightshipData.lng === undefined || lightshipData.lng === null) {
+                lightshipData.lng = parentNomination.lng;
+            }
+
+            if (lightshipData.city === undefined || lightshipData.city === null) {
+                lightshipData.city = parentNomination.city;
+            }
+
+            if (lightshipData.state === undefined || lightshipData.state === null) {
+                lightshipData.state = parentNomination.state;
+            }
+
+            if (lightshipData._lastImported === undefined || lightshipData._lastImported === null) {
+                lightshipData._lastImported = nominationTimestamp;
+            }
         }
 
+        // Remove fields with deleted flags
+        // This may have been set during manual editing of Wayspot data
+        if (thisSubmission.lightship.deletedFields) {
+            Object.keys(thisSubmission.lightship.deletedFields).forEach(deletedField => {
+                linkedSubmissions.forEach(submission => {
+                    if (deletedField !== 'title') {
+                        linkedSubmissions.forEach(submission => {
+                            delete submission.lightship[deletedField];
+                        });
+                    }
+                });
+            });
+        }
+
+        // Remove the deleted flags themselves
+        delete thisSubmission.lightship.deletedFields;
+
         // Copy across values from linked submissions
-        ['id', 'title', 'description', 'lat', 'lng', 'city', 'state', 'country', '_lastImported'].forEach(field => {
+        ['guid', 'title', 'description', 'lat', 'lng', 'city', 'state', 'country', '_lastImported'].forEach(field => {
             const mostRecentData = findMostRecentLightshipData(field);
 
             // Only overwrite if mostRecentData[field] exists
@@ -3214,7 +3299,7 @@ function init() {
         linkedSubmissions.forEach(submission => {
             submission.edited = true;
             // Iterate over all fields in lightshipData and update linked submissions
-            ['id', 'title', 'description', 'lat', 'lng', 'city', 'state', 'country', '_lastImported'].forEach(field => {
+            ['guid', 'title', 'description', 'lat', 'lng', 'city', 'state', 'country', '_lastImported'].forEach(field => {
                 if (field === 'title' && lightshipData.title !== undefined && lightshipData.title !== null && lightshipData.title !== '') {
                     submission.title = lightshipData.title;
                 } else {
@@ -3223,10 +3308,13 @@ function init() {
             });
         });
 
-        createPhotoDetailsPane(thisSubmission.imageUrl);
-        if (!groupingSetting) {
-            updatePhotoListItems(linkedSubmissions);
+        if (referredFrom === 'contributions') {
+            createPhotoDetailsPane(thisSubmission.imageUrl);
+            if (!groupingSetting) {
+                updatePhotoListItems(linkedSubmissions);
+            }
         }
+
         savePhotoSubmissionsToIDB();
     }
 
@@ -3868,27 +3956,41 @@ function init() {
 
     // Function to handle saving Wayspot data
     function handleWayspotDataSaveButton(thisSubmission) {
-        // Get input values
-        const titleInput = document.getElementById('title');
-        const descriptionInput = document.getElementById('description');
-        const latitudeInput = document.getElementById('latitude');
-        const longitudeInput = document.getElementById('longitude');
-        const cityInput = document.getElementById('city');
-        const stateInput = document.getElementById('state');
+        // Define a reusable function to check and set deletedFields
+        function checkAndSetDeletedField(inputElement, field, oldData) {
+            if (oldData[field] !== undefined && oldData[field] !== null && oldData[field] !== '' && inputElement.value === '') {
+                thisSubmission.lightship.deletedFields[field] = true;
+            }
+        }
 
-        // Save inputs to thisSubmission.lightship
-        thisSubmission.lightship.title = titleInput.value || '';
-        thisSubmission.lightship.description = descriptionInput.value || '';
-        thisSubmission.lightship.lat = latitudeInput.value ? parseFloat(latitudeInput.value) : '';
-        thisSubmission.lightship.lng = longitudeInput.value ? parseFloat(longitudeInput.value) : '';
-        thisSubmission.lightship.city = cityInput.value || '';
-        thisSubmission.lightship.state = stateInput.value || '';
+        // Define the field names and corresponding const declarations
+        const fieldMappings = [
+            { name: 'title', inputElement: document.getElementById('title') },
+            { name: 'description', inputElement: document.getElementById('description') },
+            { name: 'latitude', inputElement: document.getElementById('latitude') },
+            { name: 'longitude', inputElement: document.getElementById('longitude') },
+            { name: 'city', inputElement: document.getElementById('city') },
+            { name: 'state', inputElement: document.getElementById('state') }
+        ];
+
+        // Get input elements and save inputs to thisSubmission.lightship
+        fieldMappings.forEach(({ name, inputElement }) => {
+            const oldLightship = { ...thisSubmission.lightship }; // Make a copy of the current lightship data
+
+            thisSubmission.lightship[name] = inputElement.value || '';
+
+            // Set a flag to indicate whether a field has been explicitly deleted
+            thisSubmission.lightship.deletedFields = {};
+
+            // Check and set deletedFields for each field
+            checkAndSetDeletedField(inputElement, name, oldLightship);
+        });
 
         // Set lastImported timestamp
         thisSubmission.lightship._lastImported = Date.now();
 
         // Call functions
-        synchronizeLightshipData(thisSubmission);
+        synchronizeLightshipData(thisSubmission, 'contributions');
         clearOverlay();
     }
 
@@ -3919,7 +4021,7 @@ function init() {
                 thisSubmission.lightship._lastImported = Date.now();
 
                 // Call synchronizeLightshipData
-                synchronizeLightshipData(thisSubmission);
+                synchronizeLightshipData(thisSubmission, 'contributions');
 
                 // Clear the overlay
                 clearOverlay();
@@ -3967,7 +4069,7 @@ Additional information: [If you have more explanations, add them here]`;
             window.open('https://community.wayfarer.nianticlabs.com/post/discussion/wayspot-photo', '_blank');
         })
             .catch(() => {
-            alert("something went wrong");
+            alert(`Unexpected error copying clipboard data`);
         });
     }
 
@@ -4819,6 +4921,21 @@ Additional information: [If you have more explanations, add them here]`;
   }
   .wfpc-checkbox {
     margin-bottom: 0.5rem;
+  }
+  .wfpcNotification {
+    font-weight: bold;
+    border-radius: 1em;
+    padding: 1em;
+    margin-top: 1.5em;
+    color: white;
+    background-color: #09b065;
+  }
+  #wfpcNotify {
+    position: absolute;
+    bottom: 1em;
+    right: 1em;
+    width: 30em;
+    z-index: 100;
   }
     `;
 
