@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.2.9
+// @version      0.2.10
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -665,16 +665,12 @@ function init() {
 
             if (result.type === 'NEW' && result.nearbyPortals) {
                 result.nearbyPortals.forEach(portal => {
-                    extractLightshipDataFromReview(portal);
+                    extractLightshipDataFromReview(portal, 'NEW');
                 });
                 return;
             }
-            if (result.type === 'EDIT') {
-                extractLightshipDataFromReview(result);
-                return;
-            }
-            if (result.type === 'PHOTO') {
-                extractLightshipDataFromPhotoReview(result);
+            if (result.type === 'EDIT' || result.type === 'PHOTO') {
+                extractLightshipDataFromReview(result, result.type);
                 return;
             }
         } catch (e)    {
@@ -706,46 +702,30 @@ function init() {
         }
     }
 
-    function extractLightshipDataFromReview(response) {
-        const imageUrl = response.imageUrl;
+    function extractLightshipDataFromReview(response, reviewType) {
+        let matchingSubmission;
 
-        // Check if the URL from response.imageUrl or response.parentNomination appears in photoSubmissions
-        const matchingSubmission = photoSubmissions.find(submission => submission.imageUrl === imageUrl || submission.lightship.parentNomination === imageUrl);
-
-        if (imageUrl && matchingSubmission) {
-            // Update the matching submission with lightship data
-            matchingSubmission.lightship = {
-                ...matchingSubmission.lightship, // Copy existing properties
-                guid: response.guid || null,
-                title: response.title || null,
-                description: response.description || null,
-                lat: response.lat,
-                lng: response.lng,
-                _lastImported: new Date().getTime(),
-            };
-
-            matchingSubmission.submitted.edited = true;
-
-            createNotification(response.title);
-
-            synchronizeLightshipData(matchingSubmission, 'review');
-        }
-    }
-
-    function extractLightshipDataFromPhotoReview(response) {
+        if (reviewType === 'PHOTO') {
         // Check if any of the newPhotos URLs appear in photoSubmissions
-        const matchingSubmission = photoSubmissions.find(submission =>
+        matchingSubmission = photoSubmissions.find(submission =>
                                                          response.newPhotos.some(photo => photo.value === submission.imageUrl || photo.value === submission.lightship.parentNomination)
                                                         );
+        } else {
+            const imageUrl = response.imageUrl;
+            if (imageUrl) {
+                matchingSubmission = photoSubmissions.find(submission => submission.imageUrl === imageUrl || submission.lightship.parentNomination === imageUrl);
+            }
+        }
 
         if (matchingSubmission) {
             // Update the matching submission with lightship data
             matchingSubmission.lightship = {
                 ...matchingSubmission.lightship, // Copy existing properties
-                title: response.title || matchingSubmission.lightship.title || null, // Update title if available in response
-                description: response.description || matchingSubmission.lightship.description || null, // Update description if available in response
-                lat: response.lat || matchingSubmission.lightship.lat,
-                lng: response.lng || matchingSubmission.lightship.lng,
+                guid: response.guid || matchingSubmission.lightship.guid || null,
+                title: response.title || matchingSubmission.lightship.title || null,
+                description: response.description || matchingSubmission.lightship.description || null,
+                lat: response.lat,
+                lng: response.lng,
                 _lastImported: new Date().getTime(),
             };
 
@@ -2038,7 +2018,17 @@ function init() {
 
         // Update the Wayspot data
         photoSubmissions.forEach(submission => {
-            submission.title = submission.outcome.title !== null ? submission.outcome.title : submission.submitted.title;
+            if (
+                submission.lightship.title &&
+                (!submission.outcome.timestamp || submission.lightship._lastImported > submission.outcome.timestamp)
+            ) {
+                submission.title = submission.lightship.title;
+            } else if (submission.outcome.title) {
+                submission.title = submission.outcome.title;
+            } else {
+                submission.title = submission.submitted.title;
+            }
+
             submission.status = submission.outcome.result !== null ? submission.outcome.result : 'pending';
 
             // Set the game source based on the email templates
