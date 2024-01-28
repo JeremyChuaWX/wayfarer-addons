@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.2.6
+// @version      0.2.7
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -707,30 +707,28 @@ function init() {
     }
 
     function extractLightshipDataFromReview(response) {
-        console.log('extracting data from review page');
         const imageUrl = response.imageUrl;
 
         // Check if the URL from response.imageUrl or response.parentNomination appears in photoSubmissions
         const matchingSubmission = photoSubmissions.find(submission => submission.imageUrl === imageUrl || submission.lightship.parentNomination === imageUrl);
 
         if (imageUrl && matchingSubmission) {
-            console.log('Found a submitted photo during a Wayfarer review! Details saved for ', response.title);
-            // Update the matching submission with lightship data
-            matchingSubmission.lightship = {
-                ...matchingSubmission.lightship, // Copy existing properties
-                guid: response.guid || null,
-                title: response.title || null,
-                description: response.description || null,
-                lat: response.lat,
-                lng: response.lng,
-                _lastImported: new Date().getTime(),
-            };
+                // Update the matching submission with lightship data
+                matchingSubmission.lightship = {
+                    ...matchingSubmission.lightship, // Copy existing properties
+                    guid: response.guid || null,
+                    title: response.title || null,
+                    description: response.description || null,
+                    lat: response.lat,
+                    lng: response.lng,
+                    _lastImported: new Date().getTime(),
+                };
 
-            createNotification(response.title);
+                createNotification(response.title);
 
-            matchingSubmission.submitted.edited = true;
+                createNotification(response.title);
 
-            synchronizeLightshipData(matchingSubmission, 'review');
+                synchronizeLightshipData(matchingSubmission, 'review');
         }
     }
 
@@ -741,7 +739,6 @@ function init() {
                                                         );
 
         if (matchingSubmission) {
-            console.log('Found a submitted photo during a Wayfarer review! Details saved for ', response.title);    
             // Update the matching submission with lightship data
             matchingSubmission.lightship = {
                 ...matchingSubmission.lightship, // Copy existing properties
@@ -761,6 +758,8 @@ function init() {
     }
 
     function createNotification(title) {
+        console.log(`Found a submitted photo during a Wayfarer review! Details for '${title}' have been synchronised to the Contributions Management page.`);
+
         if (document.getElementById("wfpcNotify") === null) {
             let container = document.createElement("div");
             container.id = "wfpcNotify";
@@ -3310,9 +3309,7 @@ function init() {
 
         if (referredFrom === 'contributions') {
             createPhotoDetailsPane(thisSubmission.imageUrl);
-            if (!groupingSetting) {
-                updatePhotoListItems(linkedSubmissions);
-            }
+            updatePhotoListItems(linkedSubmissions);
         }
 
         savePhotoSubmissionsToIDB();
