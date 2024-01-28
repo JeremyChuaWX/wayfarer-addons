@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.2.4
+// @version      0.2.5
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -89,7 +89,7 @@ function init() {
             importData: 'Wayspotデータのインポート',
             importDataExplanation: 'Wayspot データを Ingress IITC などの外部ソースから JSON 形式で手動インポートします。',
             settingsHeader: '写真投稿のグループ化',
-            settingsExplanation1: 'プラグイン Wayfarer Photo Contributions をオンにすると、投稿管理ページに同じWayspotのすべての写真が1つの項目として表示されます。この場合、写真を手動でリンクさせるためのユーザー入力が必要になります。',
+            settingsExplanation1: 'Wayfarer Photo Contributionsプラグイン をオンにすると、投稿管理ページに同じWayspotのすべての写真が1つの項目として表示されます。この場合、写真を手動でリンクさせるためのユーザー入力が必要になります。',
             settingsExplanation2: 'オフにすると、同じWayspotに属する写真としてリンクされている場合でも、各写真は個別のエントリーとして投稿管理ページに表示されます。',
         },
         ko: {
@@ -315,14 +315,14 @@ function init() {
         pl: {
             switchToPhotos: 'Przełącz na zdjęcia',
             switchToNominations: 'Przejdź do Wayspotów',
-            pending: 'w oczekiwaniu',
-            submitted: 'zgłoszony',
+            pending: 'W oczekiwaniu',
+            submitted: 'Zgłoszony',
             linkPhotos: 'Połącz zdjęcia',
-            linkPhotosExplanation1: 'Ta funkcja służy do łączenia zdjęć przesłanych dla tego samego punktu trasy.',
+            linkPhotosExplanation1: 'Ta funkcja służy do łączenia zdjęć przesłanych dla tego samego Wayspota.',
             linkPhotosExplanation2: 'Kliknij każde zdjęcie, które chcesz połączyć z tym wpisem.',
             submittedPhotos: 'Zgłoszone zdjęcia:',
-            submittedWayspots: 'Zgłoszone punkty trasy:',
-            editData: 'Edytuj dane Wayspot',
+            submittedWayspots: 'Zgłoszone Wayspoty:',
+            editData: 'Edytuj dane Wayspota',
             formSeparator: ':',
             latitude: 'Szerokość geograficzna',
             longitude: 'Długość geograficzna',
@@ -330,9 +330,9 @@ function init() {
             state: 'Stan',
             importData: 'Importowanie danych Wayspot',
             importDataExplanation: 'Ręcznie importuj dane Wayspot w formacie JSON z zewnętrznych źródeł, takich jak Ingress IITC.',
-            settingsHeader: 'Grupowanie wkładów zdjęciowych',
-            settingsExplanation1: 'Po włączeniu, wtyczka Wayfarer Photos Contributions wyświetli wszystkie zdjęcia dla tego samego Wayspota jako pojedynczy wpis na stronie Contribution Management. Będzie to wymagało ręcznego połączenia zdjęć przez użytkownika.',
-            settingsExplanation2: 'Po jej wyłączeniu, każde zdjęcie będzie wyświetlane na stronie Contribution Management jako osobny wpis, nawet jeśli zdjęcia zostały połączone jako należące do tego samego punktu trasy.',
+            settingsHeader: 'Grupowanie zgłoszonych zdjęć',
+            settingsExplanation1: 'Po włączeniu, wtyczka Wayfarer Photos Contributions wyświetli wszystkie zdjęcia dla tego samego Wayspota jako pojedynczy wpis na stronie Zarządzanie zgłoszeniami. Będzie to wymagało ręcznego połączenia zdjęć przez użytkownika.',
+            settingsExplanation2: 'Po jej wyłączeniu, każde zdjęcie będzie wyświetlane na stronie Zarządzanie zgłoszeniami jako osobny wpis, nawet jeśli zdjęcia zostały połączone jako należące do tego samego Wayspota.',
         },
         ru: {
             switchToPhotos: 'Переключиться на фотографии',
@@ -427,9 +427,9 @@ function init() {
             switchToNominations: 'ওয়েস্পটে স্যুইচ করুন',
             pending: 'বিচারাধীন',
             submitted: 'জমা দেওয়া হয়েছে',
-            linkPhotos: 'একসাথে ফটো লিঙ্ক করুন',
-            linkPhotosExplanation1: 'একই ওয়েস্পটের জন্য ফটো জমাগুলিকে একসাথে লিঙ্ক করতে এই ফাংশনটি ব্যবহার করুন৷',
-            linkPhotosExplanation2: 'আপনি এই এন্ট্রিতে সংযোগ করতে চান এমন প্রতিটি ফটোতে ক্লিক করুন।',
+            linkPhotos: 'ছবি লিঙ্ক করুন',
+            linkPhotosExplanation1: 'একই ওয়েস্পটের ছবিগুলিকে একসাথে লিঙ্ক করতে এই ফাংশনটি ব্যবহার করুন৷',
+            linkPhotosExplanation2: 'লিঙ্ক করতে চান এমন প্রতিটি ছবিতে ক্লিক করুন।',
             submittedPhotos: 'জমা দেওয়া ছবি:',
             submittedWayspots: 'জমা দেওয়া Wayspots:',
             editData: 'Wayspot ডেটা সম্পাদনা করুন',
@@ -437,12 +437,12 @@ function init() {
             latitude: 'অক্ষাংশ',
             longitude: 'দ্রাঘিমাংশ',
             city: 'শহর',
-            state: 'অবস্থা',
+            state: 'রাজ্য',
             importData: 'Wayspot ডেটা আমদানি করুন',
-            importDataExplanation: 'Ingress IITC এর মতো বাহ্যিক উত্স থেকে JSON ফর্ম্যাটে ম্যানুয়ালি Wayspot ডেটা আমদানি করুন৷',
+            importDataExplanation: 'Ingress IITC এর মতো বাহ্যিক উৎস থেকে JSON ফর্ম্যাটে ম্যানুয়ালি Wayspot ডেটা আমদানি করুন৷',
             settingsHeader: 'ফটো অবদানের গ্রুপিং',
-            settingsExplanation1: 'চালু করা হলে, Wayfarer Photo Contributions প্ল্যাগ-ইন কন্ট্রিবিউশন ম্যানেজমেন্ট পৃষ্ঠায় একক এন্ট্রি হিসাবে একই Wayspot-এর সমস্ত ফটো প্রদর্শন করবে। ফটোগুলিকে ম্যানুয়ালি লিঙ্ক করার জন্য ব্যবহারকারীর ইনপুটের প্রয়োজন হবে৷',
-            settingsExplanation2: 'যখন বন্ধ করা হয়, প্রতিটি ফটো একটি পৃথক এন্ট্রি হিসাবে অবদান ব্যবস্থাপনা পৃষ্ঠায় প্রদর্শিত হবে, এমনকি ফটোগুলি একই Wayspot-এর অন্তর্গত হিসাবে একসাথে লিঙ্ক করা থাকলেও৷',
+            settingsExplanation1: ' চালু করা হলে, Wayfarer Photo Contributions প্লাগ-ইন কন্ট্রিবিউশন ম্যানেজমেন্ট পাতায় একক এন্ট্রি হিসাবে একই Wayspot-এর সমস্ত ছবি দেখাবে। ছবিগুলিকে ম্যানুয়ালি লিঙ্ক করার জন্য ব্যবহারকারীর ইনপুটের প্রয়োজন হবে৷',
+            settingsExplanation2: 'বন্ধ থাকলে, প্রতিটি ছবি এক-একটি পৃথক এন্ট্রি হিসাবে কন্ট্রিবিউশন ম্যানেজমেন্ট পাতায় দেখা যাবে; এমনকি ছবিগুলি একই Wayspot-এর অন্তর্গত হিসাবে একসাথে লিঙ্ক করা থাকলেও৷',
         },
         hi: {
             switchToPhotos: 'फ़ोटो पर स्विच करें',
@@ -705,8 +705,8 @@ function init() {
     function extractLightshipDataFromReview(response) {
         const imageUrl = response.imageUrl;
 
-        // Check if the URL from response.imageUrl appears in photoSubmissions
-        const matchingSubmission = photoSubmissions.find(submission => submission.imageUrl === imageUrl);
+        // Check if the URL from response.imageUrl or response.parentNomination appears in photoSubmissions
+        const matchingSubmission = photoSubmissions.find(submission => submission.imageUrl === imageUrl || submission.parentNomination === imageUrl);
 
         if (matchingSubmission) {
             console.log('Found a submitted photo during a Wayfarer review! Details saved for ', response.title);
@@ -1157,14 +1157,12 @@ function init() {
             const newDiv = document.createElement('div');
             newDiv.className = 'flex flex-row';
 
-            // Create the new button
             const newButton = document.createElement('button');
             newButton.classList.add('wf-button', 'wfpc-photos-list-buttons', 'wf-button--icon');
             newButton.setAttribute('wf-button', '');
             newButton.setAttribute('wftype', 'icon');
             newButton.id = 'switch-to-photos-button';
 
-            // Create the span element for the new button
             const spanElement = document.createElement('span');
             spanElement.className = 'text-xs';
             spanElement.id = 'switch-to-photos-text';
@@ -1173,13 +1171,9 @@ function init() {
             // Attach click event listener to newButton
             newButton.addEventListener('click', toggleDisplayedList);
 
-            // Append the span to the new button
+            // Append elements
             newButton.appendChild(spanElement);
-
-            // Append the new button to the new div
             newDiv.appendChild(newButton);
-
-            // Insert the new div before the existing button
             existingButton.parentNode.insertBefore(newDiv, existingButton);
 
             // Move existingButton inside newDiv
@@ -1190,31 +1184,26 @@ function init() {
     function toggleDisplayedList() {
         const photosListDiv = document.querySelector('.wfpc-photos-list');
         const nomsListDiv = document.querySelector('.noms-list');
+        const nominationDetailsPane = document.querySelector('app-details-pane');
+        const photoDetailsPane = document.querySelector('.wfpc-details-pane');
 
         // Check the current visibility state of photos-list
         const isPhotosListHidden = photosListDiv.classList.contains('hidden-list');
 
-        // Define the detailsPane plane for each type
-        const nominationDetailsPane = document.querySelector('app-details-pane');
-        const photoDetailsPane = document.querySelector('.wfpc-details-pane');
+        // Toggle classes based on isPhotosListHidden
+        photosListDiv.classList.toggle('hidden-list', !isPhotosListHidden);
+        nomsListDiv.classList.toggle('hidden-list', isPhotosListHidden);
 
+        if (nominationDetailsPane) {
+            nominationDetailsPane.classList.toggle('hidden-list', isPhotosListHidden);
+        }
+
+        // Adjust logic based on visibility state
         if (isPhotosListHidden) {
-            // Show the photos list, hide the nominations list
             currentDisplay = 'photos';
             sortAndFilterPhotoSubmissions();
-            photosListDiv.classList.remove('hidden-list');
-            nomsListDiv.classList.add('hidden-list');
-            if (nominationDetailsPane) {
-                nominationDetailsPane.classList.add('hidden-list');
-            }
         } else {
-            // Show the nominations list, hide the photos list
             currentDisplay = 'wayspots';
-            photosListDiv.classList.add('hidden-list');
-            nomsListDiv.classList.remove('hidden-list');
-            if (nominationDetailsPane) {
-                nominationDetailsPane.classList.remove('hidden-list');
-            }
             if (photoDetailsPane) {
                 photoDetailsPane.remove();
             }
@@ -1378,7 +1367,7 @@ function init() {
                 fr: /Remerciements ! Contribution de Wayspot Niantic Photo reçue pour (?<title>.+) !/,
                 hi: /धन्यवाद! (?<title>.+) के लिए Niantic Wayspot संपादन सुझाव प्राप्त हुआ!/,
                 it: /Grazie! Abbiamo ricevuto Photo di Niantic Wayspot per (?<title>.+)./,
-                jp: /ありがとうございます。 Niantic Wayspot Photo「(?<title>.+)」が受領されました。/,
+                ja: /ありがとうございます。 Niantic Wayspot Photo「(?<title>.+)」が受領されました。/,
                 ko: /감사합니다! (?<title>.+)에 대한 Niantic Wayspot Photo 제출 완료/,
                 mr: /धन्यवाद! (?<title>.+) साठी Niantic वेस्पॉट Photo प्राप्त झाले!/,
                 nl: /Bedankt! Niantic Wayspot-Photo ontvangen voor (?<title>.+)!/,
@@ -1434,7 +1423,7 @@ function init() {
                     body: /grazie per la proposta di contenuti multimediali Photo di Wayspot per (?<title>.+) in data (?<day>\d{1,2})-(?<month>\w{3})-(?<year>\d{4})/,
                     acceptanceText: 'Congratulazioni, la tua proposta di Photo di Wayspot è stata accettata dalla comunità Wayfarer',
                 },
-                jp: {
+                ja: {
                   title: /Niantic Wayspotのメディア申請「(?<title>.+)」が決定しました/,
                   body: /(?<year>\d{4})\/(?<month>\d{2})\/(?<day>\d{1,2})にWayspot Photo「(?<title>.+)」に関して申請していただき、ありがとうございました/,
                   acceptanceText: 'おめでとうございます。コミュニティはあなたのWayspot Photo申請を承認しました'
@@ -1763,7 +1752,7 @@ function init() {
                 fr: ['janv', 'févr', 'mars', 'avr', 'mai', 'juin', 'juil', 'août', 'sept', 'oct', 'nov', 'déc'],
                 hi: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
                 it: ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'],
-                jp: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'],
+                ja: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'],
                 ko: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'],
                 mr: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
                 nl: ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'],
@@ -3370,16 +3359,6 @@ function init() {
         const detailsPaneButtonsContainer = document.createElement('photo-details-menu');
         detailsPaneButtonsContainer.classList.add('wfpc-details-buttons-div');
 
-        if (status === 'rejected') {
-            const appealButton = document.createElement('button');
-            appealButton.classList.add('wf-button', 'wf-button--accent');
-            appealButton.textContent = l10n['nominations.item.appeal'];
-            appealButton.addEventListener('click', function () {
-                handleAppealButton(photoSubmission);
-            });
-            detailsPaneButtonsContainer.appendChild(appealButton);
-        }
-
         const matchPhotosButton = document.createElement('button');
         matchPhotosButton.classList.add('wf-button');
         matchPhotosButton.style.marginLeft = '0.8rem';
@@ -3512,6 +3491,10 @@ function init() {
                         existingDropdown.remove();
                     }
                     createOutcomeDropdown(linkedSubmission);
+
+                    // Update the appeal button
+                    removeAppealButton()
+                    addAppealButton(linkedSubmission);
                 });
 
                 linkedSubmissionContainer.appendChild(linkedImage);
@@ -3704,6 +3687,29 @@ function init() {
             const matchingImage = document.querySelector(`.wfpc-details-carousel-image[src="${currentImageUrl}"]`);
             if (matchingImage) {
                 matchingImage.classList.add('wfpc-carousel-image-selected');
+            }
+        }
+
+        addAppealButton(photoSubmission);
+
+        function addAppealButton(photoSubmission) {
+            if (photoSubmission.status === 'rejected') {
+                const appealButton = document.createElement('button');
+                appealButton.classList.add('wf-button', 'wf-button--accent');
+                appealButton.textContent = l10n['nominations.item.appeal'];
+                appealButton.id = 'wfpc-appeal-button';
+                appealButton.title = 'Copy appeal template to clipboard and open new forum appeal';
+                appealButton.addEventListener('click', function () {
+                    handleAppealButton(photoSubmission);
+                });
+                detailsPaneButtonsContainer.insertBefore(appealButton, detailsPaneButtonsContainer.firstChild);
+            }
+        }
+
+        function removeAppealButton() {
+            const appealButton = document.getElementById('wfpc-appeal-button');
+            if (appealButton) {
+                appealButton.remove();
             }
         }
     }
@@ -3955,9 +3961,14 @@ Photos to support your claim: [Attach photo]
 
 Additional information: [If you have more explanations, add them here]`;
 
-        navigator.clipboard.writeText(appealString);
-
-        window.open('https://community.wayfarer.nianticlabs.com/post/discussion/wayspot-photo', '_blank')
+        navigator.clipboard
+            .writeText(appealString)
+            .then(() => {
+            window.open('https://community.wayfarer.nianticlabs.com/post/discussion/wayspot-photo', '_blank');
+        })
+            .catch(() => {
+            alert("something went wrong");
+        });
     }
 
     function formatDate(timestamp) {
