@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.2.8
+// @version      0.2.9
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -724,7 +724,7 @@ function init() {
                 _lastImported: new Date().getTime(),
             };
 
-            createNotification(response.title);
+            matchingSubmission.submitted.edited = true;
 
             createNotification(response.title);
 
@@ -773,7 +773,7 @@ function init() {
         notification.classList.add('wfpcNotification');
         notification.addEventListener('click', () => notification.parentNode.removeChild(notification));
         const content = document.createElement('p');
-        content.textContent = `Recognised photo submission for ${title}. Updating Wayspot data.`;
+        content.textContent = `Detected a submitted photo for ${title}. Updating Wayspot data in Contribution Management.`;
         notification.appendChild(content);
         if (existingWfnshNotify) {
             existingWfnshNotify.appendChild(notification);
@@ -4939,7 +4939,7 @@ Additional information: [If you have more explanations, add them here]`;
     padding: 1em;
     margin-top: 1.5em;
     color: white;
-    background-color: #09b065;
+    background-color: #23699e;
   }
   #wfpcNotify {
     position: absolute;
