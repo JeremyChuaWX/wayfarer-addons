@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.2.11
+// @version      0.2.12
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -230,7 +230,7 @@ function init() {
             settingsHeader: 'Regroupement des contributions photos',
             settingsExplanation1: "Lorsqu'il est actif, le plug-in Wayfarer Photos Contributions affiche toutes les photos d'un même Wayspot sous la forme d'une entrée unique sur la page de gestion des contributions. Une intervention de l'utilisateur sera nécessaire pour lier les photos entre elles manuellement.",
             settingsExplanation2: "Lorsqu'il est désactivé, chaque photo sera affichée dans la page de gestion des contributions comme une entrée individuelle, même si les photos ont été liées entre elles comme appartenant au même Wayspot.",
-            notificationString: `J'ai trouvé une photo proposée lors d'un examen du Wayfarer ! Les détails de '{title}' ont été synchronisés avec la page de gestion des contributions.`,
+            notificationString: `J'ai trouvé une photo proposée lors de l'examen d'une proposition Wayfarer ! Les détails de '{title}' ont été synchronisés avec la page de gestion des contributions.`,
         },
         it: {
             switchToPhotos: 'Passa alle foto',
@@ -368,7 +368,7 @@ function init() {
             settingsHeader: 'Группировка фотовкладов',
             settingsExplanation1: 'При включении плагин Wayfarer Photos Contributions отображает все фотографии для одной точки Wayspot в виде одной записи на странице управления предложениями. При этом пользователю потребуется вручную связать фотографии вместе.',
             settingsExplanation2: 'Если плагин выключен, каждая фотография будет отображаться на странице управления предложениями как отдельная запись, даже если фотографии были связаны вместе как относящиеся к одному Wayspot.',
-            notificationString: `Нашел предложенную фотографию во время обзора Wayfarer! Данные для '{title}' были синхронизированы на страницу управления вкладами.`,
+            notificationString: `Нашел предложенную фотографию во время рецензии Wayfarer! Данные для '{title}' были синхронизированы на страницу управления вкладами.`,
         },
         sv: {
             switchToPhotos: 'Byt till foton',
@@ -752,8 +752,6 @@ function init() {
                 response.lng !== undefined && response.lng !== matchingSubmission.lightship.lng ||
                 response.guid !== undefined && response.guid !== matchingSubmission.lightship.guid;
 
-            changeDetected = true;
-
             // Update the matching submission with lightship data only if changes are detected
             if (changeDetected) {
                 matchingSubmission.lightship = {
@@ -768,30 +766,14 @@ function init() {
 
                 matchingSubmission.submitted.edited = true;
 
-                createNotification(response.title, 'en');
-                createNotification(response.title, 'in');
-                createNotification(response.title, 'en');
-                createNotification(response.title, 'de');
-                createNotification(response.title, 'en');
-                createNotification(response.title, 'fr');
-                createNotification(response.title, 'ru');
-                createNotification(response.title, 'en');
-                createNotification(response.title, 'pt');
-                createNotification(response.title, 'es');
-                createNotification(response.title, 'en');
-                createNotification(response.title, 'ja');
-                createNotification(response.title, 'en');
-                createNotification(response.title, 'pl');
-                createNotification(response.title, 'en');
-                createNotification(response.title, 'nl');
-                createNotification(response.title, 'en');
-                createNotification(response.title, 'bn');
+                createNotification(response.title);
+
                 synchronizeLightshipData(matchingSubmission, 'review');
             }
         }
     }
 
-    function createNotification(title, lang) {
+    function createNotification(title) {
         console.log(`Found a submitted photo during a Wayfarer review! Details for '${title}' have been synchronised to the Contributions Management page.`);
 
         const existingWfpcNotify = document.getElementById("wfpcNotify");
@@ -803,7 +785,7 @@ function init() {
             document.getElementsByTagName("body")[0].appendChild(container);
         }
 
-        const notificationString = strings[lang].notificationString.replace('{title}', title);
+        const notificationString = strings[language].notificationString.replace('{title}', title);
 
         const notification = document.createElement('div');
         notification.classList.add('wfpcNotification');
