@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.2.10
+// @version      0.2.11
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -69,6 +69,7 @@ function init() {
             settingsHeader: 'Grouping of Photo Contributions',
             settingsExplanation1: 'When turned on, the Wayfarer Photo Contributions plug-in will display all of the photos for the same Wayspot as a single entry on the Contribution Management page. This will require user input to manually link the photos together.',
             settingsExplanation2: 'When turned off, each photo will be displayed in the Contribution Management page as an individual entry, even if photos have been linked together as belonging to the same Wayspot.',
+            notificationString: `Found a submitted photo during a Wayfarer review! Details for '{title}' have been synchronised to the Contributions Management page.`,
         },
         ja: {
             switchToPhotos: '写真に切り替える',
@@ -91,6 +92,7 @@ function init() {
             settingsHeader: '写真投稿のグループ化',
             settingsExplanation1: 'Wayfarer Photo Contributionsプラグイン をオンにすると、投稿管理ページに同じWayspotのすべての写真が1つの項目として表示されます。この場合、写真を手動でリンクさせるためのユーザー入力が必要になります。',
             settingsExplanation2: 'オフにすると、同じWayspotに属する写真としてリンクされている場合でも、各写真は個別のエントリーとして投稿管理ページに表示されます。',
+            notificationString: `Wayfarerレビュー中に投稿された写真を発見！「{title}」の詳細が投稿管理ページに同期されました。`,
         },
         ko: {
             switchToPhotos: '사진으로 전환',
@@ -113,6 +115,7 @@ function init() {
             settingsHeader: '사진 기여 그룹화',
             settingsExplanation1: '이 기능을 켜면, Wafarer Photo Contributions 플러그인이 동일한 Wayspot에 대한 모든 사진을 기여 관리 페이지에 단일 항목으로 표시합니다. 이 경우 사진을 수동으로 연결하려면 사용자의 입력이 필요합니다.',
             settingsExplanation2: '이 기능을 끄면 사진이 동일한 Wayspot에 속하는 것으로 서로 연결되어 있더라도 각 사진이 기여도 관리 페이지에 개별 항목으로 표시됩니다.',
+            notificationString: `웨이페어러 심사 중 제출된 사진을 찾았습니다! '{title}'에 대한 세부 정보가 기여 관리 페이지에 동기화되었습니다.`,
         },
         pt: {
             switchToPhotos: 'Mudar para fotos',
@@ -135,6 +138,7 @@ function init() {
             settingsHeader: 'Agrupamento de contribuições de fotos',
             settingsExplanation1: 'Quando ativado, o plug-in Wayfarer Photos Contributions exibirá todas as fotos para o mesmo Wayspot como uma única entrada na página Gerenciamento de contribuições. Isso exigirá a entrada do usuário para vincular manualmente as fotos.',
             settingsExplanation2: 'Quando desativado, cada foto será exibida na página Gerenciamento de contribuições como uma entrada individual, mesmo que as fotos tenham sido vinculadas como pertencentes ao mesmo Wayspot.',
+            notificationString: `Encontrei uma foto enviada durante uma revisão do Wayfarer! Os detalhes de '{title}' foram sincronizados com a página Gerenciamento de contribuições.`,
         },
         cs: {
             switchToPhotos: 'Přepněte na Fotky',
@@ -157,6 +161,7 @@ function init() {
             settingsHeader: 'Seskupení příspěvků fotografií',
             settingsExplanation1: 'Je-li zapnut, zobrazí zásuvný modul Wayfarer Photos Contributions všechny fotografie pro stejný Wayspot jako jedinou položku na stránce Správa příspěvků. To bude vyžadovat vstup uživatele, aby fotografie ručně spojil dohromady.',
             settingsExplanation2: 'Je-li vypnut, každá fotografie se na stránce Správa příspěvků zobrazí jako samostatná položka, i když byly fotografie spojeny dohromady jako patřící ke stejnému Wayspotu.',
+            notificationString: `Nalezena odeslaná fotografie během recenze Wayfarer! Podrobnosti pro '{title}' byly synchronizovány se stránkou Správa příspěvků.`,
         },
         es: {
             switchToPhotos: 'Cambiar a fotos',
@@ -179,6 +184,7 @@ function init() {
             settingsHeader: 'Agrupación de contribuciones de fotos',
             settingsExplanation1: 'Cuando está activado, el complemento Wayfarer Photos Contributions mostrará todas las fotos del mismo Wayspot como una única entrada en la página de gestión de contribuciones. Esto requerirá la intervención del usuario para vincular manualmente las fotos.',
             settingsExplanation2: 'Si está desactivado, cada foto se mostrará en la página de gestión de contribuciones como una entrada individual, incluso si las fotos se han vinculado entre sí como pertenecientes al mismo punto de acceso.',
+            notificationString: `Se ha encontrado una foto enviada durante una revisión de Wayfarer. Los datos de '{title}' se han sincronizado con la página de gestión de contribuciones.`,
         },
         de: {
             switchToPhotos: 'Zu Fotos wechseln',
@@ -201,6 +207,7 @@ function init() {
             settingsHeader: 'Gruppierung von Fotobeiträgen',
             settingsExplanation1: 'Wenn diese Funktion aktiviert ist, zeigt das Wayfarer Photos Contributions Plug-in alle Fotos für denselben Wayspot als einen einzigen Eintrag auf der Seite Contribution Management an. Dies erfordert eine Benutzereingabe, um die Fotos manuell miteinander zu verknüpfen.',
             settingsExplanation2: 'Wenn das Plug-in ausgeschaltet ist, wird jedes Foto auf der Seite Beitragsverwaltung als einzelner Eintrag angezeigt, auch wenn die Fotos mit demselben Wayspot verknüpft wurden.',
+            notificationString: `Ein eingereichtes Foto bei einer Wayfarer-Bewertung gefunden! Die Details für '{title}' wurden mit der Seite der Beitragsverwaltung synchronisiert.`,
         },
         fr: {
             switchToPhotos: 'Vers les photos',
@@ -223,6 +230,7 @@ function init() {
             settingsHeader: 'Regroupement des contributions photos',
             settingsExplanation1: "Lorsqu'il est actif, le plug-in Wayfarer Photos Contributions affiche toutes les photos d'un même Wayspot sous la forme d'une entrée unique sur la page de gestion des contributions. Une intervention de l'utilisateur sera nécessaire pour lier les photos entre elles manuellement.",
             settingsExplanation2: "Lorsqu'il est désactivé, chaque photo sera affichée dans la page de gestion des contributions comme une entrée individuelle, même si les photos ont été liées entre elles comme appartenant au même Wayspot.",
+            notificationString: `J'ai trouvé une photo proposée lors d'un examen du Wayfarer ! Les détails de '{title}' ont été synchronisés avec la page de gestion des contributions.`,
         },
         it: {
             switchToPhotos: 'Passa alle foto',
@@ -245,6 +253,7 @@ function init() {
             settingsHeader: 'Raggruppamento dei contributi fotografici',
             settingsExplanation1: "Se attivato, il plug-in Contributi fotografici del Wayfarer visualizza tutte le foto dello stesso Wayspot come un'unica voce nella pagina di gestione dei contributi. Ciò richiede l'intervento dell'utente per collegare manualmente le foto tra loro.",
             settingsExplanation2: "Quando è disattivato, ogni foto verrà visualizzata nella pagina di gestione dei contributi come voce singola, anche se le foto sono state collegate insieme come appartenenti allo stesso Wayspot.",
+            notificationString: `Trovata una foto inviata durante una revisione del Wayfarer! I dettagli di "{title}" sono stati sincronizzati nella pagina di gestione dei contributi.`,
         },
         in: {
             switchToPhotos: 'Beralih ke foto',
@@ -267,6 +276,7 @@ function init() {
             settingsHeader: 'Mengelompokan kontribusi Foto/Gambar',
             settingsExplanation1: 'Jika dinyalakan, plug-in Kontribusi Foto/Gambar Wayspot akan menampilkan semua Foto/Gambar untuk Wayspot yang sama sebagai nominasi tunggal pada laman Manajemen Kontribusi. Hal ini akan memerlukan masukan pengguna untuk menautkan foto/gambar secara manual.',
             settingsExplanation2: 'Jika dimatikan, masing-masing foto/gambar akan ditampilkan pada laman Manajemen Kontribusi sebagai masukan individu, bahkan jika foto/gambar tersebut telah ditautkan bersama untuk Wayspot yang sama.',
+            notificationString: `Menemukan foto/gambar yang diajukan selama ulasan Wayfarer! Detail untuk '{title}' telah disinkronisasikan ke halaman Manajemen Kontribusi.`,
         },
         nl: {
             switchToPhotos: `Wisselen naar foto's`,
@@ -289,6 +299,7 @@ function init() {
             settingsHeader: 'Groeperen van fotobijdragen',
             settingsExplanation1: "Als de plug-in Wayfarer Foto's Bijdragen is ingeschakeld, worden alle foto's voor dezelfde Wayspot als één item weergegeven op de Bijdragenbeheer pagina. Dit vereist gebruikersinvoer om de foto's handmatig aan elkaar te koppelen.",
             settingsExplanation2: "Als deze optie is uitgeschakeld, wordt elke foto op de Contribution Management pagina individueel weergegeven, zelfs als foto's aan dezelfde Wayspot zijn gekoppeld.",
+            notificationString: `Een ingediende foto gevonden tijdens een Wayfarer review! Details voor '{title}' zijn gesynchroniseerd naar de Bijdragenbeheer pagina.`,
         },
         no: {
             switchToPhotos: 'Bytt til bilder',
@@ -311,6 +322,7 @@ function init() {
             settingsHeader: 'Gruppering av fotobidrag',
             settingsExplanation1: 'Når denne funksjonen er slått på, vil Wayfarer Photos Contributions-plugin-modulen vise alle bildene for samme Wayspot som én enkelt oppføring på Contribution Management-siden. Dette krever at brukeren manuelt kobler bildene sammen.',
             settingsExplanation2: 'Når den er slått av, vil hvert bilde vises på siden for bidragsadministrasjon som en individuell oppføring, selv om bildene er koblet sammen som tilhørende samme Wayspot.',
+            notificationString: `Fant et innsendt bilde under en Wayfarer-gjennomgang! Detaljer for '{title}' har blitt synkronisert med siden for bidragshåndtering.`,
         },
         pl: {
             switchToPhotos: 'Przełącz na zdjęcia',
@@ -333,6 +345,7 @@ function init() {
             settingsHeader: 'Grupowanie zgłoszonych zdjęć',
             settingsExplanation1: 'Po włączeniu, wtyczka Wayfarer Photos Contributions wyświetli wszystkie zdjęcia dla tego samego Wayspota jako pojedynczy wpis na stronie Zarządzanie zgłoszeniami. Będzie to wymagało ręcznego połączenia zdjęć przez użytkownika.',
             settingsExplanation2: 'Po jej wyłączeniu, każde zdjęcie będzie wyświetlane na stronie Zarządzanie zgłoszeniami jako osobny wpis, nawet jeśli zdjęcia zostały połączone jako należące do tego samego Wayspota.',
+            notificationString: `Znaleziono zgłoszone zdjęcie podczas oceniania Wayfarer. Szczegół dotyczące "{title}" zostały zsynchronizowane ze stroną Zarządzanie zgłoszeniami`,
         },
         ru: {
             switchToPhotos: 'Переключиться на фотографии',
@@ -355,6 +368,7 @@ function init() {
             settingsHeader: 'Группировка фотовкладов',
             settingsExplanation1: 'При включении плагин Wayfarer Photos Contributions отображает все фотографии для одной точки Wayspot в виде одной записи на странице управления предложениями. При этом пользователю потребуется вручную связать фотографии вместе.',
             settingsExplanation2: 'Если плагин выключен, каждая фотография будет отображаться на странице управления предложениями как отдельная запись, даже если фотографии были связаны вместе как относящиеся к одному Wayspot.',
+            notificationString: `Нашел предложенную фотографию во время обзора Wayfarer! Данные для '{title}' были синхронизированы на страницу управления вкладами.`,
         },
         sv: {
             switchToPhotos: 'Byt till foton',
@@ -377,6 +391,7 @@ function init() {
             settingsHeader: 'Gruppering av fotobidrag',
             settingsExplanation1: 'När den är aktiverad kommer insticksprogrammet Wayfarer Photo Contributions att visa alla foton för samma Wayspot som en enda post på sidan Contribution Management. Detta kräver att användaren manuellt länkar samman bilderna.',
             settingsExplanation2: 'När den är avstängd kommer varje foto att visas på sidan Bidragshantering som en enskild post, även om foton har länkats ihop som tillhörande samma Wayspot.',
+            notificationString: `Hittade ett inskickat foto under en Wayfarer-granskning! Detaljer för '{title}' har synkroniserats till bidragshanteringssidan.`,
         },
         th: {
             switchToPhotos: 'สลับไปที่รูปถ่าย',
@@ -399,6 +414,7 @@ function init() {
             settingsHeader: 'การจัดกลุ่มผลงานภาพถ่าย',
             settingsExplanation1: 'เมื่อเปิดใช้งาน ปลั๊กอิน Wayfarer Photo Contributions จะแสดงภาพถ่ายทั้งหมดสำหรับ Wayspot เดียวกันเป็นรายการเดียวบนหน้าการจัดการการมีส่วนร่วม ซึ่งจะต้องมีการป้อนข้อมูลจากผู้ใช้เพื่อเชื่อมโยงรูปภาพเข้าด้วยกันด้วยตนเอง',
             settingsExplanation2: 'เมื่อปิด รูปภาพแต่ละรูปจะแสดงในหน้าการจัดการการมีส่วนร่วมเป็นรายการเดี่ยว แม้ว่ารูปภาพจะเชื่อมโยงเข้าด้วยกันเป็นของ Wayspot เดียวกันก็ตาม',
+            notificationString: `พบรูปถ่ายที่ส่งมาในระหว่างการรีวิว Wayfarer! รายละเอียดสำหรับ '{title}' ได้รับการซิงโครไนซ์กับหน้าการจัดการการมีส่วนร่วมแล้ว`,
         },
         zh_TW: {
             switchToPhotos: '切換到照片',
@@ -421,6 +437,7 @@ function init() {
             settingsHeader: '照片貢獻分組',
             settingsExplanation1: '開啟後，Wayfarer Photo Contributions 外掛程式將在「貢獻管理」頁面上將同一 Wayspot 的所有照片顯示為單一條目。 這將需要用戶輸入來手動將照片連結在一起。',
             settingsExplanation2: '關閉後，每張照片都將作為單獨的條目顯示在「貢獻管理」頁面中，即使照片已連結在一起屬於同一 Wayspot。',
+            notificationString: `在 Wayfarer 評論期間發現提交的照片！ 「{title}」的詳細資訊已同步至貢獻管理頁面。`,
         },
         bn: {
             switchToPhotos: 'ছবিতে স্যুইচ করুন',
@@ -443,6 +460,7 @@ function init() {
             settingsHeader: 'ফটো অবদানের গ্রুপিং',
             settingsExplanation1: ' চালু করা হলে, Wayfarer Photo Contributions প্লাগ-ইন কন্ট্রিবিউশন ম্যানেজমেন্ট পাতায় একক এন্ট্রি হিসাবে একই Wayspot-এর সমস্ত ছবি দেখাবে। ছবিগুলিকে ম্যানুয়ালি লিঙ্ক করার জন্য ব্যবহারকারীর ইনপুটের প্রয়োজন হবে৷',
             settingsExplanation2: 'বন্ধ থাকলে, প্রতিটি ছবি এক-একটি পৃথক এন্ট্রি হিসাবে কন্ট্রিবিউশন ম্যানেজমেন্ট পাতায় দেখা যাবে; এমনকি ছবিগুলি একই Wayspot-এর অন্তর্গত হিসাবে একসাথে লিঙ্ক করা থাকলেও৷',
+            notificationString: `একটি Wayfarer পর্যালোচনা সময় একটি জমা ফটো পাওয়া গেছে! '{title}'-এর বিবরণ অবদান ব্যবস্থাপনা পৃষ্ঠায় সিঙ্ক্রোনাইজ করা হয়েছে।`,
         },
         hi: {
             switchToPhotos: 'फ़ोटो पर स्विच करें',
@@ -465,6 +483,7 @@ function init() {
             settingsHeader: 'फोटो योगदान का समूहन',
             settingsExplanation1: 'चालू होने पर, वेफ़रर फोटो कंट्रीब्यूशन प्लग-इन एक ही वेस्पॉट के लिए सभी फ़ोटो को कंट्रीब्यूशन मैनेजमेंट पेज पर एकल प्रविष्टि के रूप में प्रदर्शित करेगा। इसके लिए फ़ोटो को मैन्युअल रूप से एक साथ लिंक करने के लिए उपयोगकर्ता इनपुट की आवश्यकता होगी।',
             settingsExplanation2: 'बंद होने पर, प्रत्येक फ़ोटो को योगदान प्रबंधन पृष्ठ में एक व्यक्तिगत प्रविष्टि के रूप में प्रदर्शित किया जाएगा, भले ही फ़ोटो को एक ही वेस्पॉट से संबंधित होने के कारण एक साथ लिंक किया गया हो।',
+            notificationString: `वेफ़रर समीक्षा के दौरान सबमिट की गई एक फ़ोटो मिली! '{title}' का विवरण योगदान प्रबंधन पृष्ठ पर सिंक्रनाइज़ किया गया है।`,
         },
         mr: {
             switchToPhotos: 'फोटोंवर स्विच करा',
@@ -487,6 +506,7 @@ function init() {
             settingsHeader: 'फोटो योगदानांचे गट करणे',
             settingsExplanation1: 'चालू केल्यावर, Wayfarer Photo Contributions प्लग-इन योगदान व्यवस्थापन पृष्ठावरील एकाच एंट्रीच्या रूपात समान वेस्पॉटसाठी सर्व फोटो प्रदर्शित करेल. फोटो एकत्र जोडण्यासाठी वापरकर्ता इनपुटची आवश्यकता असेल.',
             settingsExplanation2: 'बंद केल्यावर, प्रत्येक फोटो योगदान व्यवस्थापन पृष्ठावर वैयक्तिक एंट्री म्हणून प्रदर्शित केला जाईल, जरी फोटो एकाच वेस्पॉटशी संबंधित म्हणून एकत्र जोडले गेले असले तरीही.',
+            notificationString: `वेफेअर पुनरावलोकनादरम्यान सबमिट केलेला फोटो सापडला! '{title}' साठीचे तपशील योगदान व्यवस्थापन पृष्ठावर समक्रमित केले गेले आहेत.`,
         },
         ta: {
             switchToPhotos: 'புகைப்படங்களுக்கு மாறவும்',
@@ -509,6 +529,7 @@ function init() {
             settingsHeader: 'புகைப்படப் பங்களிப்புகளின் குழுவாக்கம்',
             settingsExplanation1: 'இயக்கப்பட்டிருக்கும் போது, Wayfarer Photo Contributions செருகுநிரலானது, ஒரே Wayspotக்கான அனைத்துப் புகைப்படங்களையும் பங்களிப்பு மேலாண்மைப் பக்கத்தில் ஒரே பதிவாகக் காண்பிக்கும். புகைப்படங்களை கைமுறையாக ஒன்றாக இணைக்க பயனர் உள்ளீடு தேவைப்படும்.',
             settingsExplanation2: 'அணைக்கப்படும் போது, ஒவ்வொரு புகைப்படமும் ஒரே Wayspot க்கு சொந்தமானவை என ஒன்றாக இணைக்கப்பட்டிருந்தாலும், பங்களிப்பு மேலாண்மை பக்கத்தில் தனிப்பட்ட உள்ளீட்டாக காட்டப்படும்.',
+            notificationString: `வேஃபேரர் மதிப்பாய்வின் போது சமர்ப்பிக்கப்பட்ட புகைப்படம் கிடைத்தது! '{title}' க்கான விவரங்கள் பங்களிப்புகள் மேலாண்மை பக்கத்துடன் ஒத்திசைக்கப்பட்டுள்ளன.`,
         },
         te: {
             switchToPhotos: 'ఫోటోలను ఒకదానితో ఒకటి లింక్ చేయండి',
@@ -531,6 +552,7 @@ function init() {
             settingsHeader: 'ఫోటో సహకారాల సమూహనం',
             settingsExplanation1: 'ఆన్ చేసినప్పుడు, Wayfarer ఫోటో కంట్రిబ్యూషన్స్ ప్లగ్-ఇన్ కంట్రిబ్యూషన్ మేనేజ్‌మెంట్ పేజీలో ఒకే ఎంట్రీగా ఒకే వేస్పాట్ కోసం అన్ని ఫోటోలను ప్రదర్శిస్తుంది. ఇది ఫోటోలను మాన్యువల్‌గా లింక్ చేయడానికి వినియోగదారు ఇన్‌పుట్ అవసరం.',
             settingsExplanation2: 'ఆపివేయబడినప్పుడు, ఫోటోలు ఒకే వేస్‌పాట్‌కు చెందినవిగా కలిసి లింక్ చేయబడినప్పటికీ, ప్రతి ఫోటో సహకార నిర్వహణ పేజీలో వ్యక్తిగత ఎంట్రీగా ప్రదర్శించబడుతుంది.',
+            notificationString: `వేఫేరర్ సమీక్షలో సమర్పించిన ఫోటో కనుగొనబడింది! '{title}' కోసం వివరాలు సహకార నిర్వహణ పేజీకి సమకాలీకరించబడ్డాయి.`,
         },
         tl: {
             switchToPhotos: 'Lumipat sa mga larawan',
@@ -553,6 +575,7 @@ function init() {
             settingsHeader: 'Pagpapangkat ng mga Kontribusyon sa Larawan',
             settingsExplanation1: 'Kapag naka-on, ipapakita ng Wayfarer Photo Contributions plug-in ang lahat ng larawan para sa parehong Wayspot bilang isang entry sa page ng Contribution Management. Mangangailangan ito ng input ng user upang manu-manong i-link ang mga larawan nang magkasama.',
             settingsExplanation2: 'Kapag naka-off, ang bawat larawan ay ipapakita sa pahina ng Pamamahala ng Kontribusyon bilang isang indibidwal na entry, kahit na ang mga larawan ay na-link nang magkasama bilang kabilang sa parehong Wayspot.',
+            notificationString: `Nakakita ng isinumiteng larawan sa panahon ng pagsusuri ng Wayfarer! Ang mga detalye para sa '{title}' ay na-synchronize sa page ng Contributions Management.`,
         },
         tr: {
             switchToPhotos: 'Fotoğraflara geç',
@@ -575,6 +598,7 @@ function init() {
             settingsHeader: 'Fotoğraf Katkılarının Gruplandırılması',
             settingsExplanation1: 'Wayfarer Photo Contributions eklentisi açıldığında, aynı Wayspot için tüm fotoğraflar Katkı Yönetimi sayfasında tek bir giriş olarak görüntülenecektir. Bu, fotoğrafları manuel olarak birbirine bağlamak için kullanıcı girişi gerektirecektir.',
             settingsExplanation2: "Kapatıldığında, fotoğraflar aynı Wayspot'a ait olarak birbirine bağlanmış olsa bile, her fotoğraf Katkı Yönetimi sayfasında ayrı bir giriş olarak görüntülenecektir.",
+            notificationString: `Wayfarer incelemesi sırasında gönderilen bir fotoğraf bulundu! '{title}' ile ilgili ayrıntılar Katkı Yönetimi sayfasına senkronize edildi.`,
         }
     };
 
@@ -706,10 +730,10 @@ function init() {
         let matchingSubmission;
 
         if (reviewType === 'PHOTO') {
-        // Check if any of the newPhotos URLs appear in photoSubmissions
-        matchingSubmission = photoSubmissions.find(submission =>
-                                                         response.newPhotos.some(photo => photo.value === submission.imageUrl || photo.value === submission.lightship.parentNomination)
-                                                        );
+            // Check if any of the newPhotos URLs appear in photoSubmissions
+            matchingSubmission = photoSubmissions.find(submission =>
+                                                       response.newPhotos.some(photo => photo.value === submission.imageUrl || photo.value === submission.lightship.parentNomination)
+                                                      );
         } else {
             const imageUrl = response.imageUrl;
             if (imageUrl) {
@@ -718,26 +742,56 @@ function init() {
         }
 
         if (matchingSubmission) {
-            // Update the matching submission with lightship data
-            matchingSubmission.lightship = {
-                ...matchingSubmission.lightship, // Copy existing properties
-                guid: response.guid || matchingSubmission.lightship.guid || null,
-                title: response.title || matchingSubmission.lightship.title || null,
-                description: response.description || matchingSubmission.lightship.description || null,
-                lat: response.lat,
-                lng: response.lng,
-                _lastImported: new Date().getTime(),
-            };
+            // Check for changes before updating the matching submission with lightship data
+            let changeDetected = false;
 
-            matchingSubmission.submitted.edited = true;
+            changeDetected =
+                response.title !== undefined && response.title !== matchingSubmission.lightship.title ||
+                response.description !== undefined && response.description !== matchingSubmission.lightship.description ||
+                response.lat !== undefined && response.lat !== matchingSubmission.lightship.lat ||
+                response.lng !== undefined && response.lng !== matchingSubmission.lightship.lng ||
+                response.guid !== undefined && response.guid !== matchingSubmission.lightship.guid;
 
-            createNotification(response.title);
+            changeDetected = true;
 
-            synchronizeLightshipData(matchingSubmission, 'review');
+            // Update the matching submission with lightship data only if changes are detected
+            if (changeDetected) {
+                matchingSubmission.lightship = {
+                    ...matchingSubmission.lightship, // Copy existing properties
+                    guid: response.guid !== undefined ? response.guid : matchingSubmission.lightship.guid || null,
+                    title: response.title !== undefined ? response.title : matchingSubmission.lightship.title || null,
+                    description: response.description !== undefined ? response.description : matchingSubmission.lightship.description || null,
+                    lat: response.lat !== undefined ? response.lat : matchingSubmission.lightship.lat,
+                    lng: response.lng !== undefined ? response.lng : matchingSubmission.lightship.lng,
+                    _lastImported: new Date().getTime(),
+                };
+
+                matchingSubmission.submitted.edited = true;
+
+                createNotification(response.title, 'en');
+                createNotification(response.title, 'in');
+                createNotification(response.title, 'en');
+                createNotification(response.title, 'de');
+                createNotification(response.title, 'en');
+                createNotification(response.title, 'fr');
+                createNotification(response.title, 'ru');
+                createNotification(response.title, 'en');
+                createNotification(response.title, 'pt');
+                createNotification(response.title, 'es');
+                createNotification(response.title, 'en');
+                createNotification(response.title, 'ja');
+                createNotification(response.title, 'en');
+                createNotification(response.title, 'pl');
+                createNotification(response.title, 'en');
+                createNotification(response.title, 'nl');
+                createNotification(response.title, 'en');
+                createNotification(response.title, 'bn');
+                synchronizeLightshipData(matchingSubmission, 'review');
+            }
         }
     }
 
-    function createNotification(title) {
+    function createNotification(title, lang) {
         console.log(`Found a submitted photo during a Wayfarer review! Details for '${title}' have been synchronised to the Contributions Management page.`);
 
         const existingWfpcNotify = document.getElementById("wfpcNotify");
@@ -749,11 +803,13 @@ function init() {
             document.getElementsByTagName("body")[0].appendChild(container);
         }
 
+        const notificationString = strings[lang].notificationString.replace('{title}', title);
+
         const notification = document.createElement('div');
         notification.classList.add('wfpcNotification');
         notification.addEventListener('click', () => notification.parentNode.removeChild(notification));
         const content = document.createElement('p');
-        content.textContent = `Detected a submitted photo for ${title}. Updating Wayspot data in Contribution Management.`;
+        content.textContent = notificationString;
         notification.appendChild(content);
         if (existingWfnshNotify) {
             existingWfnshNotify.appendChild(notification);
