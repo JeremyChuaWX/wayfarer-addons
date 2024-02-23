@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.2.12
+// @version      0.2.13
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -3714,8 +3714,10 @@ function init() {
 
             if (status === 'pending') {
                 wfpcOneLineParagraph.textContent = `${submittedDate} - ${strings[language].submitted}`;
-            } else {
+            } else if (status === 'accepted') {
                 wfpcOneLineParagraph.textContent = `${outcomeDate} - ${l10n['nominations.status.accepted']}`;
+            } else if (status === 'rejected') {
+                wfpcOneLineParagraph.textContent = `${outcomeDate} - ${l10n['nominations.status.notaccepted']}`;
             }
 
             wfpcDDRightBox.appendChild(wfpcOneLineParagraph);
