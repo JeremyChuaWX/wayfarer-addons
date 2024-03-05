@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.2.14
+// @version      0.2.15
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -559,7 +559,7 @@ function init() {
             switchToNominations: 'Lumipat sa Wayspots',
             pending: 'Nakabinbin',
             submitted: 'Isinumite',
-            linkPhotos: 'Ugnayin ang mga Larawan',
+            linkPhotos: 'Ipangkat ang mga Larawan',
             linkPhotosExplanation1: 'Gamitin ang function na ito upang pag-ugnayin ang mga isinumiteng larawan para sa iisang partikular na Wayspot.',
             linkPhotosExplanation2: 'I-click ang bawat larawan na gusto mong ikonekta sa entry na ito.',
             submittedPhotos: 'Mga isinumiteng larawan:',
@@ -1474,11 +1474,12 @@ function init() {
                 bn: {
                     title: /(?<title>.+)-এর জন্য Niantic Wayspot মিডিয়া জমা দেওয়ার সিদ্ধান্ত নেওয়া হয়েছে/,
                     body: /(?<month>\w{3}) (?<day>\d{1,2}), (?<year>\d{4})-এ (?<title>.+)-এর জন্য আপনার Wayspot Photo জমা দেওয়ার জন্য আপনাকে ধন্যবাদ জানাই/,
+                    body_new_date_format: /(?<day>\d{1,2}) (?<month>.+?), (?<year>\d{4})-এ (?<title>.+)-এর জন্য আপনার Wayspot Photo জমা দেওয়ার জন্য আপনাকে ধন্যবাদ জানাই/,
                     acceptanceText: 'অভিনন্দন, সম্প্রদায়ের সিদ্ধান্ত অনুসারে আপনার Wayspot Photo-এর সম্পাদনার জমাকরণ তারা স্বীকার করেছেন'
                 },
                 cs: {
                     title: /Rozhodnutí o odeslání obrázku Niantic Wayspotu (?<title>.+)/,
-                    body: /děkujeme za odeslání návrhu pro položku Photo Wayspotu (?<title>.+) ze dne (?<day>\d{1,2})\.(?<month>\d{1,2})\.(?<year>\d{4})/,
+                    body: /děkujeme za odeslání návrhu pro položku Photo Wayspotu (?<title>.+) ze dne (?<day>\d{1,2})\.\s?(?<month>\d{1,2})\.\s?(?<year>\d{4})/,
                     acceptanceText: 'Gratulujeme, komunita se rozhodla přijmout vaáš příspěvek Photo pro Wayspot'
                 },
                 de: {
@@ -1499,11 +1500,12 @@ function init() {
                 hi: {
                     title: /(?<title>.+) के लिए तह Niantic Wayspot मीडिया सबमिशन/,
                     body: /प्रिय (?<username>.+),([^]+?)(?<title>.+) पर (?<month>\w{3}) (?<day>\d{1,2}), (?<year>\d{4}) लिए आपके Wayspot Photo सबमिशन के लिए धन्यवाद।/,
+                    body_new_date_format: /प्रिय (?<username>.+),([^]+?)(?<title>.+) पर (?<day>\d{1,2}) (?<month>.+?) (?<year>\d{4}) लिए आपके Wayspot Photo सबमिशन के लिए धन्यवाद।/,
                     acceptanceText: 'बधाई, समुदाय ने को आपके Wayspot संपादन को स्वीकार करने का निर्णय लिया है'
                 },
                 it: {
                     title: /Proposta di contenuti multimediali di Niantic Wayspot decisa per (?<title>.+)/,
-                    body: /grazie per la proposta di contenuti multimediali Photo di Wayspot per (?<title>.+) in data (?<day>\d{1,2})-(?<month>\w{3})-(?<year>\d{4})/,
+                    body: /grazie per la proposta di contenuti multimediali Photo di Wayspot per (?<title>.+) in data (?<day>\d{1,2})[- ](?<month>\w{3})[- ](?<year>\d{4})/,
                     acceptanceText: 'Congratulazioni, la tua proposta di Photo di Wayspot è stata accettata dalla comunità Wayfarer',
                 },
                 ja: {
@@ -1519,11 +1521,12 @@ function init() {
                 mr: {
                     title: /(?<title>.+) साठी Niantic वेस्पॉट मीडिया सबमिशनचा निर्णय घेतला/,
                     body: /(?<month>\w{3}) (?<day>\d{1,2}), (?<year>\d{4}) रोजी (?<title>.+) साठी तुमच्या वेस्पॉट Photo सबमिशनबद्दल धन्यवाद/,
+                    body_new_date_format: /(?<day>\d{1,2}) (?<month>.+?), (?<year>\d{4}) रोजी (?<title>.+) साठी तुमच्या वेस्पॉट Photo सबमिशनबद्दल धन्यवाद/,
                     acceptanceText: 'अभिनंदन, समुदायाने तुमचे Photo सबमिशन स्वीकारण्याचा निर्णय घेतला आहे'
                 },
                 nl: {
                     title: /Besluit over Niantic Wayspot-media-inzending voor (?<title>.+)/,
-                    body: /Bedankt voor je Wayspot-Photo-inzending voor (?<title>.+) op (?<day>\d{1,2})-(?<month>\w{3})-(?<year>\d{4})/,
+                    body: /Bedankt voor je Wayspot-Photo-inzending voor (?<title>.+) op (?<day>\d{1,2})[- ](?<month>\w{3})\.?[- ](?<year>\d{4})/,
                     acceptanceText: 'Gefeliciteerd, de gemeenschap heeft besloten om je Wayspot-Photo-inzending wel te accepteren'
                 },
                 no: {
@@ -1534,31 +1537,36 @@ function init() {
                 pl: {
                     title: /Decyzja na temat zgłoszenia materiałów do Wayspotu Niantic (?<title>.+)/,
                     body: /Dziękujemy za zgłoszenie (?<year>\d{4})-(?<month>\d{2})-(?<day>\d{1,2}) materiałów Photo do Wayspotu „(?<title>.+)”/,
+                    body_new_date_format: /Dziękujemy za zgłoszenie (?<day>\d{1,2}) (?<month>\w{3}) (?<year>\d{4}) materiałów Photo do Wayspotu „(?<title>.+)”/,
                     acceptanceText: 'Gratulujemy, społeczność zdecydowała zaakceptować zgłoszenia materiałów Photo do Wayspotu'
                 },
                 pt: {
                     title: /Decisão sobre o envio de mídia para o Niantic Wayspot (?<title>.+)/,
-                    body: /Agradecemos o seu envio de Photo para o Wayspot (?<title>.+) em (?<day>\d{1,2})\/(?<month>\w{3})\/(?<year>\d{4})/,
+                    body: /Agradecemos o seu envio de Photo para o Wayspot (?<title>.+) em (?<day>\d{1,2})(?:\/| de )(?<month>\w{3})(?:\/| de )(?<year>\d{4})/,
                     acceptanceText: 'Parabéns, a comunidade decidiu aceitar o seu envio de Photo para o Wayspot'
                 },
                 ru: {
                     title: /Вынесено решение по предложению по файлу для (?<title>.+)/,
-                    body: /Благодарим за заявку Wayfarer (Photo) для (?<title>.+), отправленную (?<day>\d{1,2})\.(?<month>\d{2})\.(?<year>\d{4})/,
+                    body: /Благодарим за заявку Wayfarer \(Photo\) для (?<title>.+), отправленную (?<day>\d{1,2})\.(?<month>\d{2})\.(?<year>\d{4})/,
+                    body_new_date_format: /Благодарим за заявку Wayfarer \(Photo\) для (?<title>.+), отправленную (?<day>\d{1,2}) (?<month>.+?) (?<year>\d{4}) г\./,
                     acceptanceText: 'Поздравляем, сообщество решило принять ваше предложение по файлу (Photo) для Wayspot'
                 },
                 sv: {
                     title: /Niantic Wayspot-medieinlämning har beslutats om för (?<title>.+)/,
                     body: /Tack för din Wayspot Photo-inlämning för (?<title>.+) den (?<year>\d{4})-(?<month>\w{3})-(?<day>\d{1,2})/,
+                    body_new_date_format: /Tack för din Wayspot Photo-inlämning för (?<title>.+) den (?<day>\d{1,2}) (?<month>\w{3})\.? (?<year>\d{4})/,
                     acceptanceText: 'Grattis måste vi meddela att vår community har beslutat att acceptera din Wayspot Photo-inlämning'
                 },
                 ta: {
                     title: /(?<title>.+) -க்கான Niantic Wayspot மீடியா சமர்ப்பிப்பு பரிசீலிக்கப்பட்டது/,
                     body: /நாளது தேதியில் (?<month>\w{3}) (?<day>\d{1,2}), (?<year>\d{4}), (?<title>.+) -க்கான உங்களது Wayspot Photo சமர்ப்பிப்பிற்கு நன்றி/,
+                    body_new_date_format: /நாளது தேதியில் (?<day>\d{1,2}) (?<month>.+?), (?<year>\d{4}), (?<title>.+) -க்கான உங்களது Wayspot Photo சமர்ப்பிப்பிற்கு நன்றி/,
                     acceptanceText: 'வாழ்த்துக்கள், குழு உங்கள் Wayspot – Photo -ஐ - ஏற்றுக்கொள்வதாக முடிவு செய்திருக்கிறது'
                 },
                 te: {
                     title: /(?<title>.+) కొరకు Niantic వేస్పాట్ మీడియా సమర్పణపై నిర్ణయం/,
                     body: /(?<month>\w{3}) (?<day>\d{1,2}), (?<year>\d{4}) తేదీన (?<title>.+) కొరకు మీరు సమర్పించిన Photo ను బట్టి ధన్యవాదాలు/,
+                    body_new_date_format: /(?<day>\d{1,2}) (?<month>.+?), (?<year>\d{4}) తేదీన (?<title>.+) కొరకు మీరు సమర్పించిన Photo ను బట్టి ధన్యవాదాలు/,
                     acceptanceText: 'అభినందనలు, మీరు సమర్పించిన వేస్పాట్ Photo ను అంగీకరించడానికి ఉండటానికి కమ్యూనిటీ నిర్ణయించింది'
                 },
                 th: {
@@ -1568,7 +1576,7 @@ function init() {
                 },
                 zh: {
                     title: /社群已對你為 (?<title>.+) 提交的 Niantic Wayspot 媒體做出決定/,
-                    body: /感謝你在 (?<year>\d{4})-(?<month>\d{1,2})-(?<day>\d{1,2}) 為 (?<title>.+) 提交 Wayspot Photo/,
+                    body: /感謝你在 (?<year>\d{4})[-年](?<month>\d{1,2})[-月](?<day>\d{1,2})日? 為 (?<title>.+) 提交 Wayspot Photo/,
                     acceptanceText: '恭喜，社群已決定 接受你提交的 Wayspot Photo'
                 }
             }
@@ -1602,6 +1610,16 @@ function init() {
                         const year = bodyMatch.groups.year;
 
                         email.originalSubmissionDate = convertDateComponents(lang, day, month, year);
+                    } else if (langTemplates.body_new_date_format) {
+                        const newBodyMatch = emailText.match(langTemplates.body_new_date_format);
+
+                        if (newBodyMatch) {
+                            const day = newBodyMatch.groups.day;
+                            const month = newBodyMatch.groups.month.toLowerCase();
+                            const year = newBodyMatch.groups.year;
+
+                            email.originalSubmissionDate = convertDateComponents(lang, day, month, year, 'new');
+                        }
                     }
 
                     if (emailText.includes(langTemplates.acceptanceText)) {
@@ -1825,33 +1843,51 @@ function init() {
             }
         }
 
-        function convertDateComponents(lang, dayString, monthString, yearString) {
+        function convertDateComponents(lang, dayString, monthString, yearString, format) {
             const months = {
                 en: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
                 bn: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
+                bn_new: ['জানু', 'ফেব', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'],
                 cs: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'],
                 de: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'],
                 es: ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sept', 'oct', 'nov', 'dic'],
                 fr: ['janv', 'févr', 'mars', 'avr', 'mai', 'juin', 'juil', 'août', 'sept', 'oct', 'nov', 'déc'],
                 hi: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
+                hi_new: ['जन॰', 'फ़र॰', 'मार्च', 'अप्रैल', 'मई', 'जून', 'जुल॰', 'अग॰', 'सित॰', 'अक्तू॰', 'नव॰', 'दिस॰'],
                 it: ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'],
                 ja: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'],
                 ko: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'],
                 mr: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
+                mr_new: ['जाने', 'फेब्रु', 'मार्च', 'एप्रि', 'मे', 'जून', 'जुलै', 'ऑग', 'सप्टें', 'ऑक्टो', 'नोव्हें', 'डिसें'],
                 nl: ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'],
                 no: ['jan', 'feb', 'mar', 'apr', 'mai', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'des'],
                 pl: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'],
+                pl_new: ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'],
                 pt: ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'],
                 ru: ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'],
+                ru_new: ['янв.', 'февр.', 'мар.', 'апр.', 'мая', 'июн.', 'июл.', 'авг.', 'сент.', 'окт.', 'нояб.', 'дек.'],
                 sv: ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'],
+                sv_new: ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'],
                 ta: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
+                ta_new: ['ஜன.', 'பிப்.', 'மார்.', 'ஏப்.', 'மே', 'ஜூன்', 'ஜூலை', 'ஆக.', 'செப்.', 'அக்.', 'நவ.', 'டிச.'],
                 te: ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
+                te_new: ['జన', 'ఫిబ్ర', 'మార్చి', 'ఏప్రి', 'మే', 'జూన్', 'జులై', 'ఆగ', 'సెప్టెం', 'అక్టో', 'నవం', 'డిసెం'],
                 th: ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'],
                 zh: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
             };
 
             const day = parseInt(dayString, 10);
-            const monthIndex = months[lang].indexOf(monthString.toLowerCase());
+
+            const normalizedMonthString = monthString.normalize();
+
+            let monthIndex;
+
+            if (format !== 'new') {
+                monthIndex = months[lang].findIndex(m => m.normalize() === normalizedMonthString.toLowerCase());
+            } else {
+                monthIndex = months[`${lang}_new`].findIndex(m => m.normalize() === normalizedMonthString.toLowerCase());
+            }
+
             const year = parseInt(yearString, 10);
 
             const originalSubmissionDate = new Date(year, monthIndex, day);
