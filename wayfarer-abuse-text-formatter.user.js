@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Abuse Text Formatter
-// @version      0.0.1
+// @version      0.0.2
 // @description  Adds text for copy & paste into Abuse form
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/raw/main/wayfarer-abuse-text-formatter.user.js
@@ -8,7 +8,7 @@
 // @match        https://wayfarer.nianticlabs.com/*
 // ==/UserScript==
 
-// Copyright 2023 tnt
+// Copyright 2024 tnt
 
 // This script is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -61,7 +61,12 @@
                 console.warn('Wayfarer\'s response didn\'t include a candidate.');
                 return;
             }
-            insertReportLink(candidate);
+
+            if (candidate.type === 'NEW' || candidate.type === 'PHOTO') {
+                insertReportLink(candidate);
+            } else if (candidate.type === 'EDIT') {
+                insertEditReportLink(candidate);
+            }
 
         } catch (e) {
             console.log(e); // eslint-disable-line no-console
@@ -69,7 +74,7 @@
     }
 
      const awaitElement = get => new Promise((resolve, reject) => {
-                let triesLeft = 20;
+                let triesLeft = 30;
                 const queryLoop = () => {
                         const ref = get();
                         if (ref) resolve(ref);
@@ -80,33 +85,63 @@
                 queryLoop();
      });
 
+    function createReportText(candidate) {
+        const { title, lat, lng } = candidate;
+
+        // Create a new div element
+        const newDiv = document.createElement('div');
+
+        // Set the content of the new div element
+        if (title) {
+            newDiv.textContent = `"${title}" at ${lat},${lng} `;
+        } else {
+            newDiv.textContent = `[Unknown Title] at ${lat},${lng} `;
+        }
+
+        // Create a hyperlink element
+        const reportLink = document.createElement('a');
+        reportLink.textContent = '[Report]';
+        reportLink.href = 'https://niantic.helpshift.com/hc/en/21-wayfarer/faq/2190-reporting-abuse-in-wayfarer/?l=en&p=web';
+
+        // Append the hyperlink element to the new div element
+        newDiv.appendChild(reportLink);
+
+        return newDiv;
+    }
+
     function insertReportLink(candidate) {
         // Use awaitElement to wait for the target div element to be available
         awaitElement(() => document.querySelector('.mt-2'))
             .then(targetElement => {
             const { title, lat, lng } = candidate;
 
-            // Create a new div element
-            const newDiv = document.createElement('div');
-
-            // Set the content of the new div element
-            newDiv.textContent = `"${title}" at ${lat},${lng} `;
-
-            // Create a hyperlink element
-            const reportLink = document.createElement('a');
-            reportLink.textContent = '[Report]';
-            reportLink.href = 'https://niantic.helpshift.com/hc/en/21-wayfarer/faq/2190-reporting-abuse-in-wayfarer/?l=en&p=web';
-
-            // Append the hyperlink element to the new div element
-            newDiv.appendChild(reportLink);
+            const abuseTextDiv = createReportText(candidate);
 
             // Insert the new div element before the target element
-            targetElement.parentNode.insertBefore(newDiv, targetElement);
+            targetElement.parentNode.insertBefore(abuseTextDiv, targetElement);
         })
             .catch(() => {
             console.log("Target div element not found.");
         });
     }
 
+    function insertEditReportLink(candidate) {
+        // Use awaitElement to wait for the target div element to be available
+        awaitElement(() => document.querySelector('.review-edit-info'))
+            .then(targetElement => {
+
+            const abuseTextDiv = createReportText(candidate);
+
+            // Insert the new div element as the second child of the target element
+            if (targetElement.children.length >= 1) {
+                targetElement.insertBefore(abuseTextDiv, targetElement.children[1]);
+            } else {
+                targetElement.appendChild(abuseTextDiv); // If no child exists, simply append
+            }
+        })
+            .catch(() => {
+            console.log("Target div element not found.");
+        });
+    }
 
 })();
