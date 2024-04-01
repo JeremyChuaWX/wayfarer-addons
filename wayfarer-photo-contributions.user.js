@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Photo Contributions
-// @version      0.2.15
+// @version      0.2.16
 // @description  Add photos to the contributions page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-photo-contributions.user.js
@@ -965,6 +965,7 @@ function init() {
                     }
                 }
 
+                await windowRef.wft_plugins_api.emailImport.prepare();
                 for await (const email of windowRef.wft_plugins_api.emailImport.iterate()) {
 
                     try {
