@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Switcher
-// @version      0.0.1
+// @version      0.0.2
 // @description  Support for simultaneous tickets
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-switcher.user.js
-// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-switcher.user.js
+// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/
+// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
 // @match        https://webchat.helpshift.com/*
@@ -342,7 +342,7 @@ function init() {
                                 const currentBody = decodeHTMLEntities(currentMessage.body);
                                 if (currentBody === currentQuestion && nextMessage.body) {
                                     wayspotFound = true;
-                                    wayspotName = nextMessage.body;
+                                    wayspotName = decodeHTMLEntities(nextMessage.body);
                                     break;
                                 }
                             }
