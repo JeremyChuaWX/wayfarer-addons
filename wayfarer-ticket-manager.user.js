@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         Wayfarer Ticket Switcher
-// @version      0.0.2
+// @name         Wayfarer Ticket Manager
+// @version      0.0.3
 // @description  Support for simultaneous tickets
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/
-// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/
+// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
+// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
 // @match        https://webchat.helpshift.com/*
@@ -43,26 +43,31 @@ function init() {
 
     function initHelp() {
 
-        // Overwrite the open method of the XMLHttpRequest.prototype to intercept the server calls
-        (function (open) {
-            XMLHttpRequest.prototype.open = function (method, url) {
-                if (method == 'POST') {
-                    switch (url) {
-                        case 'https://api.helpshift.com/websdk/niantic/conversations/history':
-                        case 'https://api.helpshift.com/websdk/niantic/conversations/updates':
-                            this.addEventListener('load', parseResponse, false);
+        (function(open) {
+            XMLHttpRequest.prototype.open = function(method, url) {
+                if (method === 'POST') {
+                    if (url === 'https://api.helpshift.com/websdk/niantic/conversations/history' ||
+                        url === 'https://api.helpshift.com/websdk/niantic/conversations/updates' ||
+                        url.startsWith('https://api.helpshift.com/websdk/niantic/issues/')) {
+                        this.addEventListener('load', parseResponse, false);
+                        this.addEventListener('readystatechange', function() {
+                            if (this.readyState === 4) { // Check if request is complete
+                                parseResponse.call(this); // Call parseResponse function when request is complete
+                            }
+                        });
                     }
                 }
                 open.apply(this, arguments);
             };
         })(XMLHttpRequest.prototype.open);
 
-        function parseResponse(e) {
+        function parseResponse() {
             try {
                 const json = JSON.parse(this.responseText);
                 if (!json) return;
                 sendTicketHistory(json);
             } catch (ex) {
+                console.error('Error parsing JSON:', ex);
             }
         }
 
@@ -124,6 +129,8 @@ function init() {
 
         let currentSession;
 
+        let isTheNextMessageTheWayspotTitle = false;
+
         const awaitElement = get => new Promise((resolve, reject) => {
             let triesLeft = 20;
             const queryLoop = () => {
@@ -135,6 +142,11 @@ function init() {
             }
             queryLoop();
         });
+
+        const decodeHTMLEntities = str => {
+            const doc = new DOMParser().parseFromString(str, "text/html");
+            return doc.documentElement.textContent;
+        };
 
         awaitElement(() => document.getElementById('hs-web-sdk-iframe'))
             .then(() => {
@@ -170,10 +182,7 @@ function init() {
 
                     if (!helpChatSessions[data.aui]) {
                         helpChatSessions[data.aui] = { di: data.di, asi: data.asi };
-                        localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(helpChatSessions));
-                        console.log('New session added to helpChatSessions:', data.aui);
-                    } else {
-                        console.log('Session already exists in helpChatSessions:', data.aui);
+                        saveDataToLocalStorage();
                     }
                 }
             }
@@ -183,6 +192,7 @@ function init() {
             GM_setValue(uuid, data);
             GM_deleteValue(uuid);
 
+            saveDataToLocalStorage();
             refreshPage();
         }
 
@@ -190,7 +200,12 @@ function init() {
             GM_setValue(uuid, 'clear');
             GM_deleteValue(uuid);
 
+            saveDataToLocalStorage();
             refreshPage();
+        }
+
+        function saveDataToLocalStorage() {
+            localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(helpChatSessions));
         }
 
         function refreshPage() {
@@ -200,26 +215,25 @@ function init() {
         }
 
         GM_addValueChangeListener(uuid, (label, data) => {
-            if (label === uuid && data && data.issues) {
-                // Create a deep copy of data
-                const dataCopy = JSON.parse(JSON.stringify(data));
-                processTicketMessages(dataCopy);
+            if (label === uuid && data) {
+                processTicketData(data);
             }
         });
 
-        function processTicketMessages(data) {
-            let ticketData = {};
+        function processTicketData(data) {
+            if (data.body) {
+                let messages = [];
+                messages.push(data);
+                processTicketMessages(messages);
+            } else if (data.issues) {
+                processTicketUpdate(data);
+            }
+        }
 
+        function processTicketUpdate(data) {
             const issues = data.issues;
 
-            const decodeHTMLEntities = str => {
-                const doc = new DOMParser().parseFromString(str, "text/html");
-                return doc.documentElement.textContent;
-            };
-
             if (issues.length > 0) {
-
-                console.log('DEBUG: Received response with ticket data (>0 issues). Issues response: ', issues);
 
                 let mostRecentTicket;
 
@@ -230,113 +244,126 @@ function init() {
                         return (new Date(current.created_at) > new Date(prev.created_at)) ? current : prev;
                     });
                 } else {
-                    console.error("Ticker Switcher: Unexpected error in identifying most recent ticket");
+                    console.error("Ticker Manager: Unexpected error in identifying most recent ticket");
                 }
 
-                const messages = mostRecentTicket.messages;
+                processTicketMessages(mostRecentTicket.messages);
+            }
+        }
 
-                const lastMessage = messages[messages.length - 1];
+        function processTicketMessages(messages) {
 
-                if (lastMessage.type === "Confirmation Accepted") {
-                    helpChatSessions[currentSession].inProgress = false;
-                    helpChatSessions[currentSession].type = '';
-                    helpChatSessions[currentSession].wayspot = '';
-                    localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(helpChatSessions));
-                } else {
-                    helpChatSessions[currentSession].inProgress = true;
+            const lastMessage = messages[messages.length - 1];
 
-                    let ticketType;
+            if (lastMessage.type === "Confirmation Accepted") {
+                helpChatSessions[currentSession].inProgress = false;
+                helpChatSessions[currentSession].type = '';
+                helpChatSessions[currentSession].wayspot = '';
+                localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(helpChatSessions));
+            } else {
+                helpChatSessions[currentSession].inProgress = true;
 
-                    const translations = [
-                        { lang: 'en', values: ["Title or Description Edit", "Image Edit", "Location Edit", "Location Edits > 10m", "Report Wayfarer Abuse", "Wayfarer Access Issues"] },
-                        { lang: 'cs', values: ["Úprava názvu nebo popisu", "Úprava obrázku", "Úprava umístění", "Úpravy polohy> 10m", "Nahlásit zneužívání Wayfarer", "Problémy s přístupem Wayfarer"] },
-                        { lang: 'de', values: ["Titel- oder Beschreibungsbearbeitung", "Bildbearbeitung", "Standortbearbeitung", "Standort Änderungen> 10 m", "Melden Sie den Missbrauch von Wayfarer", "Wayfarer -Zugriffsprobleme"] },
-                        { lang: 'es', values: ["Edición de título o descripción", "Edición de imagen", "Edición de ubicación", "Ediciones de ubicación> 10m", "Informe de abuso de Wayfarer", "Problemas de acceso de Wayfarer"] },
-                        { lang: 'fr', values: ["Modification du titre ou de la description", "Modification de l'image", "Modification de l'emplacement", "Modifications de l'emplacement> 10m", "Signaler un abus dans Wayfarer", "Problèmes d'accès à Wayfarer"] },
-                        { lang: 'hi', values: ["संपादन शीर्षक या विवरण", "छवि संपादन", "स्थान संपादन", "स्थान संपादन> 10 मी", "वेफ़रर दुरुपयोग की रिपोर्ट करें", "वेफ़रर एक्सेस इश्यूज"] },
-                        { lang: 'it', values: ["Modifica Titolo o Descrizione", "Modifica Immagine", "Modifica Posizione", "Modifiche di posizione> 10m", "Segnala abusi viandante", "Problemi di accesso wayfarer"] },
-                        { lang: 'ja', values: ["タイトルまたは説明の編集", "画像編集", "位置編集", "ロケーション編集> 10m", "ウェイファーラーの虐待を報告します", "WayFarerアクセス​​の問題"] },
-                        { lang: 'ko', values: ["제목 또는 설명 수정", "이미지 수정", "위치 수정", "위치 편집> 10m", "Wayfarer 학대를보고하십시오", "Wayfarer 액세스 문제"] },
-                        { lang: 'nl', values: ["Titel- of beschrijvingsbewerking", "Afbeeldingbewerking", "Locatiebewerking", "Locatie -bewerkingen> 10m", "Meld wayfarer misbruik", "Wayfarer toegangsproblemen"] },
-                        { lang: 'no', values: ["Tittel- eller beskrivelsesredigering", "Billedredigering", "Stedsredigering", "Sted redigeringer> 10m", "Rapporter Wayfarer misbruk", "Wayfarer tilgangsproblemer"] },
-                        { lang: 'pl', values: ["Edycja tytułu lub opisu", "Edycja zdjęcia", "Edycja lokalizacji", "Edyty lokalizacji> 10m", "Zgłoś nadużycie Wayfarer", "Problemy z dostępem do Wayfarer"] },
-                        { lang: 'pt', values: ["Edição de título ou descrição", "Edição de imagem", "Edição de localização", "Edições de localização> 10m", "Relatório de abuso de WayFarer", "Problemas de acesso ao WayFarer"] },
-                        { lang: 'sv', values: ["Redigera titel eller beskrivning", "Bildredigering", "Platsredigering", "Platsredigeringar> 10m", "Rapportera Wayfarer -missbruk", "Wayfarer Access -problem"] },
-                        { lang: 'th', values: ["แก้ไขชื่อเรื่องหรือคำอธิบาย", "แก้ไขรูปภาพ", "แก้ไขที่ตั้ง", "การแก้ไขสถานที่> 10m", "รายงานการละเมิด Wayfarer", "ปัญหาการเข้าถึง Wayfarer"] },
-                        { lang: 'tr', values: ["Başlık veya Açıklama Düzenleme", "Resim Düzenleme", "Konum Düzenleme", "Konum Düzenlemeleri> 10m", "Wayfarer istismarını rapor edin", "Wayfarer erişim sorunları"] },
-                        { lang: 'zh', values: ["標題或描述編輯", "圖片編輯", "位置編輯", "位置編輯> 10m", "舉報濫用行人", "Wayfarer訪問問題"] },
-                    ];
+                let ticketType;
 
-                    for (let i = messages.length - 1; i >= 0; i--) {
-                        const message = messages[i];
+                const translations = [
+                    { lang: 'en', values: ["Title or Description Edit", "Image Edit", "Location Edit", "Location Edits > 10m", "Report Wayfarer Abuse", "Wayfarer Access Issues"] },
+                    { lang: 'cs', values: ["Úprava názvu nebo popisu", "Úprava obrázku", "Úprava umístění", "Úpravy polohy> 10m", "Nahlásit zneužívání Wayfarer", "Problémy s přístupem Wayfarer"] },
+                    { lang: 'de', values: ["Titel- oder Beschreibungsbearbeitung", "Bildbearbeitung", "Standortbearbeitung", "Standort Änderungen> 10 m", "Melden Sie den Missbrauch von Wayfarer", "Wayfarer -Zugriffsprobleme"] },
+                    { lang: 'es', values: ["Edición de título o descripción", "Edición de imagen", "Edición de ubicación", "Ediciones de ubicación> 10m", "Informe de abuso de Wayfarer", "Problemas de acceso de Wayfarer"] },
+                    { lang: 'fr', values: ["Modification du titre ou de la description", "Modification de l'image", "Modification de l'emplacement", "Modifications de l'emplacement> 10m", "Signaler un abus dans Wayfarer", "Problèmes d'accès à Wayfarer"] },
+                    { lang: 'hi', values: ["संपादन शीर्षक या विवरण", "छवि संपादन", "स्थान संपादन", "स्थान संपादन> 10 मी", "वेफ़रर दुरुपयोग की रिपोर्ट करें", "वेफ़रर एक्सेस इश्यूज"] },
+                    { lang: 'it', values: ["Modifica Titolo o Descrizione", "Modifica Immagine", "Modifica Posizione", "Modifiche di posizione> 10m", "Segnala abusi viandante", "Problemi di accesso wayfarer"] },
+                    { lang: 'ja', values: ["タイトルまたは説明の編集", "画像編集", "位置編集", "ロケーション編集> 10m", "ウェイファーラーの虐待を報告します", "WayFarerアクセス​​の問題"] },
+                    { lang: 'ko', values: ["제목 또는 설명 수정", "이미지 수정", "위치 수정", "위치 편집> 10m", "Wayfarer 학대를보고하십시오", "Wayfarer 액세스 문제"] },
+                    { lang: 'nl', values: ["Titel- of beschrijvingsbewerking", "Afbeeldingbewerking", "Locatiebewerking", "Locatie -bewerkingen> 10m", "Meld wayfarer misbruik", "Wayfarer toegangsproblemen"] },
+                    { lang: 'no', values: ["Tittel- eller beskrivelsesredigering", "Billedredigering", "Stedsredigering", "Sted redigeringer> 10m", "Rapporter Wayfarer misbruk", "Wayfarer tilgangsproblemer"] },
+                    { lang: 'pl', values: ["Edycja tytułu lub opisu", "Edycja zdjęcia", "Edycja lokalizacji", "Edyty lokalizacji> 10m", "Zgłoś nadużycie Wayfarer", "Problemy z dostępem do Wayfarer"] },
+                    { lang: 'pt', values: ["Edição de título ou descrição", "Edição de imagem", "Edição de localização", "Edições de localização> 10m", "Relatório de abuso de WayFarer", "Problemas de acesso ao WayFarer"] },
+                    { lang: 'sv', values: ["Redigera titel eller beskrivning", "Bildredigering", "Platsredigering", "Platsredigeringar> 10m", "Rapportera Wayfarer -missbruk", "Wayfarer Access -problem"] },
+                    { lang: 'th', values: ["แก้ไขชื่อเรื่องหรือคำอธิบาย", "แก้ไขรูปภาพ", "แก้ไขที่ตั้ง", "การแก้ไขสถานที่> 10m", "รายงานการละเมิด Wayfarer", "ปัญหาการเข้าถึง Wayfarer"] },
+                    { lang: 'tr', values: ["Başlık veya Açıklama Düzenleme", "Resim Düzenleme", "Konum Düzenleme", "Konum Düzenlemeleri> 10m", "Wayfarer istismarını rapor edin", "Wayfarer erişim sorunları"] },
+                    { lang: 'zh', values: ["標題或描述編輯", "圖片編輯", "位置編輯", "位置編輯> 10m", "舉報濫用行人", "Wayfarer訪問問題"] },
+                ];
 
-                        if (message.type === "Option Input Response") {
-                            for (let j = 0; j < translations.length; j++) {
-                                const langValues = translations[j].values;
-                                const decodedBody = decodeHTMLEntities(message.body);
-                                const index = langValues.indexOf(decodedBody);
+                for (let i = messages.length - 1; i >= 0; i--) {
+                    const message = messages[i];
 
-                                if (index !== -1) {
-                                    switch (index) {
-                                        case 0:
-                                            ticketType = 'Text appeal';
-                                            break;
-                                        case 1:
-                                            ticketType = 'Photo appeal';
-                                            break;
-                                        case 2:
-                                            ticketType = 'Location appeal';
-                                            break;
-                                        case 3:
-                                            ticketType = 'Location edit';
-                                            break;
-                                        case 4:
-                                            ticketType = 'Abuse';
-                                            break;
-                                        case 5:
-                                            ticketType = 'Access issues';
-                                            break;
-                                        default:
-                                            break;
-                                    }
-                                    if (ticketType) {
-                                        helpChatSessions[currentSession].type = ticketType;
+                    if (message.type === "Option Input Response") {
+                        for (let j = 0; j < translations.length; j++) {
+                            const langValues = translations[j].values;
+                            const decodedBody = decodeHTMLEntities(message.body);
+                            const index = langValues.indexOf(decodedBody);
+
+                            if (index !== -1) {
+                                switch (index) {
+                                    case 0:
+                                        ticketType = 'Text appeal';
                                         break;
-                                    }
+                                    case 1:
+                                        ticketType = 'Photo appeal';
+                                        break;
+                                    case 2:
+                                        ticketType = 'Location appeal';
+                                        break;
+                                    case 3:
+                                        ticketType = 'Location edit';
+                                        break;
+                                    case 4:
+                                        ticketType = 'Abuse';
+                                        break;
+                                    case 5:
+                                        ticketType = 'Access issues';
+                                        break;
+                                    default:
+                                        break;
+                                }
+                                if (ticketType) {
+                                    helpChatSessions[currentSession].type = ticketType;
+                                    break;
                                 }
                             }
                         }
                     }
+                }
 
-                    let wayspotFound = false;
-                    let wayspotName = '';
+                let wayspotFound = false;
+                let wayspotName = '';
 
+                const wayspotQuestions = [
+                    { lang: 'en', question: "What is the name of the Wayspot?" },
+                    { lang: 'cs', question: "Jak se jmenuje WaysPot?" },
+                    { lang: 'de', question: "Wie heißt der Waypot?" },
+                    { lang: 'es', question: "¿Cuál es el nombre de Wayspot?" },
+                    { lang: 'fr', question: "Quel est le nom du Wayspot?" },
+                    { lang: 'it', question: "Qual è il nome di The Wayspot?" },
+                    { lang: 'ja', question: "Wayspotの名前は何ですか？" },
+                    { lang: 'ko', question: "Wayspot의 이름은 무엇입니까?" },
+                    { lang: 'pt', question: "Qual é o nome do Wayspot?" },
+                    { lang: 'nl', question: "Wat is de naam van de WaySpot?" },
+                    { lang: 'no', question: "Hva heter WaysPot?" },
+                    { lang: 'pl', question: "Jak nazywa się Wayspot?" },
+                    { lang: 'sv', question: "Vad heter The WaysPot?" },
+                    { lang: 'th', question: "Wayspot ชื่ออะไร?" },
+                    { lang: 'zh', question: "Wayspot的名稱是什麼？" },
+                    { lang: 'hi', question: "तरीके का नाम क्या है?" },
+                    { lang: 'tr', question: "Wayspot'un adı nedir?" },
+                ];
+
+                for (let i = 0; i < wayspotQuestions.length; i++) {
+                    const currentQuestion = decodeHTMLEntities(wayspotQuestions[i].question);
+                    const decodedLastMessage = decodeHTMLEntities(lastMessage.body);
+                    if (decodedLastMessage === currentQuestion) {
+                        isTheNextMessageTheWayspotTitle = true;
+                        break;
+                    }
+                }
+
+                if (messages.length > 1) {
                     for (let i = messages.length - 1; i >= 0; i--) {
                         const currentMessage = messages[i];
-
                         const nextMessage = messages[i + 1];
 
                         if (currentMessage && currentMessage.body && nextMessage && nextMessage.body) {
-                            const wayspotQuestions = [
-                                { lang: 'en', question: "What is the name of the Wayspot?" },
-                                { lang: 'cs', question: "Jak se jmenuje WaysPot?" },
-                                { lang: 'de', question: "Wie heißt der Waypot?" },
-                                { lang: 'es', question: "¿Cuál es el nombre de Wayspot?" },
-                                { lang: 'fr', question: "Quel est le nom du Wayspot?" },
-                                { lang: 'it', question: "Qual è il nome di The Wayspot?" },
-                                { lang: 'ja', question: "Wayspotの名前は何ですか？" },
-                                { lang: 'ko', question: "Wayspot의 이름은 무엇입니까?" },
-                                { lang: 'pt', question: "Qual é o nome do Wayspot?" },
-                                { lang: 'nl', question: "Wat is de naam van de WaySpot?" },
-                                { lang: 'no', question: "Hva heter WaysPot?" },
-                                { lang: 'pl', question: "Jak nazywa się Wayspot?" },
-                                { lang: 'sv', question: "Vad heter The WaysPot?" },
-                                { lang: 'th', question: "Wayspot ชื่ออะไร?" },
-                                { lang: 'zh', question: "Wayspot的名稱是什麼？" },
-                                { lang: 'hi', question: "तरीके का नाम क्या है?" },
-                                { lang: 'tr', question: "Wayspot'un adı nedir?" },
-                            ];
-
                             for (let i = 0; i < wayspotQuestions.length; i++) {
                                 const currentQuestion = decodeHTMLEntities(wayspotQuestions[i].question);
                                 const currentBody = decodeHTMLEntities(currentMessage.body);
@@ -348,16 +375,30 @@ function init() {
                             }
                         }
                     }
-
-                    if (wayspotFound) {
-                        helpChatSessions[currentSession].wayspot = wayspotName;
+                } else if (messages.length === 1) {
+                    // Process for single message
+                    const currentMessage = messages[0];
+                    if (isTheNextMessageTheWayspotTitle) {
+                        wayspotName = decodeHTMLEntities(currentMessage.body);
+                        wayspotFound = true;
+                        isTheNextMessageTheWayspotTitle = false;
+                    } else {
+                        for (let i = 0; i < wayspotQuestions.length; i++) {
+                            const currentQuestion = decodeHTMLEntities(wayspotQuestions[i].question);
+                            const currentBody = decodeHTMLEntities(currentMessage.body);
+                            if (currentBody === currentQuestion) {
+                                isTheNextMessageTheWayspotTitle = true;
+                                break;
+                            }
+                        }
                     }
-
-                    localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(helpChatSessions));
                 }
 
-            } else {
-                console.log('DEBUG: Update response had no ticket data (length of issues was 0).');
+                if (wayspotFound) {
+                    helpChatSessions[currentSession].wayspot = wayspotName;
+                }
+
+                saveDataToLocalStorage();
             }
         }
 
@@ -370,20 +411,7 @@ function init() {
 
         function addTicketSwitchButton() {
             const containerDiv = document.createElement('div');
-            containerDiv.style.position = 'fixed';
-            containerDiv.style.width = '48px';
-            containerDiv.style.height = '48px';
-            containerDiv.style.zIndex = '9999991';
-            containerDiv.style.boxShadow = 'rgba(0, 0, 0, 0.4) 0px 2px 24px 0px';
-            containerDiv.style.borderRadius = '50%';
-            containerDiv.style.border = 'none';
-            containerDiv.style.overflow = 'hidden';
-            containerDiv.style.margin = '4px';
-            containerDiv.style.padding = '0px';
-            containerDiv.style.boxSizing = 'content-box';
-            containerDiv.style.outline = 'none';
-            containerDiv.style.inset = 'auto 74px 16px auto';
-            containerDiv.textContent = 'foo bar';
+            containerDiv.classList.add('wftm-containerDiv');
 
             containerDiv.innerHTML = `
         <button aria-label="Switch Tickets" id="ticketSwitchButton" style="position: absolute; top: 0px; left: 0px; width: 48px; height: 48px; background: linear-gradient(131deg, rgba(216, 88, 19, 0.75), rgb(216, 88, 19) 123%); border-radius: 50%; cursor: pointer; box-sizing: border-box; padding: 12px 10px 8px; border: none; outline-offset: -4px; outline: rgba(0, 103, 244, 0.4) solid 0px;" class="hs-websdk-launcher-anti-clockwise">
@@ -431,110 +459,48 @@ function init() {
             // Add event listener to the button
             const ticketSwitchButton = document.getElementById('ticketSwitchButton');
             ticketSwitchButton.addEventListener('click', function() {
-                // Check if interfaceContainer already exists
                 if (document.getElementById('ticketInterfaceContainer')) {
-                    // If interfaceContainer exists, remove it
+                    // If interfaceContainer exists, remove it to prevent doubles
                     removeInterfaceContainer();
                 } else {
                     // If interfaceContainer doesn't exist, create it
                     const interfaceContainer = document.createElement('div');
                     interfaceContainer.id = 'ticketInterfaceContainer';
-                    interfaceContainer.style.display = 'block';
-                    interfaceContainer.style.position = 'fixed';
-                    interfaceContainer.style.inset = 'auto 16px 75px auto';
-                    interfaceContainer.style.minHeight = '500px';
-                    interfaceContainer.style.maxHeight = '500px';
-                    interfaceContainer.style.minWidth = '360px';
-                    interfaceContainer.style.maxWidth = '380px';
-                    interfaceContainer.style.height = 'calc(100% - 32px)';
-                    interfaceContainer.style.width = '100%';
-                    interfaceContainer.style.border = 'none';
-                    interfaceContainer.style.borderRadius = '12px';
-                    interfaceContainer.style.zIndex = '9999999';
-                    interfaceContainer.style.overflow = 'hidden';
-                    interfaceContainer.style.backgroundColor = '#f0f2f4';
-                    interfaceContainer.style.transform = 'translate3d(0px, 0px, 0px)';
-                    interfaceContainer.style.boxShadow = 'rgba(0, 0, 0, 0.2) 0px 4px 32px';
-                    interfaceContainer.style.animation = '0.3s cubic-bezier(0.25, 0.1, 0.25, 1) 0s 1 normal none running hs-websdk-slide-up';
+                    interfaceContainer.classList.add('wftm-interface-container');
 
                     const header = document.createElement('header');
-                    header.style.display = 'flex';
-                    header.style.flex = '0 0 auto';
-                    header.style.alignItems = 'center';
-                    header.style.justifyContent = 'space-between';
-                    header.style.height = '60px';
-                    header.style.padding = '0px 16px';
-                    header.style.padding = '0px 16px';
-                    header.style.paddingTop = '0px';
-                    header.style.paddingRight = '16px';
-                    header.style.paddingLeft = '16px';
-                    header.style.color = 'var(--header-text-color, #FFFFFF, #111827)';
-                    header.style.background = 'linear-gradient(98deg, var(--header-bg-start-color, #d85813), var(--header-bg-start-color, #d85813bf) 130%)';
+                    header.classList.add('wftm-header');
 
                     const avatarTitleWrapper = document.createElement('div');
-                    avatarTitleWrapper.style.display = 'flex';
-                    avatarTitleWrapper.style.flex = '0 0 auto';
-                    avatarTitleWrapper.style.alignItems = 'center';
+                    avatarTitleWrapper.classList.add('wftm-avatarTitleWrapper');
 
                     const avatarWrapper = document.createElement('div');
-                    avatarWrapper.style.position = 'relative';
+                    avatarWrapper.classList.add('wftm-avatarWrapper');
+
                     const avatarImage = document.createElement('img');
                     avatarImage.src = 'https://s3.amazonaws.com/assets.helpshift.com/niantic/avatar/5b16a10a-a694-4302-9218-337ec26b3150/64.png';
                     avatarImage.alt = 'Avatar Image';
-                    avatarImage.classList.add('hs-header__avatar', 'hs-avatar__avatar');
-                    avatarImage.style.height = '36px';
-                    avatarImage.style.width = '36px';
-                    avatarImage.style.minWidth = '36px';
-                    avatarImage.style.borderRadius = '50%';
+                    avatarImage.classList.add('wftm-avatarImage');
                     avatarWrapper.appendChild(avatarImage);
 
                     const textWrapper = document.createElement('div');
-                    textWrapper.style.paddingLeft = '16px';
-                    textWrapper.style.width = '100%';
-                    textWrapper.style.overflow = 'hidden';
-                    textWrapper.style.textOverflow = 'ellipsis';
-                    textWrapper.style.whiteSpace = 'nowrap';
-                    textWrapper.style.fontSize = '16px';
-                    textWrapper.style.fontWeight = '600';
+                    textWrapper.classList.add('wftm-textWrapper');
 
                     const titleText = document.createElement('span');
-                    titleText.textContent = 'Wayfarer Ticket Switcher';
-                    titleText.style.color = 'var(--text-color, white)';
+                    titleText.textContent = 'Wayfarer Ticket Manager';
+                    titleText.classList.add('wftm-titleText');
                     textWrapper.appendChild(titleText);
 
-                    // I couldn't get the close button to render properly
-                    // You'll just have to click the ticket switch icon instead to close it!
-
-                    // const closeButton = document.createElement('button');
-                    // closeButton.setAttribute('aria-label', 'Close chat');
-                    // closeButton.style.padding = '0';
-                    // closeButton.style.margin = '0';
-                    // closeButton.style.cursor = 'pointer';
-                    // closeButton.style.backgroundColor = 'transparent';
-                    // closeButton.style.border = 'none';
-                    // closeButton.style.alignItems = 'center';
-                    // closeButton.style.justifyContent = 'center';
-                    // closeButton.style.height = '36px';
-                    // closeButton.style.minWidth = '36px';
-                    // closeButton.style.borderRadius = '50%';
-                    // closeButton.style.display = 'flex';
-                    // const closeIcon = document.createElement('svg');
-                    // closeIcon.classList.add('hs-header__close-chat-icon', 'hs-ion-icon');
-                    // closeIcon.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-                    // closeIcon.setAttributeNS('http://www.w3.org/2000/svg', 'viewBox', '0 0 512 512');
-                    // closeIcon.setAttributeNS(null, 'aria-hidden', 'false');
-                    // closeIcon.style.width = '24px';
-                    // closeIcon.style.height = '24px';
-                    // const path = document.createElement('path');
-                    // path.setAttribute('d', 'M289.94 256l95-95A24 24 0 00351 127l-95 95-95-95a24 24 0 00-34 34l95 95-95 95a24 24 0 1034 34l95-95 95 95a24 24 0 0034-34z');
-                    // closeIcon.appendChild(path);
-                    // closeButton.appendChild(closeIcon);
+                    const closeButton = document.createElement('button');
+                    closeButton.setAttribute('aria-label', 'Close chat');
+                    closeButton.classList.add('wftm-closeButton');
+                    closeButton.textContent = '×';
+                    closeButton.addEventListener('click', removeInterfaceContainer);
 
                     avatarTitleWrapper.appendChild(avatarWrapper);
                     avatarTitleWrapper.appendChild(textWrapper);
                     header.appendChild(avatarTitleWrapper);
-                    // header.appendChild(closeButton);
-
+                    header.appendChild(closeButton);
                     interfaceContainer.appendChild(header);
 
                     // Create the table
@@ -685,7 +651,7 @@ function init() {
 
                         // Remove the aui from helpChatSessions
                         delete helpChatSessions[aui];
-                        localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(helpChatSessions));
+                        saveDataToLocalStorage();
 
                         // Update the visual display of row numbers to the AUI and remove it from the table
                         const rows = table.querySelectorAll('tr');
@@ -699,6 +665,102 @@ function init() {
                 }
             });
         }
+
+        // Define CSS styles as a string
+        const styles = `
+.wftm-containerDiv {
+    position: fixed;
+    width: 48px;
+    height: 48px;
+    z-index: 9999991;
+    box-shadow: rgba(0, 0, 0, 0.4) 0px 2px 24px 0px;
+    border-radius: 50%;
+    border: none;
+    overflow: hidden;
+    margin: 4px;
+    padding: 0px;
+    box-sizing: content-box;
+    outline: none;
+    inset: auto 74px 16px auto;
+}
+.wftm-interface-container {
+    display: block;
+    position: fixed;
+    inset: auto 16px 75px auto;
+    min-height: 500px;
+    max-height: 500px;
+    min-width: 360px;
+    max-width: 380px;
+    height: calc(100% - 32px);
+    width: 100%;
+    border: none;
+    border-radius: 12px;
+    z-index: 9999999;
+    overflow: hidden;
+    background-color: #f0f2f4;
+    transform: translate3d(0px, 0px, 0px);
+    box-shadow: rgba(0, 0, 0, 0.2) 0px 4px 32px;
+    animation: 0.3s cubic-bezier(0.25, 0.1, 0.25, 1) 0s 1 normal none running hs-websdk-slide-up;
+}
+.wftm-header {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: space-between;
+    height: 60px;
+    padding: 0 16px;
+    color: var(--header-text-color, #FFFFFF, #111827);
+    background: linear-gradient(98deg, var(--header-bg-start-color, #d85813), var(--header-bg-start-color, #d85813bf) 130%);
+}
+.wftm-avatarTitleWrapper {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+}
+.wftm-avatarWrapper {
+    position: relative;
+}
+.wftm-avatarImage {
+    height: 36px;
+    width: 36px;
+    min-width: 36px;
+    border-radius: 50%;
+}
+.wftm-textWrapper {
+    padding-left: 16px;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 16px;
+    font-weight: 600;
+}
+.wftm-titleText {
+    color: var(--text-color, white);
+}
+.wftm-closeButton {
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    background-color: transparent;
+    border: none;
+    align-items: center;
+    justify-content: center;
+    height: 36px;
+    min-width: 36px;
+    border-radius: 50%;
+    display: flex;
+    color: white;
+    font-size: 24px;
+}
+`
+
+        // Create a style element
+        const styleElement = document.createElement('style');
+        styleElement.textContent = styles;
+
+        // Append the style element to the document head
+        document.head.appendChild(styleElement);
     }
 
 
