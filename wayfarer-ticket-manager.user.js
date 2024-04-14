@@ -26,13 +26,6 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 
-// ==UserScript==
-// @name         Wayfarer Ticket Multi-Pass
-// @version      0.0.1
-// @description  Support for simultaneous tickets
-// @match        https://wayfarer.nianticlabs.com/*
-// ==/UserScript==
-
 function init() {
 
     const uuid = 'aff6f55e-004d-4100-abee-f6f93c108eb5'; // randomly generated, unique to this userscript, please don't re-use in other scripts
