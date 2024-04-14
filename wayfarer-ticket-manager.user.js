@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.0.3
+// @version      0.0.4
 // @description  Support for simultaneous tickets
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
@@ -499,6 +499,7 @@ function init() {
                     // Create the table
                     const table = document.createElement('table');
                     table.style.color = '#000000';
+                    table.style.width = '100%';
                     const tbody = document.createElement('tbody');
 
                     // Create table headers
