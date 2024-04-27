@@ -101,23 +101,26 @@
             });
     }
 
-	function addCoordinates(selected) {
-        const { lat, lng, city, state } = selected;
+    function addCoordinates(selected) {
+
+        const lat = selected.poiData.lat || selected.lat;
+        const lng = selected.poiData.lng || selected.lng;
+
         awaitElement(() => document.querySelector("app-nominations app-details-pane p"))
             .then((locationP) => {
-                const coordinates = `${lat},${lng}`;
-                const newText = `${city} ${state} (${coordinates})`;
-                locationP.innerText = newText;
-                locationP.style.cursor = 'pointer';
-                locationP.title = 'Copy coordinates to clipboard';
-                locationP.onclick = function() {
-                    navigator.clipboard.writeText(coordinates);
-                }
-            });
+            const coordinates = `${lat},${lng}`;
+            const newText = `${selected.city} ${selected.state} (${coordinates})`;
+            locationP.innerText = newText;
+            locationP.style.cursor = 'pointer';
+            locationP.title = 'Copy coordinates to clipboard';
+            locationP.onclick = function() {
+                navigator.clipboard.writeText(coordinates);
+            }
+        });
 
         awaitElement(() => document.querySelector("app-nominations app-details-pane h4"))
             .then((titleP) => {
-                if (intelLink === null) {
+            if (intelLink === null) {
                 intelLink = document.createElement('a');
                 intelLink.id = 'intelLink';
                 intelLink.className = 'anchor-link';
@@ -128,11 +131,11 @@
 
             intelLink.href = `https://intel.ingress.com/?ll=${lat},${lng}&z=16`;
             intelLink.innerText = titleP.innerText;
-            
+
             insertAfter(intelLink, titleP);
             titleP.style.display = "none";
-        });     
-	}
+        });
+    }
 
     function insertAfter(newNode, referenceNode) {
         referenceNode.parentNode.insertBefore(newNode, referenceNode.nextSibling);
