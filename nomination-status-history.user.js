@@ -1789,7 +1789,7 @@
             .wfnshNotification {
                 font-weight: bold;
                 border-radius: 1em;
-                padding: 0.8em;
+                padding: 1em;
                 margin-top: 1.5em;
                 color: white;
             }
