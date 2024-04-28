@@ -103,8 +103,8 @@
 
     function addCoordinates(selected) {
 
-        const lat = selected.poiData.lat || selected.lat;
-        const lng = selected.poiData.lng || selected.lng;
+        const lat = selected.poiData?.lat || selected.lat;
+        const lng = selected.poiData?.lng || selected.lng;
 
         awaitElement(() => document.querySelector("app-nominations app-details-pane p"))
             .then((locationP) => {
