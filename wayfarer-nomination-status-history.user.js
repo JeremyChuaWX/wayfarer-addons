@@ -570,8 +570,6 @@
         svg.setAttribute("xml:space", "preserve");
         svg.setAttribute("width", "20");
         svg.setAttribute("height", "20");
-        svg.style.marginLeft = '5px';
-        svg.style.marginRight = '10px';
         switch (type) {
             case 'NOMINATION':
                 svg.innerHTML = `<g transform="matrix(5.5202 0 0 5.5202 7.5948 7.5921)"><path d="m45 0c-19.537 0-35.375 15.838-35.375 35.375 0 8.722 3.171 16.693 8.404 22.861l26.971 31.764 26.97-31.765c5.233-6.167 8.404-14.139 8.404-22.861 1e-3 -19.536-15.837-35.374-35.374-35.374zm0 48.705c-8.035 0-14.548-6.513-14.548-14.548s6.513-14.548 14.548-14.548 14.548 6.513 14.548 14.548-6.513 14.548-14.548 14.548z" fill="#ffffff" stroke-linecap="round"/></g>`
@@ -622,7 +620,7 @@
         if (icon) {
             const iconWrapper = document.createElement('div');
             iconWrapper.appendChild(icon);
-            iconWrapper.style.width = '35px';
+            iconWrapper.style.width = '30px';
             contentWrapper.appendChild(iconWrapper);
         }
         contentWrapper.appendChild(content);
