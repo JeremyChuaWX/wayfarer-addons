@@ -487,7 +487,7 @@
             actionTypes.forEach(actionType => {
                 const message = messageTypeMapping[actionType](importCount);
                 if (message) {
-                    createNotification(message, 'green', createNotificationIcon(actionType));
+                    createNotification(message, 'gray', createNotificationIcon(actionType));
                 }
             });
         }
@@ -532,8 +532,9 @@
                 color = 'green';
                 break;
             case 'NOMINATED':
+                // This is only generated when it used to have a status other than hold
                 text = 'returned to the queue!';
-                color = 'grey';
+                color = 'brown';
                 break;
             case 'REJECTED':
                 text = 'was rejected!';
@@ -1800,9 +1801,6 @@
             .wfnshBg-green {
                 background-color: #09b065;
             }
-            .wfnshBg-grey {
-                background-color: #727785;
-            }
             .wfnshBg-blue {
                 background-color: #1a3aad;
             }
@@ -1814,6 +1812,9 @@
             }
             .wfnshBg-gray {
                 background-color: gray;
+            }
+            .wfnshBg-brown {
+                background-color: #755534;
             }
             .wfnshDropdown {
                 cursor: pointer;
