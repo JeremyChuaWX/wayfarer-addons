@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.0.4
+// @version      0.0.5
 // @description  Support for simultaneous tickets
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
@@ -198,7 +198,9 @@ function init() {
         }
 
         function saveDataToLocalStorage() {
-            localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(helpChatSessions));
+            const storedData = JSON.parse(localStorage.getItem(OBJECT_STORE_NAME)) || {};
+            storedData[currentSession] = helpChatSessions[currentSession];
+            localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(storedData));
         }
 
         function refreshPage() {
@@ -645,7 +647,11 @@ function init() {
 
                         // Remove the aui from helpChatSessions
                         delete helpChatSessions[aui];
-                        saveDataToLocalStorage();
+
+                        // Remove the aui entry from local storage
+                        const storedData = JSON.parse(localStorage.getItem(OBJECT_STORE_NAME)) || {};
+                        delete storedData[aui];
+                        localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(storedData));
 
                         // Update the visual display of row numbers to the AUI and remove it from the table
                         const rows = table.querySelectorAll('tr');
