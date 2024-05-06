@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.0.5
+// @version      0.0.6
 // @description  Support for simultaneous tickets
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
@@ -252,9 +252,9 @@ function init() {
 
             if (lastMessage.type === "Confirmation Accepted") {
                 helpChatSessions[currentSession].inProgress = false;
-                helpChatSessions[currentSession].type = '';
-                helpChatSessions[currentSession].wayspot = '';
-                localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(helpChatSessions));
+                const storedData = JSON.parse(localStorage.getItem(OBJECT_STORE_NAME)) || {};
+                storedData[currentSession] = helpChatSessions[currentSession];
+                localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(storedData));
             } else {
                 helpChatSessions[currentSession].inProgress = true;
 
@@ -547,7 +547,14 @@ function init() {
                         const cellSummary = document.createElement('td');
                         cellSummary.style.textAlign = 'left';
                         if (rowData.inProgress === false || !rowData.type) {
-                            cellSummary.textContent = 'No active ticket';
+                            if (!rowData.type) {
+                                cellSummary.textContent = 'No active ticket';
+                            } else {
+                                cellSummary.textContent = `[Previous ticket] ${rowData.type}`;
+                                if (rowData.wayspot) {
+                                    cellSummary.textContent += `: ${rowData.wayspot}`;
+                                }
+                            }
                         } else {
                             cellSummary.textContent = rowData.type;
                             if (rowData.wayspot) {
@@ -566,12 +573,10 @@ function init() {
 
                         const cellDelete = document.createElement('td');
                         cellDelete.style.textAlign = 'center';
-                        if (key !== currentSession) {
-                            const deleteText = document.createElement('span');
-                            deleteText.style.cursor = 'pointer';
-                            deleteText.textContent = '🗑️';
-                            cellDelete.appendChild(deleteText);
-                        }
+                        const deleteText = document.createElement('span');
+                        deleteText.style.cursor = 'pointer';
+                        deleteText.textContent = '🗑️';
+                        cellDelete.appendChild(deleteText);
 
                         row.appendChild(cellNumber);
                         row.appendChild(cellSummary);
@@ -580,19 +585,18 @@ function init() {
                         tbody.appendChild(row);
                         index++;
 
-                        // Event handling for restore and delete actions
+                        cellDelete.addEventListener('click', function() {
+                            const aui = key;
+                            // Handle delete action using aui value
+                            deleteTicket(aui);
+                        });
+
                         if (key !== currentSession) {
                             cellRestore.addEventListener('click', function() {
                                 const aui = key;
                                 const asi = helpChatSessions[aui].asi;
                                 const di = helpChatSessions[aui].di;
                                 restoreOldTicket({ aui, asi, di });
-                            });
-
-                            cellDelete.addEventListener('click', function() {
-                                const aui = key;
-                                // Handle delete action using aui value
-                                deleteTicket(aui);
                             });
                         }
                     }
@@ -660,6 +664,11 @@ function init() {
                             const row = rows[i];
                             row.cells[0].textContent = rowIndex;
                             rowIndex++;
+                        }
+
+                        // Check if helpChatSessions is empty and generate a new ticket if so
+                        if (Object.keys(helpChatSessions).length === 0) {
+                            generateNewTicket();
                         }
                     }
                 }
