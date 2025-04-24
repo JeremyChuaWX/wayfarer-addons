@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.0.6
+// @version      0.0.7
 // @description  Support for simultaneous tickets
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
@@ -229,7 +229,6 @@ function init() {
             const issues = data.issues;
 
             if (issues.length > 0) {
-
                 let mostRecentTicket;
 
                 if (issues.length === 1) {
@@ -239,10 +238,29 @@ function init() {
                         return (new Date(current.created_at) > new Date(prev.created_at)) ? current : prev;
                     });
                 } else {
-                    console.error("Ticker Manager: Unexpected error in identifying most recent ticket");
+                    console.error("Ticket Manager: Unexpected error in identifying most recent ticket");
+                }
+
+                // Set the ticket type based on the most recent ticket's title
+                if (mostRecentTicket && mostRecentTicket.title) {
+                    const ticketType = categorizeTicketTitle(mostRecentTicket.title);
+                    helpChatSessions[currentSession].type = ticketType;
                 }
 
                 processTicketMessages(mostRecentTicket.messages);
+            }
+        }
+
+        function categorizeTicketTitle(title) {
+            const arrowSeparator = "→ ";
+            const parts = title.split(arrowSeparator);
+
+            if (parts.length > 1) {
+                const extractedType = parts[1].trim();
+                return extractedType;
+            } else {
+                console.warn("Ticket Manager couldn't parse title: ", title);
+                return "???";
             }
         }
 
@@ -257,69 +275,6 @@ function init() {
                 localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(storedData));
             } else {
                 helpChatSessions[currentSession].inProgress = true;
-
-                let ticketType;
-
-                const translations = [
-                    { lang: 'en', values: ["Title or Description Edit", "Image Edit", "Location Edit", "Location Edits > 10m", "Report Wayfarer Abuse", "Wayfarer Access Issues"] },
-                    { lang: 'cs', values: ["Úprava názvu nebo popisu", "Úprava obrázku", "Úprava umístění", "Úpravy polohy> 10m", "Nahlásit zneužívání Wayfarer", "Problémy s přístupem Wayfarer"] },
-                    { lang: 'de', values: ["Titel- oder Beschreibungsbearbeitung", "Bildbearbeitung", "Standortbearbeitung", "Standort Änderungen> 10 m", "Melden Sie den Missbrauch von Wayfarer", "Wayfarer -Zugriffsprobleme"] },
-                    { lang: 'es', values: ["Edición de título o descripción", "Edición de imagen", "Edición de ubicación", "Ediciones de ubicación> 10m", "Informe de abuso de Wayfarer", "Problemas de acceso de Wayfarer"] },
-                    { lang: 'fr', values: ["Modification du titre ou de la description", "Modification de l'image", "Modification de l'emplacement", "Modifications de l'emplacement> 10m", "Signaler un abus dans Wayfarer", "Problèmes d'accès à Wayfarer"] },
-                    { lang: 'hi', values: ["संपादन शीर्षक या विवरण", "छवि संपादन", "स्थान संपादन", "स्थान संपादन> 10 मी", "वेफ़रर दुरुपयोग की रिपोर्ट करें", "वेफ़रर एक्सेस इश्यूज"] },
-                    { lang: 'it', values: ["Modifica Titolo o Descrizione", "Modifica Immagine", "Modifica Posizione", "Modifiche di posizione> 10m", "Segnala abusi viandante", "Problemi di accesso wayfarer"] },
-                    { lang: 'ja', values: ["タイトルまたは説明の編集", "画像編集", "位置編集", "ロケーション編集> 10m", "ウェイファーラーの虐待を報告します", "WayFarerアクセス​​の問題"] },
-                    { lang: 'ko', values: ["제목 또는 설명 수정", "이미지 수정", "위치 수정", "위치 편집> 10m", "Wayfarer 학대를보고하십시오", "Wayfarer 액세스 문제"] },
-                    { lang: 'nl', values: ["Titel- of beschrijvingsbewerking", "Afbeeldingbewerking", "Locatiebewerking", "Locatie -bewerkingen> 10m", "Meld wayfarer misbruik", "Wayfarer toegangsproblemen"] },
-                    { lang: 'no', values: ["Tittel- eller beskrivelsesredigering", "Billedredigering", "Stedsredigering", "Sted redigeringer> 10m", "Rapporter Wayfarer misbruk", "Wayfarer tilgangsproblemer"] },
-                    { lang: 'pl', values: ["Edycja tytułu lub opisu", "Edycja zdjęcia", "Edycja lokalizacji", "Edyty lokalizacji> 10m", "Zgłoś nadużycie Wayfarer", "Problemy z dostępem do Wayfarer"] },
-                    { lang: 'pt', values: ["Edição de título ou descrição", "Edição de imagem", "Edição de localização", "Edições de localização> 10m", "Relatório de abuso de WayFarer", "Problemas de acesso ao WayFarer"] },
-                    { lang: 'sv', values: ["Redigera titel eller beskrivning", "Bildredigering", "Platsredigering", "Platsredigeringar> 10m", "Rapportera Wayfarer -missbruk", "Wayfarer Access -problem"] },
-                    { lang: 'th', values: ["แก้ไขชื่อเรื่องหรือคำอธิบาย", "แก้ไขรูปภาพ", "แก้ไขที่ตั้ง", "การแก้ไขสถานที่> 10m", "รายงานการละเมิด Wayfarer", "ปัญหาการเข้าถึง Wayfarer"] },
-                    { lang: 'tr', values: ["Başlık veya Açıklama Düzenleme", "Resim Düzenleme", "Konum Düzenleme", "Konum Düzenlemeleri> 10m", "Wayfarer istismarını rapor edin", "Wayfarer erişim sorunları"] },
-                    { lang: 'zh', values: ["標題或描述編輯", "圖片編輯", "位置編輯", "位置編輯> 10m", "舉報濫用行人", "Wayfarer訪問問題"] },
-                ];
-
-                for (let i = messages.length - 1; i >= 0; i--) {
-                    const message = messages[i];
-
-                    if (message.type === "Option Input Response") {
-                        for (let j = 0; j < translations.length; j++) {
-                            const langValues = translations[j].values;
-                            const decodedBody = decodeHTMLEntities(message.body);
-                            const index = langValues.indexOf(decodedBody);
-
-                            if (index !== -1) {
-                                switch (index) {
-                                    case 0:
-                                        ticketType = 'Text appeal';
-                                        break;
-                                    case 1:
-                                        ticketType = 'Photo appeal';
-                                        break;
-                                    case 2:
-                                        ticketType = 'Location appeal';
-                                        break;
-                                    case 3:
-                                        ticketType = 'Location edit';
-                                        break;
-                                    case 4:
-                                        ticketType = 'Abuse';
-                                        break;
-                                    case 5:
-                                        ticketType = 'Access issues';
-                                        break;
-                                    default:
-                                        break;
-                                }
-                                if (ticketType) {
-                                    helpChatSessions[currentSession].type = ticketType;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
 
                 let wayspotFound = false;
                 let wayspotName = '';
@@ -657,7 +612,7 @@ function init() {
                         delete storedData[aui];
                         localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(storedData));
 
-                        // Update the visual display of row numbers to the AUI and remove it from the table
+                        // Update the visual display of row numbers to the AUI and remove it from the tablege
                         const rows = table.querySelectorAll('tr');
                         let rowIndex = 1; // Start from 1 to match the initial index
                         for (let i = 1; i < rows.length; i++) {
