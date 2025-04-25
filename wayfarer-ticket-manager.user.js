@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.0.7
+// @version      0.0.8
 // @description  Support for simultaneous tickets
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
@@ -14,7 +14,7 @@
 // @grant        GM_addValueChangeListener
 // ==/UserScript==
 
-// Copyright 2024 tntnnbltn
+// Copyright 2025 tntnnbltn
 
 // This script is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -244,7 +244,15 @@ function init() {
                 // Set the ticket type based on the most recent ticket's title
                 if (mostRecentTicket && mostRecentTicket.title) {
                     const ticketType = categorizeTicketTitle(mostRecentTicket.title);
-                    helpChatSessions[currentSession].type = ticketType;
+                    const newTimestamp = mostRecentTicket.created_at;
+
+                    const currentSessionData = helpChatSessions[currentSession];
+                    const existingTimestamp = currentSessionData.ticketTypeTimestamp || 0;
+
+                    if (newTimestamp > existingTimestamp) {
+                        currentSessionData.type = ticketType;
+                        currentSessionData.ticketTypeTimestamp = newTimestamp;
+                    }
                 }
 
                 processTicketMessages(mostRecentTicket.messages);
@@ -265,7 +273,6 @@ function init() {
         }
 
         function processTicketMessages(messages) {
-
             const lastMessage = messages[messages.length - 1];
 
             if (lastMessage.type === "Confirmation Accepted") {
@@ -278,6 +285,7 @@ function init() {
 
                 let wayspotFound = false;
                 let wayspotName = '';
+                let wayspotTimestamp;
 
                 const wayspotQuestions = [
                     { lang: 'en', question: "What is the name of the Wayspot?" },
@@ -320,32 +328,38 @@ function init() {
                                 if (currentBody === currentQuestion && nextMessage.body) {
                                     wayspotFound = true;
                                     wayspotName = decodeHTMLEntities(nextMessage.body);
+                                    wayspotTimestamp = nextMessage.created_at;
                                     break;
                                 }
                             }
                         }
                     }
                 } else if (messages.length === 1) {
-                    // Process for single message
                     const currentMessage = messages[0];
-                    if (isTheNextMessageTheWayspotTitle) {
-                        wayspotName = decodeHTMLEntities(currentMessage.body);
+                    const currentBody = decodeHTMLEntities(currentMessage.body);
+
+                    // Check if current message matches any known "Wayspot question"
+                    // This is a backup to stop it putting "What is the name of the Wayspot?" as the Wayspot title
+                    const isCurrentMessageAQuestion = wayspotQuestions.some(q =>
+                                                                            currentBody === decodeHTMLEntities(q.question)
+                                                                           );
+
+                    if (isTheNextMessageTheWayspotTitle && !isCurrentMessageAQuestion) {
+                        wayspotName = currentBody;
+                        wayspotTimestamp = currentMessage.created_at;
                         wayspotFound = true;
                         isTheNextMessageTheWayspotTitle = false;
-                    } else {
-                        for (let i = 0; i < wayspotQuestions.length; i++) {
-                            const currentQuestion = decodeHTMLEntities(wayspotQuestions[i].question);
-                            const currentBody = decodeHTMLEntities(currentMessage.body);
-                            if (currentBody === currentQuestion) {
-                                isTheNextMessageTheWayspotTitle = true;
-                                break;
-                            }
-                        }
                     }
                 }
 
                 if (wayspotFound) {
-                    helpChatSessions[currentSession].wayspot = wayspotName;
+                    const currentSessionData = helpChatSessions[currentSession];
+                    const existingWayspotTimestamp = currentSessionData.wayspotTimestamp || 0;
+
+                    if (wayspotTimestamp > existingWayspotTimestamp) {
+                        currentSessionData.wayspot = wayspotName;
+                        currentSessionData.wayspotTimestamp = wayspotTimestamp;
+                    }
                 }
 
                 saveDataToLocalStorage();
