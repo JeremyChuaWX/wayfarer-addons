@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.0.8
+// @version      0.0.9
 // @description  Support for simultaneous tickets
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
@@ -252,6 +252,15 @@ function init() {
                     if (newTimestamp > existingTimestamp) {
                         currentSessionData.type = ticketType;
                         currentSessionData.ticketTypeTimestamp = newTimestamp;
+                        helpChatSessions[currentSession].inProgress = true;
+                    }
+
+                    // Clear old Wayspot title if its timestamp is older
+                    if (currentSessionData.wayspot && currentSessionData.wayspotTimestamp) {
+                        if (currentSessionData.wayspotTimestamp < newTimestamp) {
+                            currentSessionData.wayspot = null;
+                            currentSessionData.wayspotTimestamp = null;
+                        }
                     }
                 }
 
