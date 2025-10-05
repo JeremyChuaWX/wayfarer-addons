@@ -63,7 +63,6 @@
     };
 
     const handleIncomingReview = result => new Promise((resolve, reject) => {
-        console.log(result);
 
         if (!result.nearbyPortals || !Array.isArray(result.nearbyPortals) || result.nearbyPortals.length === 0) {
             return reject("No nearby portals to store.");
