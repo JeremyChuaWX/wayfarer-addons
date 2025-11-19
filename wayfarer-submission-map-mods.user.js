@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.9
+// @version      0.0.10
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -41,6 +41,7 @@
     let poiMovementThreshold = radius * 0.25;
     let s2Overlay = null;
     let s2IdleListener = null;
+    let darkMode = false;
 
     // Initialize default settings
     let userSettings = {
@@ -94,10 +95,32 @@
                 if (method == 'GET') {
                     this.addEventListener('load', interceptSettings, false);
                 }
+            } else if (url == '/api/v1/vault/properties') {
+                if (method == 'GET') {
+                    this.addEventListener('load', interceptProperties, false);
+                }
             }
             open.apply(this, arguments);
         };
     })(XMLHttpRequest.prototype.open);
+
+    function interceptProperties() {
+        try {
+            const response = this.response;
+            const json = JSON.parse(response);
+            if (!json) return;
+            if (!json.result || !json.result.darkMode) return;
+
+            const darkModeSetting = json.result.darkMode
+            if (darkModeSetting === "DISABLED") {
+                darkMode = false;
+            } else {
+                darkMode = true;
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    }
 
     function interceptSettings() {
         try {
@@ -129,6 +152,91 @@
                 const settingsItem = await awaitElement(() => document.querySelector('.settings__item'));
                 const parentDiv = settingsItem.parentElement;
 
+                function applyDarkFieldStyles(input) {
+                    if (darkMode) return;
+                    input.style.color = '#000';
+                    input.style.backgroundColor = '#fff';
+                }
+
+                // Generic number input helper used for POI + S2
+                function makeNumberInput(settingsObj, key, {
+                    min,
+                    max,
+                    step,
+                    width = '60px',
+                    fallback,
+                    onAfterSave
+                }) {
+                    const input = document.createElement('input');
+                    input.type = 'number';
+                    input.style.width = width;
+                    input.min = String(min);
+                    input.max = String(max);
+                    input.step = String(step);
+
+                    const initial = settingsObj[key];
+                    input.value = (initial !== undefined && initial !== null) ? initial : fallback;
+
+                    applyDarkFieldStyles(input);
+
+                    input.addEventListener('change', () => {
+                        let val = parseFloat(input.value);
+                        if (isNaN(val)) val = (fallback !== undefined) ? fallback : min;
+                        if (val < min) val = min;
+                        if (val > max) val = max;
+
+                        settingsObj[key] = val;
+                        input.value = val;
+                        saveUserSettings();
+                        if (onAfterSave) onAfterSave(val);
+                    });
+
+                    return input;
+                }
+
+                function makeColorInput(settingsObj, key, onAfterSave) {
+                    const input = document.createElement('input');
+                    input.type = 'color';
+                    input.value = settingsObj[key];
+                    input.addEventListener('input', () => {
+                        settingsObj[key] = input.value;
+                        saveUserSettings();
+                        if (onAfterSave) onAfterSave(input.value);
+                    });
+                    return input;
+                }
+
+                function makeToggle(settingsObj) {
+                    const box = document.createElement('input');
+                    box.type = 'checkbox';
+                    box.checked = settingsObj.enabled;
+                    box.addEventListener('change', () => {
+                        settingsObj.enabled = box.checked;
+                        saveUserSettings();
+                    });
+                    return box;
+                }
+
+                function makeCell(content) {
+                    const td = document.createElement('td');
+                    td.style.padding = '6px 4px';
+                    td.style.verticalAlign = 'middle';
+                    td.appendChild(content);
+                    return td;
+                }
+
+                function makeHeaderCell(text) {
+                    const th = document.createElement('th');
+                    th.textContent = text;
+                    th.style.fontWeight = '600';
+                    th.style.padding = '6px';
+                    th.style.borderBottom = '1px solid #ccc';
+                    th.style.textAlign = 'center';
+                    return th;
+                }
+
+                // ---------- ROOT CONTAINER ----------
+
                 const newSettingsItem = document.createElement('div');
                 newSettingsItem.classList.add('settings__item', 'settings-item');
 
@@ -138,7 +246,6 @@
                 headerDiv.style.cursor = "pointer";
                 headerDiv.style.userSelect = "none";
 
-                // Toggle label
                 const toggleLabel = document.createElement('span');
                 toggleLabel.textContent = " (click to show options)";
                 toggleLabel.style.fontSize = "12px";
@@ -151,9 +258,9 @@
                 const descriptionDiv = document.createElement('div');
                 descriptionDiv.classList.add('settings-item__description');
 
-                // -----------------------
-                // POI MARKER SETTINGS
-                // -----------------------
+                // =======================
+                //  POI MARKER SETTINGS
+                // =======================
                 const poiHeader = document.createElement('div');
                 poiHeader.textContent = 'POI markers';
                 poiHeader.style.fontWeight = '600';
@@ -166,7 +273,6 @@
                 poiDescription.style.fontSize = '12px';
                 poiDescription.style.opacity = '0.8';
 
-                // Marker type dropdown
                 const typeRow = document.createElement('div');
                 typeRow.style.display = 'flex';
                 typeRow.style.alignItems = 'center';
@@ -179,6 +285,7 @@
                 const markerTypeSelect = document.createElement('select');
                 markerTypeSelect.style.padding = '2px 4px';
                 markerTypeSelect.style.fontSize = '13px';
+                applyDarkFieldStyles(markerTypeSelect);
 
                 const optThumbnail = document.createElement('option');
                 optThumbnail.value = 'thumbnail';
@@ -202,7 +309,7 @@
                 typeRow.appendChild(typeLabel);
                 typeRow.appendChild(markerTypeSelect);
 
-                // Thumbnail options container
+                // Thumbnail options
                 const thumbnailOptionsDiv = document.createElement('div');
                 thumbnailOptionsDiv.style.marginLeft = '20px';
                 thumbnailOptionsDiv.style.marginBottom = '10px';
@@ -213,21 +320,18 @@
                 thumbTitle.style.opacity = '0.85';
                 thumbTitle.style.marginBottom = '4px';
 
-                // Thumbnail border color
+                // Thumb border colour
                 const thumbBorderColorLabel = document.createElement('label');
                 thumbBorderColorLabel.style.display = 'flex';
                 thumbBorderColorLabel.style.alignItems = 'center';
                 thumbBorderColorLabel.style.gap = '6px';
                 thumbBorderColorLabel.style.marginBottom = '4px';
 
-                const thumbBorderColorInput = document.createElement('input');
-                thumbBorderColorInput.type = 'color';
-                thumbBorderColorInput.value = userSettings.poi.thumbnail.borderColor;
-                thumbBorderColorInput.addEventListener('input', () => {
-                    userSettings.poi.thumbnail.borderColor = thumbBorderColorInput.value;
-                    saveUserSettings();
-                    injectMarkerCss();
-                });
+                const thumbBorderColorInput = makeColorInput(
+                    userSettings.poi.thumbnail,
+                    'borderColor',
+                    () => injectMarkerCss()
+                );
 
                 const thumbBorderColorText = document.createElement('span');
                 thumbBorderColorText.textContent = 'Border colour';
@@ -235,30 +339,25 @@
                 thumbBorderColorLabel.appendChild(thumbBorderColorInput);
                 thumbBorderColorLabel.appendChild(thumbBorderColorText);
 
-                // Thumbnail border width
+                // Thumb border width
                 const thumbBorderWidthLabel = document.createElement('label');
                 thumbBorderWidthLabel.style.display = 'flex';
                 thumbBorderWidthLabel.style.alignItems = 'center';
                 thumbBorderWidthLabel.style.gap = '6px';
                 thumbBorderWidthLabel.style.marginBottom = '4px';
 
-                const thumbBorderWidthInput = document.createElement('input');
-                thumbBorderWidthInput.type = 'number';
-                thumbBorderWidthInput.min = '0';
-                thumbBorderWidthInput.max = '10';
-                thumbBorderWidthInput.step = '1';
-                thumbBorderWidthInput.style.width = '60px';
-                thumbBorderWidthInput.value = userSettings.poi.thumbnail.borderWidth;
-                thumbBorderWidthInput.addEventListener('change', () => {
-                    let val = parseInt(thumbBorderWidthInput.value, 10);
-                    if (isNaN(val)) val = 2;
-                    if (val < 0) val = 0;
-                    if (val > 10) val = 10;
-                    userSettings.poi.thumbnail.borderWidth = val;
-                    thumbBorderWidthInput.value = val;
-                    saveUserSettings();
-                    injectMarkerCss();
-                });
+                const thumbBorderWidthInput = makeNumberInput(
+                    userSettings.poi.thumbnail,
+                    'borderWidth',
+                    {
+                        min: 0,
+                        max: 10,
+                        step: 1,
+                        width: '60px',
+                        fallback: 3,
+                        onAfterSave: () => injectMarkerCss()
+                    }
+                );
 
                 const thumbBorderWidthText = document.createElement('span');
                 thumbBorderWidthText.textContent = 'Border stroke (px)';
@@ -266,29 +365,24 @@
                 thumbBorderWidthLabel.appendChild(thumbBorderWidthInput);
                 thumbBorderWidthLabel.appendChild(thumbBorderWidthText);
 
-                // Thumbnail border opacity
+                // Thumb border opacity
                 const thumbBorderOpacityLabel = document.createElement('label');
                 thumbBorderOpacityLabel.style.display = 'flex';
                 thumbBorderOpacityLabel.style.alignItems = 'center';
                 thumbBorderOpacityLabel.style.gap = '6px';
 
-                const thumbBorderOpacityInput = document.createElement('input');
-                thumbBorderOpacityInput.type = 'number';
-                thumbBorderOpacityInput.min = '0';
-                thumbBorderOpacityInput.max = '1';
-                thumbBorderOpacityInput.step = '0.1';
-                thumbBorderOpacityInput.style.width = '60px';
-                thumbBorderOpacityInput.value = userSettings.poi.thumbnail.borderOpacity;
-                thumbBorderOpacityInput.addEventListener('change', () => {
-                    let val = parseFloat(thumbBorderOpacityInput.value);
-                    if (isNaN(val)) val = 1.0;
-                    if (val < 0) val = 0;
-                    if (val > 1) val = 1;
-                    userSettings.poi.thumbnail.borderOpacity = val;
-                    thumbBorderOpacityInput.value = val;
-                    saveUserSettings();
-                    injectMarkerCss();
-                });
+                const thumbBorderOpacityInput = makeNumberInput(
+                    userSettings.poi.thumbnail,
+                    'borderOpacity',
+                    {
+                        min: 0,
+                        max: 1,
+                        step: 0.1,
+                        width: '60px',
+                        fallback: 0.7,
+                        onAfterSave: () => injectMarkerCss()
+                    }
+                );
 
                 const thumbBorderOpacityText = document.createElement('span');
                 thumbBorderOpacityText.textContent = 'Border opacity (0–1)';
@@ -301,7 +395,7 @@
                 thumbnailOptionsDiv.appendChild(thumbBorderWidthLabel);
                 thumbnailOptionsDiv.appendChild(thumbBorderOpacityLabel);
 
-                // Generic marker options container
+                // Generic marker options
                 const genericOptionsDiv = document.createElement('div');
                 genericOptionsDiv.style.marginLeft = '20px';
                 genericOptionsDiv.style.marginBottom = '10px';
@@ -312,20 +406,14 @@
                 genericTitle.style.opacity = '0.85';
                 genericTitle.style.marginBottom = '4px';
 
-                // Generic border color
+                // Generic border colour
                 const genBorderColorLabel = document.createElement('label');
                 genBorderColorLabel.style.display = 'flex';
                 genBorderColorLabel.style.alignItems = 'center';
                 genBorderColorLabel.style.gap = '6px';
                 genBorderColorLabel.style.marginBottom = '4px';
 
-                const genBorderColorInput = document.createElement('input');
-                genBorderColorInput.type = 'color';
-                genBorderColorInput.value = userSettings.poi.generic.borderColor;
-                genBorderColorInput.addEventListener('input', () => {
-                    userSettings.poi.generic.borderColor = genBorderColorInput.value;
-                    saveUserSettings();
-                });
+                const genBorderColorInput = makeColorInput(userSettings.poi.generic, 'borderColor');
 
                 const genBorderColorText = document.createElement('span');
                 genBorderColorText.textContent = 'Border colour';
@@ -340,22 +428,17 @@
                 genBorderWidthLabel.style.gap = '6px';
                 genBorderWidthLabel.style.marginBottom = '4px';
 
-                const genBorderWidthInput = document.createElement('input');
-                genBorderWidthInput.type = 'number';
-                genBorderWidthInput.min = '0';
-                genBorderWidthInput.max = '10';
-                genBorderWidthInput.step = '1';
-                genBorderWidthInput.style.width = '60px';
-                genBorderWidthInput.value = userSettings.poi.generic.borderWidth;
-                genBorderWidthInput.addEventListener('change', () => {
-                    let val = parseInt(genBorderWidthInput.value, 10);
-                    if (isNaN(val)) val = 2;
-                    if (val < 0) val = 0;
-                    if (val > 10) val = 10;
-                    userSettings.poi.generic.borderWidth = val;
-                    genBorderWidthInput.value = val;
-                    saveUserSettings();
-                });
+                const genBorderWidthInput = makeNumberInput(
+                    userSettings.poi.generic,
+                    'borderWidth',
+                    {
+                        min: 0,
+                        max: 10,
+                        step: 1,
+                        width: '60px',
+                        fallback: 2
+                    }
+                );
 
                 const genBorderWidthText = document.createElement('span');
                 genBorderWidthText.textContent = 'Border stroke (px)';
@@ -370,22 +453,17 @@
                 genBorderOpacityLabel.style.gap = '6px';
                 genBorderOpacityLabel.style.marginBottom = '4px';
 
-                const genBorderOpacityInput = document.createElement('input');
-                genBorderOpacityInput.type = 'number';
-                genBorderOpacityInput.min = '0';
-                genBorderOpacityInput.max = '1';
-                genBorderOpacityInput.step = '0.1';
-                genBorderOpacityInput.style.width = '60px';
-                genBorderOpacityInput.value = userSettings.poi.generic.borderOpacity;
-                genBorderOpacityInput.addEventListener('change', () => {
-                    let val = parseFloat(genBorderOpacityInput.value);
-                    if (isNaN(val)) val = 1.0;
-                    if (val < 0) val = 0;
-                    if (val > 1) val = 1;
-                    userSettings.poi.generic.borderOpacity = val;
-                    genBorderOpacityInput.value = val;
-                    saveUserSettings();
-                });
+                const genBorderOpacityInput = makeNumberInput(
+                    userSettings.poi.generic,
+                    'borderOpacity',
+                    {
+                        min: 0,
+                        max: 1,
+                        step: 0.1,
+                        width: '60px',
+                        fallback: 1.0
+                    }
+                );
 
                 const genBorderOpacityText = document.createElement('span');
                 genBorderOpacityText.textContent = 'Border opacity (0–1)';
@@ -393,20 +471,14 @@
                 genBorderOpacityLabel.appendChild(genBorderOpacityInput);
                 genBorderOpacityLabel.appendChild(genBorderOpacityText);
 
-                // Generic fill color
+                // Generic fill colour
                 const genFillColorLabel = document.createElement('label');
                 genFillColorLabel.style.display = 'flex';
                 genFillColorLabel.style.alignItems = 'center';
                 genFillColorLabel.style.gap = '6px';
                 genFillColorLabel.style.marginBottom = '4px';
 
-                const genFillColorInput = document.createElement('input');
-                genFillColorInput.type = 'color';
-                genFillColorInput.value = userSettings.poi.generic.fillColor;
-                genFillColorInput.addEventListener('input', () => {
-                    userSettings.poi.generic.fillColor = genFillColorInput.value;
-                    saveUserSettings();
-                });
+                const genFillColorInput = makeColorInput(userSettings.poi.generic, 'fillColor');
 
                 const genFillColorText = document.createElement('span');
                 genFillColorText.textContent = 'Fill colour';
@@ -420,22 +492,17 @@
                 genFillOpacityLabel.style.alignItems = 'center';
                 genFillOpacityLabel.style.gap = '6px';
 
-                const genFillOpacityInput = document.createElement('input');
-                genFillOpacityInput.type = 'number';
-                genFillOpacityInput.min = '0';
-                genFillOpacityInput.max = '1';
-                genFillOpacityInput.step = '0.1';
-                genFillOpacityInput.style.width = '60px';
-                genFillOpacityInput.value = userSettings.poi.generic.fillOpacity;
-                genFillOpacityInput.addEventListener('change', () => {
-                    let val = parseFloat(genFillOpacityInput.value);
-                    if (isNaN(val)) val = 0.5;
-                    if (val < 0) val = 0;
-                    if (val > 1) val = 1;
-                    userSettings.poi.generic.fillOpacity = val;
-                    genFillOpacityInput.value = val;
-                    saveUserSettings();
-                });
+                const genFillOpacityInput = makeNumberInput(
+                    userSettings.poi.generic,
+                    'fillOpacity',
+                    {
+                        min: 0,
+                        max: 1,
+                        step: 0.1,
+                        width: '60px',
+                        fallback: 0.5
+                    }
+                );
 
                 const genFillOpacityText = document.createElement('span');
                 genFillOpacityText.textContent = 'Fill opacity (0–1)';
@@ -450,27 +517,22 @@
                 genericOptionsDiv.appendChild(genFillColorLabel);
                 genericOptionsDiv.appendChild(genFillOpacityLabel);
 
-                // Helper to show/hide sections based on marker type
                 function updateMarkerOptionsVisibility() {
                     const type = userSettings.poi.markerType || 'thumbnail';
                     thumbnailOptionsDiv.style.display = (type === 'thumbnail') ? 'block' : 'none';
-                    genericOptionsDiv.style.display = (type === 'generic') ? 'block' : 'none';
+                    genericOptionsDiv.style.display  = (type === 'generic')   ? 'block' : 'none';
                 }
-
                 updateMarkerOptionsVisibility();
 
-                // -----------------------
-                // ADD MARKER UI TO BLOCK
-                // -----------------------
                 descriptionDiv.appendChild(poiHeader);
                 descriptionDiv.appendChild(poiDescription);
                 descriptionDiv.appendChild(typeRow);
                 descriptionDiv.appendChild(thumbnailOptionsDiv);
                 descriptionDiv.appendChild(genericOptionsDiv);
 
-                // -----------------------
-                // S2 GRID SETTINGS (TABLE)
-                // -----------------------
+                // =======================
+                //  S2 GRID SETTINGS
+                // =======================
                 const s2Header = document.createElement('div');
                 s2Header.textContent = 'S2 Grid';
                 s2Header.style.fontWeight = '600';
@@ -482,125 +544,65 @@
                 s2Description.style.fontSize = '12px';
                 s2Description.style.opacity = '0.8';
 
-                // Create table
                 const table = document.createElement('table');
                 table.style.width = '100%';
                 table.style.borderCollapse = 'collapse';
                 table.style.marginTop = '10px';
                 table.style.fontSize = '13px';
 
-                function makeCell(content) {
-                    const td = document.createElement('td');
-                    td.style.padding = '6px 4px';
-                    td.style.verticalAlign = 'middle';
-                    td.appendChild(content);
-                    return td;
-                }
-
-                function makeHeader(text) {
-                    const th = document.createElement('th');
-                    th.textContent = text;
-                    th.style.fontWeight = '600';
-                    th.style.padding = '6px';
-                    th.style.borderBottom = '1px solid #ccc';
-                    th.style.textAlign = 'center';
-                    return th;
-                }
-
-                // Table header row
                 const headerRow = document.createElement('tr');
-                headerRow.appendChild(document.createElement('th')); // blank corner cell
-                headerRow.appendChild(makeHeader('Primary Grid'));
-                headerRow.appendChild(makeHeader('Secondary Grid'));
+                headerRow.appendChild(document.createElement('th'));
+                headerRow.appendChild(makeHeaderCell('Primary Grid'));
+                headerRow.appendChild(makeHeaderCell('Secondary Grid'));
                 table.appendChild(headerRow);
 
-                // Convenience function to create number inputs
-                function makeNumberInput(settingsObj, key, min, max, step) {
-                    const input = document.createElement('input');
-                    input.type = 'number';
-                    input.style.width = '70px';
-                    input.value = settingsObj[key];
-                    input.min = min;
-                    input.max = max;
-                    input.step = step;
-
-                    input.addEventListener('change', () => {
-                        let val = parseFloat(input.value);
-                        if (isNaN(val)) val = min;
-                        if (val < min) val = min;
-                        if (val > max) val = max;
-                        settingsObj[key] = val;
-                        input.value = val;
-                        saveUserSettings();
-                    });
-                    return input;
-                }
-
-                // Convenience function to create colour inputs
-                function makeColorInput(settingsObj, key) {
-                    const input = document.createElement('input');
-                    input.type = 'color';
-                    input.value = settingsObj[key];
-                    input.addEventListener('input', () => {
-                        settingsObj[key] = input.value;
-                        saveUserSettings();
-                    });
-                    return input;
-                }
-
-                // Convenience function to create toggle checkbox
-                function makeToggle(settingsObj) {
-                    const box = document.createElement('input');
-                    box.type = 'checkbox';
-                    box.checked = settingsObj.enabled;
-                    box.addEventListener('change', () => {
-                        settingsObj.enabled = box.checked;
-                        saveUserSettings();
-                    });
-                    return box;
-                }
-
-                // ROW: Enabled toggle
+                // Row: Enabled
                 const rowEnabled = document.createElement('tr');
-                rowEnabled.appendChild(makeHeader("Enabled"));
-
+                rowEnabled.appendChild(makeHeaderCell("Enabled"));
                 rowEnabled.appendChild(makeCell(makeToggle(userSettings.s2.primary)));
                 rowEnabled.appendChild(makeCell(makeToggle(userSettings.s2.secondary)));
                 table.appendChild(rowEnabled);
 
-                // ROW: S2 Level
+                // Row: Level
                 const rowLevel = document.createElement('tr');
-                rowLevel.appendChild(makeHeader("S2 Level"));
-
-                rowLevel.appendChild(makeCell(makeNumberInput(userSettings.s2.primary, "level", 0, 30, 1)));
-                rowLevel.appendChild(makeCell(makeNumberInput(userSettings.s2.secondary, "level", 0, 30, 1)));
+                rowLevel.appendChild(makeHeaderCell("S2 Level"));
+                rowLevel.appendChild(makeCell(makeNumberInput(userSettings.s2.primary, "level", {
+                    min: 0, max: 30, step: 1, width: '70px', fallback: 17
+                })));
+                rowLevel.appendChild(makeCell(makeNumberInput(userSettings.s2.secondary, "level", {
+                    min: 0, max: 30, step: 1, width: '70px', fallback: 14
+                })));
                 table.appendChild(rowLevel);
 
-                // ROW: Line colour
+                // Row: Line colour
                 const rowColor = document.createElement('tr');
-                rowColor.appendChild(makeHeader("Line colour"));
-
+                rowColor.appendChild(makeHeaderCell("Line colour"));
                 rowColor.appendChild(makeCell(makeColorInput(userSettings.s2.primary, "color")));
                 rowColor.appendChild(makeCell(makeColorInput(userSettings.s2.secondary, "color")));
                 table.appendChild(rowColor);
 
-                // ROW: Line width
+                // Row: Line width
                 const rowWidth = document.createElement('tr');
-                rowWidth.appendChild(makeHeader("Line width"));
-
-                rowWidth.appendChild(makeCell(makeNumberInput(userSettings.s2.primary, "lineWidth", 1, 10, 1)));
-                rowWidth.appendChild(makeCell(makeNumberInput(userSettings.s2.secondary, "lineWidth", 1, 10, 1)));
+                rowWidth.appendChild(makeHeaderCell("Line width"));
+                rowWidth.appendChild(makeCell(makeNumberInput(userSettings.s2.primary, "lineWidth", {
+                    min: 1, max: 10, step: 1, width: '70px', fallback: 1
+                })));
+                rowWidth.appendChild(makeCell(makeNumberInput(userSettings.s2.secondary, "lineWidth", {
+                    min: 1, max: 10, step: 1, width: '70px', fallback: 2
+                })));
                 table.appendChild(rowWidth);
 
-                // ROW: Line opacity
+                // Row: Line opacity
                 const rowOpacity = document.createElement('tr');
-                rowOpacity.appendChild(makeHeader("Line opacity"));
-
-                rowOpacity.appendChild(makeCell(makeNumberInput(userSettings.s2.primary, "lineOpacity", 0, 1, 0.1)));
-                rowOpacity.appendChild(makeCell(makeNumberInput(userSettings.s2.secondary, "lineOpacity", 0, 1, 0.1)));
+                rowOpacity.appendChild(makeHeaderCell("Line opacity"));
+                rowOpacity.appendChild(makeCell(makeNumberInput(userSettings.s2.primary, "lineOpacity", {
+                    min: 0, max: 1, step: 0.1, width: '70px', fallback: 1.0
+                })));
+                rowOpacity.appendChild(makeCell(makeNumberInput(userSettings.s2.secondary, "lineOpacity", {
+                    min: 0, max: 1, step: 0.1, width: '70px', fallback: 1.0
+                })));
                 table.appendChild(rowOpacity);
 
-                // Append to settings UI
                 descriptionDiv.appendChild(s2Header);
                 descriptionDiv.appendChild(s2Description);
                 descriptionDiv.appendChild(table);
@@ -608,6 +610,7 @@
                 table.querySelectorAll("td").forEach(td => td.style.textAlign = "center");
                 table.querySelectorAll("input").forEach(input => input.style.textAlign = "center");
 
+                // ---------- Attach block ----------
                 newSettingsItem.appendChild(headerDiv);
                 newSettingsItem.appendChild(valueDiv);
                 newSettingsItem.appendChild(descriptionDiv);
@@ -617,10 +620,9 @@
                     parentDiv.insertBefore(newSettingsItem, parentDiv.children[3]);
                 }
 
-                // Start with options hidden
+                // Options hidden by default
                 descriptionDiv.style.display = "none";
 
-                // Toggle behaviour
                 headerDiv.addEventListener("click", () => {
                     const isHidden = descriptionDiv.style.display === "none";
                     descriptionDiv.style.display = isHidden ? "block" : "none";
@@ -992,52 +994,61 @@
 
     function createOverlay(poi) {
         const title = escapeHtml(poi.title);
-        const desc = escapeHtml(poi.description || "");
+        const desc  = escapeHtml(poi.description || "");
         const latStr = poi.lat.toFixed(6);
         const lngStr = poi.lng.toFixed(6);
 
-        const iwImgUrl = poi.imageUrl + "=w240"; // preview
-        const fullImgUrl = poi.imageUrl + "=s0"; // open full size
+        const iwImgUrl  = poi.imageUrl + "=w240"; // preview
+        const fullImgUrl = poi.imageUrl + "=s0";  // open full size
+
+        // Inline styles to override site styles when needed
+        const titleStyle = darkMode ? 'color:#000;' : '';
+        const descStyle  = darkMode ? 'color:#000;' : '';
+        const coordStyle = darkMode ? 'color:#333;' : 'color: inherit;';
 
         return `
-            <div class="agm-info-window-content">
-               <div class="wf-nearby-iw-content flex flex-col max-w-[240px]">
+        <div class="agm-info-window-content">
+            <div class="wf-nearby-iw-content flex flex-col max-w-[240px]">
 
-                   <!-- Title -->
-                   <div class="font-medium truncate text-base mb-1" title="${title}">
-                       ${title}
-                   </div>
+                <!-- Title -->
+                <div class="font-medium truncate text-base mb-1"
+                     title="${title}"
+                     style="${titleStyle}">
+                    ${title}
+                </div>
 
-                   <!-- Lat/Lng, looks like text but clickable to copy -->
-                   <div class="text-xs text-gray-500 mb-2">
-                       <span
-                           class="wf-copy-coords"
-                           data-lat="${latStr}"
-                           data-lng="${lngStr}"
-                           title="Click to copy coordinates"
-                           style="cursor: pointer; color: inherit; text-decoration: none;"
-                       >
-                           ${latStr}, ${lngStr}
-                       </span>
-                   </div>
+                <!-- Lat/Lng, looks like text but clickable to copy -->
+                <div class="text-xs text-gray-500 mb-2">
+                    <span
+                        class="wf-copy-coords"
+                        data-lat="${latStr}"
+                        data-lng="${lngStr}"
+                        title="Click to copy coordinates"
+                        style="cursor: pointer; text-decoration: none; ${coordStyle}"
+                    >
+                        ${latStr}, ${lngStr}
+                    </span>
+                </div>
 
-                   <!-- Image Banner -->
-                   <div style="width: 240px; height: 96px; overflow:hidden; margin-bottom:0.5rem;">
-                       <a href="${fullImgUrl}" target="_blank" rel="noopener noreferrer"
-                          style="display:block; width:100%; height:100%;">
-                           <img
-                               src="${iwImgUrl}"
-                               alt="${title}"
-                               style="display:block; width:100%; height:100%; object-fit:cover;"
-                           >
-                       </a>
-                   </div>
+                <!-- Image Banner -->
+                <div style="width: 240px; height: 96px; overflow:hidden; margin-bottom:0.5rem;">
+                    <a href="${fullImgUrl}" target="_blank" rel="noopener noreferrer"
+                       style="display:block; width:100%; height:100%;">
+                        <img
+                            src="${iwImgUrl}"
+                            alt="${title}"
+                            style="display:block; width:100%; height:100%; object-fit:cover;"
+                        >
+                    </a>
+                </div>
 
-                   <!-- Description -->
-                   <div class="text-sm">${desc}</div>
-               </div>
-           </div>
-       `;
+                <!-- Description -->
+                <div class="text-sm" style="${descStyle}">
+                    ${desc}
+                </div>
+            </div>
+        </div>
+    `;
     }
 
     async function onPoisFetched() {
