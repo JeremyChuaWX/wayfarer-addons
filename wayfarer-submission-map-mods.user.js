@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.3
+// @version      0.0.4
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -946,6 +946,29 @@
                 map: submitMap,
                 anchor: marker
             });
+
+            // Attach copy handler once the InfoWindow's DOM is ready
+            google.maps.event.addListenerOnce(poiInfoWindow, "domready", () => {
+                const el = document.querySelector(".wf-copy-coords");
+                if (!el) return;
+
+                el.addEventListener("click", () => {
+                    const lat = el.getAttribute("data-lat");
+                    const lng = el.getAttribute("data-lng");
+                    const coords = `${lat},${lng}`;
+
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(coords).catch(err => {
+                            console.error("Clipboard copy failed:", err);
+                        });
+                    } else {
+                        // Simple fallback
+                        try {
+                            window.prompt("Copy to clipboard:", coords);
+                        } catch (e) {}
+                    }
+                });
+            });
         });
 
         return marker;
@@ -988,9 +1011,17 @@
                        ${title}
                    </div>
 
-                   <!-- Lat / Lng -->
+                   <!-- Lat/Lng, looks like text but clickable to copy -->
                    <div class="text-xs text-gray-500 mb-2">
-                       ${latStr}, ${lngStr}
+                       <span
+                           class="wf-copy-coords"
+                           data-lat="${latStr}"
+                           data-lng="${lngStr}"
+                           title="Click to copy coordinates"
+                           style="cursor: pointer; color: inherit; text-decoration: none;"
+                       >
+                           ${latStr}, ${lngStr}
+                       </span>
                    </div>
 
                    <!-- Image Banner -->
