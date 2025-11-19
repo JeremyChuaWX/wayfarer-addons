@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.2
+// @version      0.0.3
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -694,7 +694,6 @@
         if (initialCoords) {
             window.currentLat = initialCoords.lat;
             window.currentLng = initialCoords.lng;
-            clearDefaultMarkers();
             requestPoisAndRefreshMap(initialCoords.lat, initialCoords.lng);
         }
 
@@ -832,24 +831,6 @@
             tryFindMap();
         });
     }
-
-    function clearDefaultMarkers() {
-        // Remove the default duplicate markers placed on the map
-        // These will be replaced with our own custom ones
-        // Does not remove submission marker (z index 1000)
-        const gmMarkers = document.querySelectorAll('.gm-style div');
-
-        gmMarkers.forEach(el => {
-            const w = el.style.width;
-            const h = el.style.height;
-            const z = el.style.zIndex;
-
-            if (z === "1" && w === "36px" && h === "56px") {
-                el.remove();
-            }
-        });
-    }
-
 
     function updatePoisOnMap() {
         if (!submitMap || !Array.isArray(window.currentPois)) return;
@@ -1035,21 +1016,12 @@
         if (!submitMap) {
             submitMap = await getSubmitMap();
 
-            // Initialise the map
-
             // Remove clickable POIs
             submitMap.setOptions({
                 clickableIcons: false,  // disables click areas on POIs
             });
 
-            // Remove the default dupe markers loaded by Wayfarer
-            // We will replace with our own
-            clearDefaultMarkers();
-
-            // Add search box
             injectSearchBox();
-
-            // Initialise S2 overlay
             initS2Overlay();
         }
 
@@ -1354,20 +1326,21 @@
     }
 
     function injectMarkerCss() {
-        const thumb = userSettings.poi.thumbnail;
-        const size = 36; // must match the scaledSize in createPoiMarker
-        const borderColorRgba = hexToRgba(thumb.borderColor, thumb.borderOpacity);
-
         const style = document.createElement('style');
         style.textContent = `
-        /* Thumbnail POI markers – circular with configurable border */
+        /* Your circular thumbnail marker styling… */
         .gm-style img[src*="lh3.googleusercontent.com"][src*="=s36-c"] {
             border-radius: 50% !important;
-            width: ${size}px !important;
-            height: ${size}px !important;
+            width: 36px !important;
+            height: 36px !important;
             object-fit: cover;
             box-sizing: border-box;
-            border: ${thumb.borderWidth}px solid ${borderColorRgba} !important;
+            /* border from userSettings, if you already wired that */
+        }
+
+        /* Hide Niantic's default 36x56 z-index:1 markers */
+        .gm-style div[style*="z-index: 1"][style*="width: 36px"][style*="height: 56px"] {
+            display: none !important;
         }
     `;
         document.head.appendChild(style);
