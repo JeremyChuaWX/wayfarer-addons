@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.7
+// @version      0.0.8
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -80,6 +80,7 @@
     };
 
     loadUserSettings();
+    injectMarkerCss();
 
     function init() {
         injectMarkerCss();
@@ -225,6 +226,7 @@
                 thumbBorderColorInput.addEventListener('input', () => {
                     userSettings.poi.thumbnail.borderColor = thumbBorderColorInput.value;
                     saveUserSettings();
+                    injectMarkerCss();
                 });
 
                 const thumbBorderColorText = document.createElement('span');
@@ -255,6 +257,7 @@
                     userSettings.poi.thumbnail.borderWidth = val;
                     thumbBorderWidthInput.value = val;
                     saveUserSettings();
+                    injectMarkerCss();
                 });
 
                 const thumbBorderWidthText = document.createElement('span');
@@ -284,6 +287,7 @@
                     userSettings.poi.thumbnail.borderOpacity = val;
                     thumbBorderOpacityInput.value = val;
                     saveUserSettings();
+                    injectMarkerCss();
                 });
 
                 const thumbBorderOpacityText = document.createElement('span');
@@ -1148,9 +1152,6 @@
             this.polyLines = [];
         }
 
-        // (Old updateGrid not really needed anymore; we’ll clear + call drawS2Grid externally)
-        // You can keep it or delete it if nothing else uses it.
-
         async drawCellGrid(map, gridLevel, strokeColor, strokeWidth = 1, strokeOpacity = 1.0) {
             await this.until(this.check_map_bounds_ready, map);
             const bounds = map.getBounds();
@@ -1333,23 +1334,24 @@
         return R * c;
     }
 
-    function hexToRgba(hex, alpha) {
-        // Strip leading #
-        hex = hex.replace('#', '');
-
-        if (hex.length === 3) {
-            // e.g. #f00 -> #ff0000
-            hex = hex.split('').map(ch => ch + ch).join('');
-        }
-
-        const r = parseInt(hex.substring(0, 2), 16);
-        const g = parseInt(hex.substring(2, 4), 16);
-        const b = parseInt(hex.substring(4, 6), 16);
-
-        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    function hexToRgba(hex, opacity) {
+        const h = hex.replace("#", "");
+        const r = parseInt(h.substring(0, 2), 16);
+        const g = parseInt(h.substring(2, 4), 16);
+        const b = parseInt(h.substring(4, 6), 16);
+        return `rgba(${r}, ${g}, ${b}, ${opacity})`;
     }
 
     function injectMarkerCss() {
+        // Remove old style tag if reloading settings
+        const existing = document.getElementById("wfsmm-marker-style");
+        if (existing) existing.remove();
+
+        const { borderColor, borderWidth, borderOpacity } = userSettings.poi.thumbnail;
+
+        // Convert opacity + color into RGBA
+        const thumbBorderRGBA = hexToRgba(borderColor, borderOpacity);
+
         const style = document.createElement('style');
         style.textContent = `
         /* Your circular thumbnail marker styling… */
@@ -1357,9 +1359,9 @@
             border-radius: 50% !important;
             width: 36px !important;
             height: 36px !important;
-            object-fit: cover;
-            box-sizing: border-box;
-            /* border from userSettings, if you already wired that */
+            object-fit: cover !important;
+            box-sizing: border-box !important;
+            border: ${borderWidth}px solid ${thumbBorderRGBA} !important;
         }
 
         /* Hide Niantic's default 36x56 z-index:1 markers */
