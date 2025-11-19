@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.13
+// @version      0.0.14
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
+// @require      https://unpkg.com/exifr/dist/full.umd.js
 // @run-at       document-start
 // ==/UserScript==
 
@@ -88,6 +89,7 @@
         injectMarkerCss();
         initLatLngObserver();
         getSubmitMap();
+        initUploadExifWatcher();
     }
 
     (function (open) {
@@ -739,6 +741,106 @@
         } catch (e) {
             console.error("Failed to load settings, using defaults:", e);
         }
+    }
+
+    function initUploadExifWatcher() {
+        const intervalMs = 1000;
+
+        const scanForEntryContainers = () => {
+            const containers = document.querySelectorAll('app-wayspot-image-entry .image-entry-container');
+            containers.forEach(container => {
+                if (container._wfsmmClickHooked) return;
+                container._wfsmmClickHooked = true;
+                container.addEventListener("click", () => {
+                    let fileAttempts = 0;
+                    const fileMaxAttempts = 60;
+                    const fileIntervalMs = 500;
+
+                    const lookForFileInput = () => {
+                        fileAttempts++;
+                        const input = document.querySelector("#file-input");
+
+                        if (input) {
+                            attachExifListenerToFileInput(input);
+                            return;
+                        }
+
+                        if (fileAttempts < fileMaxAttempts) {
+                            setTimeout(lookForFileInput, fileIntervalMs);
+                        }
+                    };
+
+                    lookForFileInput();
+                });
+            });
+
+            // Keep scanning forever so we catch containers that are removed/re-added
+            setTimeout(scanForEntryContainers, intervalMs);
+        };
+
+        scanForEntryContainers();
+    }
+
+    function attachExifListenerToFileInput(input) {
+        if (!input) return;
+        if (input._wfsmmExifHooked) return;
+        input._wfsmmExifHooked = true;
+
+        input.addEventListener('change', async (e) => {
+            const files = e.target.files;
+            if (!files || !files.length) return;
+
+            const file = files[0];
+
+            const type = file.type || "";
+            const name = file.name || "";
+
+            const gps = await extractGpsFromFileOrBuffer(file);
+            if (!gps) {
+                console.info("WFSMM: No GPS EXIF data found in selected image (or not supported).");
+                return;
+            }
+
+            console.info("WFSMM: EXIF GPS found:", gps.lat, gps.lng);
+            moveMapToExifCoords(gps.lat, gps.lng);
+        });
+    }
+
+    async function extractGpsFromFileOrBuffer(fileOrBuffer) {
+        if (typeof exifr === "undefined" || !exifr.gps) {
+            console.warn("WFSMM: exifr library not available");
+            return null;
+        }
+
+        try {
+            // exifr can take File, Blob, ArrayBuffer, etc.
+            const gps = await exifr.gps(fileOrBuffer);
+
+            // gps is usually { latitude, longitude, altitude, ... }
+            if (!gps || gps.latitude == null || gps.longitude == null) {
+                return null;
+            }
+
+            return {
+                lat: gps.latitude,
+                lng: gps.longitude
+            };
+        } catch (e) {
+            console.warn("WFSMM: Failed to read EXIF with exifr:", e);
+            return null;
+        }
+    }
+
+    function moveMapToExifCoords(lat, lng) {
+        if (!submitMap || typeof google === "undefined" || !google.maps) return;
+
+        const latLng = new google.maps.LatLng(lat, lng);
+
+        // Center the map
+        submitMap.setCenter(latLng);
+
+        // Trigger Wayfarer’s own handler so the pin + address update
+        google.maps.event.trigger(submitMap, "click", { latLng });
     }
 
     function initLatLngObserver() {
