@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.12
+// @version      0.0.13
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -1142,29 +1142,60 @@
     function injectSearchBox() {
         if (!submitMap) return;
 
+        const coordsDiv = findLatLngDiv();
+        let headerRow = coordsDiv?.closest("div.flex.items-center") ?? null;
+
+        const wrapper = document.createElement("div");
+        wrapper.style.display = "flex";
+        wrapper.style.flexDirection = "column";
+        wrapper.style.position = "relative";
+        wrapper.style.marginLeft = "12px";
+        wrapper.style.flexGrow = "1";
+        wrapper.style.maxWidth = "500px";
+        wrapper.style.flexShrink = "1";
+
+        const label = document.createElement("span");
+        label.innerText = "Search";
+
+        Object.assign(label.style, {
+            position: "absolute",
+            top: "-4px",
+            left: "8px",
+            fontSize: "12px",
+            padding: "0 4px",
+            background: darkMode ? "#262626" : "#ffffff",
+            color: darkMode ? "#d1d5db" : "#111827",
+            width: "max-content",
+            zIndex: "1"
+        });
+
         const input = document.createElement("input");
         input.type = "text";
         input.placeholder = "Search places or coordinates…";
 
-        input.style.cssText = `
-        position: absolute;
-        top: 12px;
-        left: 12px;
-        z-index: 9999;
-        width: 260px;
-        padding: 6px 10px;
-        border-radius: 4px;
-        border: 1px solid #ccc;
-        background: white;
-        font-size: 14px;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-    `;
+        Object.assign(input.style, {
+            maxWidth: "500px",
+            width: "100%",
+            height: "35px",
+            background: "transparent",
+            padding: "4px 6px",
+            borderRadius: "6px",
+            border: darkMode ? "1px solid #9ca3af" : "1px solid #000000",
+            color: darkMode ? "#f9fafb" : "#111827",
+            fontSize: "14px",
+            outline: "none",
+            marginTop: "6px",
+        });
 
-        const mapDiv = submitMap.getDiv();
-        mapDiv.style.position = "relative";
-        mapDiv.appendChild(input);
+        wrapper.appendChild(label);
+        wrapper.appendChild(input);
 
-        // Try to enable Places autocomplete if available
+        if (headerRow) {
+            headerRow.appendChild(wrapper);
+        } else {
+            return;
+        }
+
         try {
             const autocomplete = new google.maps.places.Autocomplete(input, {
                 fields: ["geometry", "name"],
@@ -1173,36 +1204,25 @@
             autocomplete.addListener("place_changed", () => {
                 const place = autocomplete.getPlace();
                 if (!place?.geometry) return;
-
                 const loc = place.geometry.location;
-                const lat = loc.lat();
-                const lng = loc.lng();
-
-                const latLng = new google.maps.LatLng(lat, lng);
-
+                const latLng = new google.maps.LatLng(loc.lat(), loc.lng());
                 submitMap.setCenter(latLng);
-
-                // Simulate a click at this location so Wayfarer's own handler runs
                 google.maps.event.trigger(submitMap, "click", { latLng });
             });
         } catch (err) {
-            console.warn("Places API not available; autocomplete disabled.", err);
+            console.warn("Places API not available;", err);
         }
 
-        // Support raw lat,lng input via Enter key
         input.addEventListener("keydown", (e) => {
             if (e.key !== "Enter") return;
-
             const parsed = parseLatLng(input.value.trim());
             if (!parsed) return;
-
-            const { lat, lng } = parsed;
-            const latLng = new google.maps.LatLng(lat, lng);
-
+            const latLng = new google.maps.LatLng(parsed.lat, parsed.lng);
             submitMap.setCenter(latLng);
             google.maps.event.trigger(submitMap, "click", { latLng });
         });
     }
+
 
     function initCustomBaseMaps() {
         if (!submitMap) return;
@@ -1211,7 +1231,7 @@
 
         let mapTypeControlOptions = {
             style: google.maps.MapTypeControlStyle.DROPDOWN_MENU,
-            position: google.maps.ControlPosition.TOP_RIGHT,
+            position: google.maps.ControlPosition.TOP_LEFT,
             mapTypeIds: ["roadmap", "satellite", "hybrid"]
         };
 
