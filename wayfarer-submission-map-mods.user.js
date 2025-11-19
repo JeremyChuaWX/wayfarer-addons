@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.5
+// @version      0.0.6
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -1363,7 +1363,7 @@
         }
 
         /* Hide Niantic's default 36x56 z-index:1 markers */
-        .gm-style div[style*="z-index: 1"][style*="width: 36px"][style*="height: 56px"] {
+        .gm-style div[style*="width: 36px"][style*="height: 56px"][style*="z-index: 1;"] {
             display: none !important;
         }
     `;
