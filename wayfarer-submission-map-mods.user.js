@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.8
+// @version      0.0.9
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -1353,6 +1353,7 @@
         const thumbBorderRGBA = hexToRgba(borderColor, borderOpacity);
 
         const style = document.createElement('style');
+        style.id = "wfsmm-marker-style";
         style.textContent = `
         /* Your circular thumbnail marker styling… */
         .gm-style img[src*="lh3.googleusercontent.com"][src*="=s36-c"] {
