@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.6
+// @version      0.0.7
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -65,7 +65,7 @@
             primary: {
                 enabled: true,
                 level: 17,
-                color: "#00FF00",
+                color: "#00B303",
                 lineWidth: 1,
                 lineOpacity: 1.0
             },
