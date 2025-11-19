@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.14
+// @version      0.0.15
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -746,39 +746,54 @@
     function initUploadExifWatcher() {
         const intervalMs = 1000;
 
-        const scanForEntryContainers = () => {
-            const containers = document.querySelectorAll('app-wayspot-image-entry .image-entry-container');
-            containers.forEach(container => {
-                if (container._wfsmmClickHooked) return;
-                container._wfsmmClickHooked = true;
-                container.addEventListener("click", () => {
-                    let fileAttempts = 0;
-                    const fileMaxAttempts = 60;
-                    const fileIntervalMs = 500;
+        const scan = () => {
+            const sections = document.querySelectorAll('div.section');
 
-                    const lookForFileInput = () => {
-                        fileAttempts++;
-                        const input = document.querySelector("#file-input");
+            sections.forEach(section => {
+                const h4 = section.querySelector('h4 span.step-number');
+                if (!h4) return;
 
-                        if (input) {
-                            attachExifListenerToFileInput(input);
-                            return;
-                        }
+                const stepNum = h4.textContent.trim();
 
-                        if (fileAttempts < fileMaxAttempts) {
-                            setTimeout(lookForFileInput, fileIntervalMs);
-                        }
-                    };
+                // Only add event listening to the "Step 1" (Wayspot Photo) button
+                // This is to avoid supporting photo exif overwriting main photo
+                if (stepNum !== "1") return;
 
-                    lookForFileInput();
-                });
+                const container = section.querySelector('app-wayspot-image-entry .image-entry-container');
+                if (!container) return;
+
+                if (!container._wfsmmClickHooked) {
+                    container._wfsmmClickHooked = true;
+
+                    container.addEventListener("click", () => {
+                        let attempts = 0;
+                        const maxAttempts = 60;
+
+                        const findInput = () => {
+                            attempts++;
+                            const input = document.querySelector("#file-input");
+
+                            if (input) {
+                                attachExifListenerToFileInput(input);
+                                return;
+                            }
+
+                            if (attempts < maxAttempts) {
+                                setTimeout(findInput, 500);
+                            } else {
+                                console.warn("WFSMM: #file-input not found (Section 1) after all attempts");
+                            }
+                        };
+
+                        findInput();
+                    });
+                }
             });
 
-            // Keep scanning forever so we catch containers that are removed/re-added
-            setTimeout(scanForEntryContainers, intervalMs);
+            setTimeout(scan, intervalMs);
         };
 
-        scanForEntryContainers();
+        scan();
     }
 
     function attachExifListenerToFileInput(input) {
