@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.4
+// @version      0.0.5
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -39,13 +39,6 @@
     let lastFetchLng = null;
     let radius = 200;
     let poiMovementThreshold = radius * 0.25;
-
-    // S2 grid config
-    let S2_PRIMARY_LEVEL = 17;
-    let S2_PRIMARY_COLOR = "#ff0000";
-    let S2_SECONDARY_LEVEL = 14;
-    let S2_SECONDARY_COLOR = "#ff0000";
-    let s2OverlayInitialized = false;
     let s2Overlay = null;
     let s2IdleListener = null;
 
