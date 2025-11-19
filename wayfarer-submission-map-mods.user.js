@@ -242,8 +242,6 @@
         }
 
         poiMarkers = Object.values(markersByGuid).map(e => e.marker);
-
-        console.log(`Now showing ${poiMarkers.length} POI markers`);
     }
 
     function updatePoiRadiusCircle() {
