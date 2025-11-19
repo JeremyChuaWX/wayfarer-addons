@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.15
+// @version      0.0.16
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -1125,25 +1125,39 @@
 
             // Attach copy handler once the InfoWindow's DOM is ready
             google.maps.event.addListenerOnce(poiInfoWindow, "domready", () => {
-                const el = document.querySelector(".wf-copy-coords");
-                if (!el) return;
+                // ---- Copy Coordinates ----
+                const coordEl = document.querySelector(".wf-copy-coords");
+                if (coordEl) {
+                    coordEl.addEventListener("click", () => {
+                        const lat = coordEl.getAttribute("data-lat");
+                        const lng = coordEl.getAttribute("data-lng");
+                        const coords = `${lat}, ${lng}`;
 
-                el.addEventListener("click", () => {
-                    const lat = el.getAttribute("data-lat");
-                    const lng = el.getAttribute("data-lng");
-                    const coords = `${lat},${lng}`;
-
-                    if (navigator.clipboard && navigator.clipboard.writeText) {
-                        navigator.clipboard.writeText(coords).catch(err => {
-                            console.error("Clipboard copy failed:", err);
-                        });
-                    } else {
-                        // Simple fallback
-                        try {
+                        if (navigator.clipboard?.writeText) {
+                            navigator.clipboard.writeText(coords).catch(err =>
+                                                                        console.error("Clipboard copy failed:", err)
+                                                                       );
+                        } else {
                             window.prompt("Copy to clipboard:", coords);
-                        } catch (e) {}
-                    }
-                });
+                        }
+                    });
+                }
+
+                // ---- Copy Title ----
+                const titleEl = document.querySelector(".wf-copy-title");
+                if (titleEl) {
+                    titleEl.addEventListener("click", () => {
+                        const text = titleEl.getAttribute("data-copy");
+
+                        if (navigator.clipboard?.writeText) {
+                            navigator.clipboard.writeText(text).catch(err =>
+                                                                      console.error("Clipboard copy failed:", err)
+                                                                     );
+                        } else {
+                            window.prompt("Copy to clipboard:", text);
+                        }
+                    });
+                }
             });
         });
 
@@ -1187,11 +1201,18 @@
         <div class="agm-info-window-content">
             <div class="wf-nearby-iw-content flex flex-col max-w-[240px]">
 
-                <!-- Title -->
+                <!-- Title (click to copy) -->
                 <div class="font-medium truncate text-base mb-1"
                      title="${title}"
                      style="${titleStyle}">
-                    ${title}
+                    <span
+                        class="wf-copy-title"
+                        data-copy="${title.replace(/"/g, '&quot;')}"
+                        title="Click to copy title"
+                        style="cursor: pointer; text-decoration: none;"
+                    >
+                        ${title}
+                    </span>
                 </div>
 
                 <!-- Lat/Lng, looks like text but clickable to copy -->
@@ -1232,7 +1253,7 @@
         if (!submitMap) {
             submitMap = await getSubmitMap();
 
-            // Remove clickable POIs
+            // Remove clickable icons from Google Maps
             submitMap.setOptions({
                 clickableIcons: false,
             });
