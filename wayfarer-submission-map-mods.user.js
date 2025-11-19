@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.11
+// @version      0.0.12
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -30,18 +30,16 @@
 (function() {
 
     let submitMap = null;
-    let poiMarkers = [];
     let poiInfoWindow = null;
     let markersByGuid = {};
     let poiRadiusCircle = null;
-    let defaultMarkerObserver = null;
     let lastFetchLat = null;
     let lastFetchLng = null;
     let radius = 200;
     let poiMovementThreshold = radius * 0.25;
     let s2Overlay = null;
-    let s2IdleListener = null;
     let darkMode = false;
+    let mapTypeListenerBound = false;
 
     // Initialize default settings
     let userSettings = {
@@ -77,6 +75,9 @@
                 lineWidth: 2,
                 lineOpacity: 1.0
             }
+        },
+        map: {
+            defaultType: "roadmap"
         }
     };
 
@@ -913,8 +914,6 @@
         for (const poi of window.currentPois) {
             upsertPoiMarker(poi);
         }
-
-        poiMarkers = Object.values(markersByGuid).map(e => e.marker);
     }
 
     function updatePoiRadiusCircle() {
@@ -1053,21 +1052,21 @@
         }
     }
 
-function createOverlay(poi) {
-    const title = escapeHtml(poi.title);
-    const desc  = escapeHtml(poi.description || "");
-    const latStr = poi.lat.toFixed(6);
-    const lngStr = poi.lng.toFixed(6);
+    function createOverlay(poi) {
+        const title = escapeHtml(poi.title);
+        const desc  = escapeHtml(poi.description || "");
+        const latStr = poi.lat.toFixed(6);
+        const lngStr = poi.lng.toFixed(6);
 
-    const iwImgUrl  = poi.imageUrl + "=w240"; // preview
-    const fullImgUrl = poi.imageUrl + "=s0";  // open full size
+        const iwImgUrl  = poi.imageUrl + "=w240"; // preview
+        const fullImgUrl = poi.imageUrl + "=s0";  // open full size
 
-    // Inline styles to override site styles when needed
-    const titleStyle = darkMode ? 'color:#000;' : '';
-    const descStyle  = darkMode ? 'color:#000;' : '';
-    const coordStyle = darkMode ? 'color:#333;' : 'color: inherit;';
+        // Inline styles to override site styles when needed
+        const titleStyle = darkMode ? 'color:#000;' : '';
+        const descStyle  = darkMode ? 'color:#000;' : '';
+        const coordStyle = darkMode ? 'color:#333;' : 'color: inherit;';
 
-    return `
+        return `
         <div class="agm-info-window-content">
             <div class="wf-nearby-iw-content flex flex-col max-w-[240px]">
 
@@ -1110,7 +1109,7 @@ function createOverlay(poi) {
             </div>
         </div>
     `;
-}
+    }
 
     async function onPoisFetched() {
         if (!submitMap) {
@@ -1118,11 +1117,23 @@ function createOverlay(poi) {
 
             // Remove clickable POIs
             submitMap.setOptions({
-                clickableIcons: false,  // disables click areas on POIs
+                clickableIcons: false,
             });
+
+            // Add listener for base map changes
+            if (!mapTypeListenerBound) {
+                mapTypeListenerBound = true;
+                submitMap.addListener("maptypeid_changed", () => {
+                    const id = submitMap.getMapTypeId();
+                    userSettings.map = userSettings.map || {};
+                    userSettings.map.defaultType = id;
+                    saveUserSettings();
+                });
+            }
 
             injectSearchBox();
             initS2Overlay();
+            initCustomBaseMaps();
         }
 
         updatePoisOnMap();
@@ -1193,6 +1204,86 @@ function createOverlay(poi) {
         });
     }
 
+    function initCustomBaseMaps() {
+        if (!submitMap) return;
+        if (submitMap._wfsmmBasemapsInitialised) return;
+        submitMap._wfsmmBasemapsInitialised = true;
+
+        let mapTypeControlOptions = {
+            style: google.maps.MapTypeControlStyle.DROPDOWN_MENU,
+            position: google.maps.ControlPosition.TOP_RIGHT,
+            mapTypeIds: ["roadmap", "satellite", "hybrid"]
+        };
+
+        // Add extra services
+        mapTypeControlOptions = setupMapLayer(
+            submitMap, mapTypeControlOptions,
+            "Bing", 19, 0,
+            "https://t0.tiles.virtualearth.net/tiles/a{quadKey}.jpeg?g=1398"
+        );
+        mapTypeControlOptions = setupMapLayer(
+            submitMap, mapTypeControlOptions,
+            "Esri", 19, 0,
+            "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+        );
+        mapTypeControlOptions = setupMapLayer(
+            submitMap, mapTypeControlOptions,
+            "Esri Clarity", 19, 0,
+            "https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+        );
+        mapTypeControlOptions = setupMapLayer(
+            submitMap, mapTypeControlOptions,
+            "OSM", 20, 0,
+            "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+        );
+
+        submitMap.setOptions({
+            mapTypeControl: true,
+            mapTypeControlOptions
+        });
+
+        const savedType = userSettings.map && userSettings.map.defaultType;
+        const preferredType = savedType || "roadmap";
+
+        const hasType = submitMap.mapTypes && submitMap.mapTypes.get(preferredType);
+        if (hasType) {
+            submitMap.setMapTypeId(preferredType);
+        } else {
+            submitMap.setMapTypeId("roadmap");
+        }
+    }
+
+    function setupMapLayer(map, mapTypeControlOptions, name, maxZoom, minZoom, url) {
+        const mapType = new google.maps.ImageMapType({
+            getTileUrl: function (coord, zoom) {
+                const normalizedCoord = getNormalizedCoord(coord, zoom);
+                if (!normalizedCoord) return "";
+
+                if (name === "Bing") {
+                    const quadKey = getBingMapsQuadKey(normalizedCoord.x, normalizedCoord.y, zoom);
+                    return url.replace("{quadKey}", quadKey);
+                } else {
+                    return url
+                        .replace("{z}", zoom)
+                        .replace("{x}", normalizedCoord.x)
+                        .replace("{y}", normalizedCoord.y);
+                }
+            },
+            tileSize: new google.maps.Size(256, 256),
+            maxZoom: maxZoom,
+            minZoom: minZoom,
+            radius: 1738000,
+            name: name
+        });
+
+        if (!mapTypeControlOptions.mapTypeIds.includes(name)) {
+            mapTypeControlOptions.mapTypeIds.push(name);
+        }
+
+        map.mapTypes.set(name, mapType);
+
+        return mapTypeControlOptions;
+    }
 
     class S2Overlay {
         constructor() {
@@ -1404,6 +1495,37 @@ function createOverlay(poi) {
               Math.sin(dLng / 2) * Math.sin(dLng / 2);
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return R * c;
+    }
+
+    function getBingMapsQuadKey(x, y, z) {
+        let quadKey = "";
+        for (let i = z; i > 0; i--) {
+            let digit = 0;
+            const mask = 1 << (i - 1);
+            if ((x & mask) !== 0) digit += 1;
+            if ((y & mask) !== 0) digit += 2;
+            quadKey += digit;
+        }
+        return quadKey;
+    }
+
+    // Normalises the coords so tiles repeat across the x axis (horizontally)
+    function getNormalizedCoord(coord, zoom) {
+        const y = coord.y;
+        let x = coord.x;
+
+        const tileRange = 1 << zoom;
+
+        // don't repeat across y-axis
+        if (y < 0 || y >= tileRange) {
+            return null;
+        }
+
+        // repeat across x-axis
+        if (x < 0 || x >= tileRange) {
+            x = ((x % tileRange) + tileRange) % tileRange;
+        }
+        return { x, y };
     }
 
     function hexToRgba(hex, opacity) {
