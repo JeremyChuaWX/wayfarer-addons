@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.16
+// @version      0.0.17
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -41,6 +41,8 @@
     let s2Overlay = null;
     let darkMode = false;
     let mapTypeListenerBound = false;
+    let latLngObserver = null;
+    let latLngTargetEl = null;
 
     // Initialize default settings
     let userSettings = {
@@ -78,7 +80,8 @@
             }
         },
         map: {
-            defaultType: "roadmap"
+            defaultType: "roadmap",
+            rememberLastView: true,
         }
     };
 
@@ -87,7 +90,7 @@
 
     function init() {
         injectMarkerCss();
-        initLatLngObserver();
+        initLatLngElementWatcher();
         getSubmitMap();
         initUploadExifWatcher();
     }
@@ -177,14 +180,65 @@
                 const descriptionDiv = document.createElement('div');
                 descriptionDiv.classList.add('settings-item__description');
 
+
+                // -----------------------
+                // MAP BEHAVIOUR SETTINGS
+                // -----------------------
+                const mapHeader = document.createElement('div');
+                mapHeader.textContent = 'Map behaviour';
+                mapHeader.style.fontWeight = '600';
+                mapHeader.style.margin = '12px 0 6px 0';
+                mapHeader.style.fontWeight = "600";
+                mapHeader.style.fontSize = "16px";
+                mapHeader.style.marginBottom = "10px";
+
+                const mapDescription = document.createElement('div');
+                mapDescription.textContent = 'Choose whether the submission map should restore to your last viewed location.';
+                mapDescription.style.marginBottom = '8px';
+                mapDescription.style.fontSize = '12px';
+                mapDescription.style.opacity = '0.8';
+
+                // Checkbox row
+                const mapRow = document.createElement('label');
+                mapRow.style.display = 'flex';
+                mapRow.style.alignItems = 'center';
+                mapRow.style.gap = '8px';
+                mapRow.style.fontSize = '13px';
+
+                const rememberCheckbox = document.createElement('input');
+                rememberCheckbox.type = 'checkbox';
+                rememberCheckbox.checked = !!(userSettings.map && userSettings.map.rememberLastView);
+
+                if (darkMode) {
+                    rememberCheckbox.style.accentColor = '#f97316'; // orange, optional
+                }
+
+                rememberCheckbox.addEventListener('change', () => {
+                    if (!userSettings.map) userSettings.map = {};
+                    userSettings.map.rememberLastView = rememberCheckbox.checked;
+                    saveUserSettings();
+                });
+
+                const rememberLabelText = document.createElement('span');
+                rememberLabelText.textContent = 'Remember last map view (center + zoom)';
+
+                mapRow.appendChild(rememberCheckbox);
+                mapRow.appendChild(rememberLabelText);
+
+                descriptionDiv.appendChild(mapHeader);
+                descriptionDiv.appendChild(mapDescription);
+                descriptionDiv.appendChild(mapRow);
+
+
                 // -----------------------
                 // POI MARKER SETTINGS
                 // -----------------------
                 const poiHeader = document.createElement('div');
                 poiHeader.textContent = 'POI markers';
                 poiHeader.style.fontWeight = '600';
-                poiHeader.style.marginBottom = '6px';
-                poiHeader.style.marginTop = '4px';
+                poiHeader.style.marginBottom = '10px';
+                poiHeader.style.marginTop = '25px';
+                poiHeader.style.fontSize = "16px";
 
                 const poiDescription = document.createElement('div');
                 poiDescription.textContent = 'How would you like POIs to appear on the submission map?';
@@ -535,7 +589,9 @@
                 const s2Header = document.createElement('div');
                 s2Header.textContent = 'S2 Grid';
                 s2Header.style.fontWeight = '600';
-                s2Header.style.margin = '12px 0 6px 0';
+                s2Header.style.marginBottom = '10px';
+                s2Header.style.marginTop = '25px';
+                s2Header.style.fontSize = "16px";
 
                 const s2Description = document.createElement('div');
                 s2Description.textContent = 'Configure the S2 grid overlays for the submission map.';
@@ -862,9 +918,21 @@
         // Find the coordinates from the lat,lng displayed above the map
         const el = findLatLngDiv();
         if (!el) {
-            setTimeout(initLatLngObserver, 500);
             return;
         }
+
+        // If we're already observing this exact element, do nothing
+        if (latLngTargetEl === el && latLngObserver) {
+            return;
+        }
+
+        // If we had an old observer, disconnect it
+        if (latLngObserver) {
+            latLngObserver.disconnect();
+            latLngObserver = null;
+        }
+
+        latLngTargetEl = el;
 
         let lastText = el.textContent.trim();
         const initialCoords = parseLatLng(lastText);
@@ -876,7 +944,16 @@
         }
 
         // Check for when the coordinates change, i.e. marker is moved
-        const observer = new MutationObserver(() => {
+        latLngObserver = new MutationObserver(() => {
+            // If this element got detached, bail; the watcher below will re-init on a new one
+            if (!document.body.contains(el)) {
+                if (latLngObserver) {
+                    latLngObserver.disconnect();
+                    latLngObserver = null;
+                }
+                return;
+            }
+
             const newText = el.textContent.trim();
             if (newText === lastText) return;
             lastText = newText;
@@ -887,11 +964,31 @@
             handleLatLngChange(coords.lat, coords.lng);
         });
 
-        observer.observe(el, {
+        latLngObserver.observe(el, {
             childList: true,
             subtree: true,
             characterData: true
         });
+    }
+
+    function initLatLngElementWatcher() {
+        const bodyObserver = new MutationObserver(() => {
+            const el = findLatLngDiv();
+
+            // If we find a lat/lng element that's different from our current target,
+            // re-run initLatLngObserver to attach to it.
+            if (el && el !== latLngTargetEl) {
+                initLatLngObserver();
+            }
+        });
+
+        bodyObserver.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+
+        // Also attempt initial attach in case map is already there
+        initLatLngObserver();
     }
 
     function handleLatLngChange(newLat, newLng) {
@@ -904,7 +1001,7 @@
         }
 
         // Marker must move a certain distance before loading new POIs
-        // Defaults to 10% of POI radius (i.e. 40 metres)
+        // Defaults to 25% of POI radius (i.e. 50 metres)
         // Prevents spamming calls to server for minor pin movements
         const dist = distanceMeters(lastFetchLat, lastFetchLng, newLat, newLng);
         if (dist > poiMovementThreshold) {
@@ -1250,15 +1347,21 @@
     }
 
     async function onPoisFetched() {
-        if (!submitMap) {
+        // Treat stale map as "no map"
+        if (!submitMap || isMapStale()) {
             submitMap = await getSubmitMap();
+            if (!submitMap) {
+                console.warn("WFSMM: getSubmitMap() returned null");
+                return;
+            }
 
             // Remove clickable icons from Google Maps
             submitMap.setOptions({
                 clickableIcons: false,
+                cameraControl: false,
             });
 
-            // Add listener for base map changes
+            // Base map (map type) change listener
             if (!mapTypeListenerBound) {
                 mapTypeListenerBound = true;
                 submitMap.addListener("maptypeid_changed", () => {
@@ -1269,6 +1372,18 @@
                 });
             }
 
+            // Restore previous view if we have one and the user wants it
+            restoreMapViewIfAny();
+
+            // Whenever the map stops moving, remember the view
+            submitMap.addListener("idle", () => {
+                // always allowed to save; only restore is gated by your setting
+                saveMapView();
+            });
+
+            addGeolocationControl(submitMap);
+            initUserLocationMarker(submitMap);
+
             injectSearchBox();
             initS2Overlay();
             initCustomBaseMaps();
@@ -1276,6 +1391,235 @@
 
         updatePoisOnMap();
     }
+
+    function addGeolocationControl(map) {
+        const controlDiv = document.createElement("div");
+
+        // Styling similar to Google Maps own button
+        controlDiv.style.background = "white";
+        controlDiv.style.border = "2px solid #fff";
+        controlDiv.style.borderRadius = "3px";
+        controlDiv.style.boxShadow = "0 2px 6px rgba(0,0,0,0.3)";
+        controlDiv.style.cursor = "pointer";
+        controlDiv.style.margin = "10px";
+        controlDiv.style.width = "36px";
+        controlDiv.style.height = "36px";
+        controlDiv.style.display = "flex";
+        controlDiv.style.alignItems = "center";
+        controlDiv.style.justifyContent = "center";
+
+        // Icon (simple target icon)
+        controlDiv.innerHTML = `
+    <div style="
+        position: relative;
+        width: 20px;
+        height: 20px;
+    ">
+        <!-- Outer circle -->
+        <div style="
+            width: 16px;
+            height: 16px;
+            border: 2px solid #666;
+            border-radius: 50%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        "></div>
+
+        <!-- Horizontal crosshair lines (with gap near center) -->
+        <div style="
+            position: absolute;
+            top: 50%;
+            left: 0;
+            width: calc(50% - 5px);
+            height: 2px;
+            background: #666;
+            transform: translateY(-50%);
+        "></div>
+        <div style="
+            position: absolute;
+            top: 50%;
+            right: 0;
+            width: calc(50% - 5px);
+            height: 2px;
+            background: #666;
+            transform: translateY(-50%);
+        "></div>
+
+        <!-- Vertical crosshair lines (with gap near center) -->
+        <div style="
+            position: absolute;
+            left: 50%;
+            top: 0;
+            height: calc(50% - 5px);
+            width: 2px;
+            background: #666;
+            transform: translateX(-50%);
+        "></div>
+        <div style="
+            position: absolute;
+            left: 50%;
+            bottom: 0;
+            height: calc(50% - 5px);
+            width: 2px;
+            background: #666;
+            transform: translateX(-50%);
+        "></div>
+
+        <!-- Center dot -->
+        <div style="
+            width: 6px;
+            height: 6px;
+            background: #666;
+            border-radius: 50%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        "></div>
+    </div>
+`;
+        controlDiv.title = "Show my location";
+
+        controlDiv.addEventListener("click", () => {
+            triggerGeolocation(map);
+        });
+
+        map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(controlDiv);
+    }
+
+    let userLocationMarker = null;
+
+    function initUserLocationMarker(map) {
+        userLocationMarker = new google.maps.Marker({
+            map,
+            clickable: false,
+            zIndex: 9999,
+            icon: {
+                path: google.maps.SymbolPath.CIRCLE,
+                scale: 8,
+                fillColor: '#4285F4',
+                fillOpacity: 0.9,
+                strokeColor: 'white',
+                strokeWeight: 2
+            }
+        });
+
+        // Hide by default until we have a position
+        userLocationMarker.setVisible(false);
+    }
+
+    function triggerGeolocation(map) {
+        if (!navigator.geolocation) {
+            console.warn("WFSMM: Geolocation not supported");
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                const lat = pos.coords.latitude;
+                const lng = pos.coords.longitude;
+
+                const latLng = new google.maps.LatLng(lat, lng);
+
+                // Move the user-location blue dot
+                userLocationMarker.setPosition(latLng);
+                userLocationMarker.setVisible(true);
+
+                // Center map smoothly
+                map.panTo(latLng);
+                map.setZoom(Math.max(map.getZoom(), 17));
+            },
+            (err) => {
+                console.warn("WFSMM: Geolocation failed:", err.message);
+            },
+            {
+                enableHighAccuracy: true,
+                maximumAge: 5000,
+                timeout: 8000
+            }
+        );
+    }
+
+    const MAP_VIEW_KEY = "wfsmm-map-view";
+
+    function saveMapView() {
+        try {
+            if (!submitMap || typeof google === "undefined" || !google.maps) return;
+
+            const center = submitMap.getCenter();
+            if (!center) return;
+
+            const zoom = submitMap.getZoom();
+
+            const data = {
+                lat: center.lat(),
+                lng: center.lng(),
+                zoom: typeof zoom === "number" ? zoom : null
+            };
+
+            localStorage.setItem(MAP_VIEW_KEY, JSON.stringify(data));
+        } catch (e) {
+            console.warn("WFSMM: Failed to save map view:", e);
+        }
+    }
+
+    function loadSavedMapView() {
+        try {
+            const raw = localStorage.getItem(MAP_VIEW_KEY);
+            if (!raw) return null;
+
+            const parsed = JSON.parse(raw);
+            if (!parsed) return null;
+
+            const lat = parseFloat(parsed.lat);
+            const lng = parseFloat(parsed.lng);
+            const zoom = parsed.zoom != null ? parseInt(parsed.zoom, 10) : null;
+
+            if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
+
+            return { lat, lng, zoom };
+        } catch (e) {
+            console.warn("WFSMM: Failed to load map view:", e);
+            return null;
+        }
+    }
+
+    function restoreMapViewIfAny() {
+        if (!userSettings.map || !userSettings.map.rememberLastView) return;
+        if (!submitMap) return;
+
+        const raw = localStorage.getItem(MAP_VIEW_KEY);
+        if (!raw) return;
+
+        let parsed;
+        try {
+            parsed = JSON.parse(raw);
+        } catch (e) {
+            console.warn("WFSMM: Failed to parse saved map view:", e);
+            return;
+        }
+
+        const lat = parseFloat(parsed.lat);
+        const lng = parseFloat(parsed.lng);
+        const zoom = parsed.zoom != null ? parseInt(parsed.zoom, 10) : null;
+
+        if (Number.isNaN(lat) || Number.isNaN(lng)) return;
+
+        const latLng = new google.maps.LatLng(lat, lng);
+
+        // 1) Move the camera
+        submitMap.setCenter(latLng);
+        if (typeof zoom === "number" && !Number.isNaN(zoom)) {
+            submitMap.setZoom(zoom);
+        }
+
+        // 2) Simulate a click at this location so Wayfarer moves the pin
+        //    and your lat/lng observer + POI fetch pipeline run.
+        google.maps.event.trigger(submitMap, "click", { latLng });
+    }
+
 
     function injectSearchBox() {
         if (!submitMap) return;
@@ -1443,6 +1787,63 @@
         return mapTypeControlOptions;
     }
 
+    function isMapStale() {
+        if (!submitMap || !submitMap.getDiv) return true;
+
+        const div = submitMap.getDiv();
+        if (!div) return true;
+
+        // If the map's DOM container is no longer attached, this is a stale map
+        if (!document.body.contains(div)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    function resetMapState() {
+        try {
+            // Clear POI markers
+            for (const guid in markersByGuid) {
+                const entry = markersByGuid[guid];
+                if (entry && entry.marker) {
+                    entry.marker.setMap(null);
+                }
+            }
+            markersByGuid = {};
+
+            // Radius circle
+            if (poiRadiusCircle) {
+                poiRadiusCircle.setMap(null);
+                poiRadiusCircle = null;
+            }
+
+            // InfoWindow
+            if (poiInfoWindow) {
+                poiInfoWindow.close();
+                poiInfoWindow = null;
+            }
+
+            // S2 overlay
+            if (s2Overlay) {
+                s2Overlay.clear();
+                s2Overlay = null;
+            }
+
+            // S2 idle listener
+            if (s2IdleListener && google && google.maps && google.maps.event) {
+                google.maps.event.removeListener(s2IdleListener);
+            }
+            s2IdleListener = null;
+
+            // You might also want to clear your user-location marker, etc.,
+            // depending on how you implemented it.
+        } catch (e) {
+            console.warn("WFSMM: error while resetting map state:", e);
+        }
+
+        submitMap = null;
+    }
     class S2Overlay {
         constructor() {
             this.polyLines = [];
