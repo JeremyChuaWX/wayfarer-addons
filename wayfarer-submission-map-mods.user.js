@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.21
+// @version      0.0.22
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -48,6 +48,10 @@
     let crosshair = null;
     let CenterPinOverlay = null;
     let centerPinOverlay = null;
+    const POI_CELL_LEVEL = 17;
+    let poiCellPolygons = [];
+    let s2IdleListener = null;
+    let poiCellZoomListener = null;
 
     // Debug tool - change to true to enable
     let enableCrosshairs = false;
@@ -92,6 +96,11 @@
                 color: "#FF0000",
                 lineWidth: 2,
                 lineOpacity: 1.0
+            },
+            poiCells: {
+                enabled: true,
+                color: "#000000",
+                fillOpacity: 0.2
             }
         },
         map: {
@@ -747,6 +756,124 @@
                 table.querySelectorAll("td").forEach(td => td.style.textAlign = "center");
                 table.querySelectorAll("input").forEach(input => input.style.textAlign = "center");
 
+                // -----------------------
+                // OCCUPIED S2 CELL SHADING
+                // -----------------------
+                const cellShadeHeader = document.createElement('div');
+                cellShadeHeader.textContent = 'Occupied S2 cells';
+                cellShadeHeader.style.fontWeight = '600';
+                cellShadeHeader.style.marginTop = '20px';
+                cellShadeHeader.style.marginBottom = '6px';
+                cellShadeHeader.style.fontSize = '16px';
+
+                const cellShadeDescription = document.createElement('div');
+                cellShadeDescription.textContent = 'Shade level 17 S2 cells that contain nearby wayspots.';
+                cellShadeDescription.style.marginBottom = '8px';
+                cellShadeDescription.style.fontSize = '12px';
+                cellShadeDescription.style.opacity = '0.8';
+
+                const row1 = document.createElement('div');
+                row1.style.display = 'flex';
+                row1.style.alignItems = 'center';
+                row1.style.gap = '8px';
+                row1.style.marginBottom = '10px';
+
+                const shadeToggle = document.createElement('input');
+                shadeToggle.type = 'checkbox';
+                shadeToggle.checked = !!(userSettings.s2 && userSettings.s2.poiCells?.enabled);
+
+                shadeToggle.addEventListener('change', () => {
+                    userSettings.s2.poiCells.enabled = shadeToggle.checked;
+                    saveUserSettings();
+                    shadePoiCells();
+                });
+
+                const shadeToggleText = document.createElement('span');
+                shadeToggleText.textContent = 'Enable shading of occupied L17 cells';
+
+                row1.appendChild(shadeToggle);
+                row1.appendChild(shadeToggleText);
+
+                const row2 = document.createElement('div');
+                row2.style.display = 'flex';
+                row2.style.alignItems = 'center';
+                row2.style.gap = '16px';
+                row2.style.flexWrap = 'wrap';
+
+                const shadeColorLabel = document.createElement('label');
+                shadeColorLabel.style.display = 'flex';
+                shadeColorLabel.style.alignItems = 'center';
+                shadeColorLabel.style.gap = '6px';
+
+                const shadeColorInput = document.createElement('input');
+                shadeColorInput.type = 'color';
+                shadeColorInput.value = userSettings.s2.poiCells.color || "#000000";
+
+                shadeColorInput.addEventListener('input', () => {
+                    userSettings.s2.poiCells.color = shadeColorInput.value;
+                    saveUserSettings();
+                    shadePoiCells();
+                });
+
+                if (darkMode) {
+                    shadeColorInput.style.backgroundColor = '#fff';
+                }
+
+                const shadeColorText = document.createElement('span');
+                shadeColorText.textContent = 'Fill colour';
+
+                shadeColorLabel.appendChild(shadeColorInput);
+                shadeColorLabel.appendChild(shadeColorText);
+
+                // --- opacity input ---
+                const shadeOpacityLabel = document.createElement('label');
+                shadeOpacityLabel.style.display = 'flex';
+                shadeOpacityLabel.style.alignItems = 'center';
+                shadeOpacityLabel.style.gap = '6px';
+
+                const shadeOpacityInput = document.createElement('input');
+                shadeOpacityInput.type = 'number';
+                shadeOpacityInput.min = '0';
+                shadeOpacityInput.max = '1';
+                shadeOpacityInput.step = '0.1';
+                shadeOpacityInput.style.width = '70px';
+
+                const initialOpacity = typeof userSettings.s2.poiCells.fillOpacity === "number"
+                ? userSettings.s2.poiCells.fillOpacity
+                : 0.2;
+
+                shadeOpacityInput.value = initialOpacity;
+
+                if (darkMode) {
+                    shadeOpacityInput.style.backgroundColor = '#fff';
+                    shadeOpacityInput.style.color = '#000';
+                }
+
+                shadeOpacityInput.addEventListener('change', () => {
+                    let val = parseFloat(shadeOpacityInput.value);
+                    if (isNaN(val)) val = 0.2;
+                    val = Math.max(0, Math.min(1, val));
+
+                    userSettings.s2.poiCells.fillOpacity = val;
+                    shadeOpacityInput.value = val;
+                    saveUserSettings();
+                    shadePoiCells();
+                });
+
+                const shadeOpacityText = document.createElement('span');
+                shadeOpacityText.textContent = 'Fill opacity';
+
+                shadeOpacityLabel.appendChild(shadeOpacityInput);
+                shadeOpacityLabel.appendChild(shadeOpacityText);
+
+                row2.appendChild(shadeColorLabel);
+                row2.appendChild(shadeOpacityLabel);
+
+                descriptionDiv.appendChild(cellShadeHeader);
+                descriptionDiv.appendChild(cellShadeDescription);
+                descriptionDiv.appendChild(row1);
+                descriptionDiv.appendChild(row2);
+
                 newSettingsItem.appendChild(headerDiv);
                 newSettingsItem.appendChild(valueDiv);
                 newSettingsItem.appendChild(descriptionDiv);
@@ -1284,6 +1411,9 @@
         for (const poi of window.currentPois) {
             upsertPoiMarker(poi);
         }
+
+        shadePoiCells();
+
     }
 
     function updatePoiRadiusCircle() {
@@ -1506,6 +1636,32 @@
         // Treat stale map as "no map"
         if (!submitMap || isMapStale()) {
             mapClickCloseBound = false;
+
+            if (poiRadiusCircle) {
+                poiRadiusCircle.setMap(null);
+                poiRadiusCircle = null;
+            }
+
+            if (s2Overlay) {
+                s2Overlay.clear();
+                s2Overlay = null;
+            }
+
+            if (s2IdleListener) {
+                google.maps.event.removeListener(s2IdleListener);
+                s2IdleListener = null;
+            }
+
+            if (poiCellPolygons && poiCellPolygons.length) {
+                poiCellPolygons.forEach(poly => poly.setMap && poly.setMap(null));
+                poiCellPolygons = [];
+            }
+
+            if (poiCellZoomListener) {
+                google.maps.event.removeListener(poiCellZoomListener);
+                poiCellZoomListener = null;
+            }
+
             submitMap = await getSubmitMap();
             if (!submitMap) {
                 console.warn("WFSMM: getSubmitMap() returned null");
@@ -1519,13 +1675,7 @@
                 fullscreenControl: true,
             });
 
-            // If we're currently in mobile mode, use our own center pin
-            if (currentMapMode === MAP_MODE.MOBILE) {
-                hideNativeCenterPin();
-                ensureCenterPinOverlay();
-            }
-
-            // Base map (map type) change listener
+            // Base map change listener, restore view, etc...
             if (!mapTypeListenerBound) {
                 mapTypeListenerBound = true;
                 submitMap.addListener("maptypeid_changed", () => {
@@ -1536,12 +1686,9 @@
                 });
             }
 
-            // Restore previous view if we have one and the user wants it
             restoreMapViewIfAny();
 
-            // Whenever the map stops moving, remember the view
             submitMap.addListener("idle", () => {
-                // always allowed to save; only restore is gated by your setting
                 saveMapView();
             });
 
@@ -1552,9 +1699,12 @@
             initS2Overlay();
             initCustomBaseMaps();
 
+            poiCellZoomListener = submitMap.addListener("zoom_changed", () => {
+                shadePoiCells();
+            });
+
             if (!mapClickCloseBound) {
                 mapClickCloseBound = true;
-
                 submitMap.addListener("click", () => {
                     if (poiInfoWindow) {
                         poiInfoWindow.close();
@@ -1565,6 +1715,7 @@
 
         updatePoisOnMap();
     }
+
 
     function addGeolocationControl(map) {
         const controlDiv = document.createElement("div");
@@ -2209,6 +2360,78 @@
         // Redraw according to current userSettings
         drawS2Grid();
     }
+
+    function clearPoiCellPolygons() {
+        if (!poiCellPolygons.length) return;
+
+        poiCellPolygons.forEach(poly => {
+            if (poly && poly.setMap) {
+                poly.setMap(null);
+            }
+        });
+        poiCellPolygons = [];
+    }
+
+    function shadePoiCells() {
+        if (!submitMap || !window.currentPois || !window.currentPois.length) {
+            clearPoiCellPolygons();
+            return;
+        }
+
+        const s2Settings = userSettings.s2 && userSettings.s2.poiCells;
+        if (!s2Settings || !s2Settings.enabled) {
+            clearPoiCellPolygons();
+            return;
+        }
+
+        const zoom = submitMap.getZoom();
+        if (typeof zoom === "number" && zoom <= 15) {
+            clearPoiCellPolygons();
+            return;
+        }
+
+        clearPoiCellPolygons();
+
+        const seen = new Set();
+        const fillColor = s2Settings.color || "#000000";
+        const fillOpacity = (typeof s2Settings.fillOpacity === "number")
+        ? s2Settings.fillOpacity
+        : 0.2;
+
+        for (const poi of window.currentPois) {
+            if (typeof poi.lat !== "number" || typeof poi.lng !== "number") continue;
+
+            const cell = S2.S2Cell.FromLatLng(
+                { lat: poi.lat, lng: poi.lng },
+                POI_CELL_LEVEL
+            );
+
+            const cellId = cell.toString();
+            if (seen.has(cellId)) continue;
+            seen.add(cellId);
+
+            const corners = cell.getCornerLatLngs();
+            const path = corners.map(c => ({
+                lat: typeof c.lat === "function" ? c.lat() : c.lat,
+                lng: typeof c.lng === "function" ? c.lng() : c.lng
+            }));
+            path.push(path[0]);
+
+            const poly = new google.maps.Polygon({
+                map: submitMap,
+                paths: path,
+                strokeColor: fillColor,
+                strokeOpacity: 0.7,
+                strokeWeight: 1,
+                fillColor: fillColor,
+                fillOpacity: fillOpacity,
+                clickable: false,
+            });
+
+            poiCellPolygons.push(poly);
+        }
+    }
+
 
     function escapeHtml(str) {
         if (!str) return "";
