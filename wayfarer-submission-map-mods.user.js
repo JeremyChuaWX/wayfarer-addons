@@ -983,7 +983,6 @@
         // If entering MOBILE mode, recenter map on current lat/lng
         // This is to prevent misalignment between coordinates and pin
         if (newMode === MAP_MODE.MOBILE) {
-            console.log('new mobile mode');
             hideNativeCenterPin();
             ensureCenterPinOverlay();
 
@@ -1013,7 +1012,6 @@
 
             if (newMode === MAP_MODE.MOBILE) {
                 // Hide Niantic's overlay and use our own
-                console.log('new mobile mode from initMapWater');
                 hideNativeCenterPin();
                 ensureCenterPinOverlay();
 
@@ -1043,7 +1041,6 @@
 
             // If we’re in mobile mode and Niantic recreates the overlay, hide it again
             if (centerPinTouched && currentMapMode === MAP_MODE.MOBILE) {
-                console.log('mobile mode from initmodemap water part 2');
                 hideNativeCenterPin();
                 ensureCenterPinOverlay();
             }
@@ -2721,14 +2718,10 @@
     }
 
     function ensureCenterPinOverlay() {
-        console.log('ensureCenterPinOverlay is being called')
         if (!submitMap) return;
-        console.log('found the submit map');
         if (!ensureCenterPinClass()) return;
-        console.log('there is a center pin class');
 
         if (!centerPinOverlay) {
-            console.log('making new CenterPinOverlay')
             centerPinOverlay = new CenterPinOverlay(submitMap);
         }
     }
