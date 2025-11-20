@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map
-// @version      0.0.1
+// @version      0.0.2
 // @description  Provides a link to a map in the Wayfarer menu
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-map.user.js
@@ -34,6 +34,7 @@
     // -------------------------------------------------------------------------
 
     let observer = null;
+    let pinnedWarningObserver = null;
 
     // Persisted flag: did we navigate to /new/submit/new via the Map button?
     let navigatedFromMap = sessionStorage.getItem('wf_map_nav') === '1';
@@ -119,6 +120,37 @@
         // Re-adjust after Google Maps initializes (extra-safe)
         setTimeout(adjustHeight, 200);
         setTimeout(adjustHeight, 500);
+    }
+
+    function suppressPinnedLocationWarningsIfMapMode() {
+        const fromMap = sessionStorage.getItem('wf_map_nav') === '1';
+        const onMapPage = location.pathname === '/new/submit/new';
+
+        if (!fromMap || !onMapPage) return;
+
+        const nodes = document.querySelectorAll('div.mt-2.text-sm.text-red-600');
+        nodes.forEach((el) => {
+            const text = (el.textContent || '').trim();
+            if (text.startsWith('Pinned location must be within 10 km')) {
+                el.remove();
+            }
+        });
+    }
+
+    function startPinnedWarningSuppressor() {
+        if (pinnedWarningObserver) return;
+
+        pinnedWarningObserver = new MutationObserver(() => {
+            suppressPinnedLocationWarningsIfMapMode();
+        });
+
+        pinnedWarningObserver.observe(document.body, {
+            childList: true,
+            subtree: true,
+        });
+
+        // Clean up anything already rendered
+        suppressPinnedLocationWarningsIfMapMode();
     }
 
     // -------------------------------------------------------------------------
@@ -325,6 +357,9 @@
 
             // Also keep it in sync on window resizes
             window.addEventListener('resize', resizeSubmitMapToViewport);
+
+            // Start suppressing "pinned location" warnings only in Map mode
+            startPinnedWarningSuppressor();
         }, 150);
     }
 
