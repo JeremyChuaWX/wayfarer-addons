@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.20
+// @version      0.0.21
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -1800,14 +1800,44 @@
         const coordsDiv = findLatLngDiv();
         let headerRow = coordsDiv?.closest("div.flex.items-center") ?? null;
 
+        if (!headerRow) return;
+
+        headerRow.style.display = "flex";
+        headerRow.style.flexWrap = "wrap";
+        headerRow.style.alignItems = "flex-start";
+
+        const infoContainer = coordsDiv && coordsDiv.parentElement;
+        if (infoContainer) {
+            infoContainer.style.flex = "1 1 auto";
+            infoContainer.style.minWidth = "0";
+        }
+
+        const addressDiv = infoContainer
+        ? infoContainer.querySelector(".font-medium.text-gray-800")
+        : null;
+
+        if (addressDiv) {
+            addressDiv.style.whiteSpace = "nowrap";
+            addressDiv.style.overflow = "hidden";
+            addressDiv.style.textOverflow = "ellipsis";
+            addressDiv.style.display = "block";
+            addressDiv.style.width = "360px";
+        }
+
         const wrapper = document.createElement("div");
-        wrapper.style.display = "flex";
-        wrapper.style.flexDirection = "column";
-        wrapper.style.position = "relative";
-        wrapper.style.marginLeft = "12px";
-        wrapper.style.flexGrow = "1";
-        wrapper.style.maxWidth = "500px";
-        wrapper.style.flexShrink = "1";
+
+        Object.assign(wrapper.style, {
+            display: "flex",
+            flexDirection: "column",
+            position: "relative",
+            marginLeft: "12px",
+            marginTop: "4px",
+            flexGrow: "1",
+            flexShrink: "1",
+            flexBasis: "400px",
+            minWidth: "350px",
+            maxWidth: "100%",
+        });
 
         const label = document.createElement("span");
         label.innerText = "Search";
@@ -1829,7 +1859,6 @@
         input.placeholder = "Search places or coordinates…";
 
         Object.assign(input.style, {
-            maxWidth: "500px",
             width: "100%",
             height: "35px",
             background: "transparent",
@@ -1844,12 +1873,7 @@
 
         wrapper.appendChild(label);
         wrapper.appendChild(input);
-
-        if (headerRow) {
-            headerRow.appendChild(wrapper);
-        } else {
-            return;
-        }
+        headerRow.appendChild(wrapper);
 
         try {
             const autocomplete = new google.maps.places.Autocomplete(input, {
