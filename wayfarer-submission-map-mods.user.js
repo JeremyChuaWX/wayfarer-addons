@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.19
+// @version      0.0.20
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -43,6 +43,21 @@
     let mapTypeListenerBound = false;
     let latLngObserver = null;
     let latLngTargetEl = null;
+    let mapClickCloseBound = false;
+    let Crosshair = null;
+    let crosshair = null;
+    let CenterPinOverlay = null;
+    let centerPinOverlay = null;
+
+    // Debug tool - change to true to enable
+    let enableCrosshairs = false;
+
+    const MAP_MODE = {
+        MOBILE: "mobile",
+        DESKTOP: "desktop"
+    };
+
+    let currentMapMode = null;
 
     // Initialize default settings
     let userSettings = {
@@ -94,6 +109,7 @@
         getSubmitMap();
         initUploadExifWatcher();
         initWayspotImageEntryWatcher();
+        initMapModeWatcher();
     }
 
     (function (open) {
@@ -760,8 +776,6 @@
         });
     }
 
-
-
     function saveUserSettings() {
         try {
             localStorage.setItem('wfsmm-settings', JSON.stringify(userSettings));
@@ -798,6 +812,152 @@
         } catch (e) {
             console.error("Failed to load settings, using defaults:", e);
         }
+    }
+
+    function detectMapMode() {
+        // 1) Mobile-style centre pin overlay
+        const mobilePin = document.querySelector(
+            '.center-pin-container .center-pin[src*="map_selection_pin.svg"]'
+        );
+        if (mobilePin) {
+            return MAP_MODE.MOBILE;
+        }
+
+        // 2) Desktop-style Google Maps marker wrapper
+        const desktopPin = Array.from(
+            document.querySelectorAll('.gm-style img[src*="map_selection_pin.svg"]')
+        ).find(img => {
+            const wrapper = img.closest('div[style*="width: 36px"][style*="height: 56px"]');
+            if (!wrapper) return false;
+
+            // z-index isn't guaranteed to be exactly 1000 forever,
+            // but a high z-index strongly indicates the desktop marker
+            const z = parseInt(wrapper.style.zIndex || "0", 10);
+            return z >= 900;
+        });
+
+        if (desktopPin) {
+            return MAP_MODE.DESKTOP;
+        }
+
+        // Unknown / not initialised
+        return null;
+    }
+
+    const updateMode = () => {
+        const newMode = detectMapMode();
+        if (!newMode || newMode === currentMapMode) return;
+
+        const oldMode = currentMapMode;
+        currentMapMode = newMode;
+        window.wfsmmMapMode = newMode;
+        console.info("WFSMM: Map mode changed to", oldMode, "→", newMode);
+
+        // If entering MOBILE mode, recenter map on current lat/lng
+        // This is to prevent misalignment between coordinates and pin
+        if (newMode === MAP_MODE.MOBILE) {
+            hideNativeCenterPin();
+            ensureCenterPinOverlay();
+
+            if (submitMap &&
+                typeof window.currentLat === "number" &&
+                typeof window.currentLng === "number") {
+
+                const latLng = new google.maps.LatLng(window.currentLat, window.currentLng);
+                submitMap.setCenter(latLng);
+            }
+        }
+
+        // If leaving MOBILE mode → DESKTOP
+        if (newMode === MAP_MODE.DESKTOP) {
+            removeCenterPinOverlay();
+        }
+    };
+
+    function initMapModeWatcher() {
+        const updateMode = () => {
+            const newMode = detectMapMode();
+            if (!newMode || newMode === currentMapMode) return;
+
+            const oldMode = currentMapMode;
+            currentMapMode = newMode;
+            window.wfsmmMapMode = newMode;
+
+            if (newMode === MAP_MODE.MOBILE) {
+                // Hide Niantic's overlay and use our own
+                hideNativeCenterPin();
+                ensureCenterPinOverlay();
+
+                // Try to recenter on the current submission coordinates
+                recenterMapOnCurrentSubmission();
+            } else if (newMode === MAP_MODE.DESKTOP) {
+                // Remove our mobile overlay in desktop mode
+                removeCenterPinOverlay();
+            }
+        };
+
+        const observer = new MutationObserver((mutations) => {
+            let centerPinTouched = false;
+
+            for (const m of mutations) {
+                for (const node of m.addedNodes) {
+                    if (!(node instanceof HTMLElement)) continue;
+
+                    if (node.matches(".center-pin-container") ||
+                        (node.querySelector && node.querySelector(".center-pin-container"))) {
+                        centerPinTouched = true;
+                    }
+                }
+            }
+
+            updateMode();
+
+            // If we’re in mobile mode and Niantic recreates the overlay, hide it again
+            if (centerPinTouched && currentMapMode === MAP_MODE.MOBILE) {
+                hideNativeCenterPin();
+                ensureCenterPinOverlay();
+            }
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+
+        window.addEventListener("resize", updateMode);
+
+        // Initial pass
+        updateMode();
+    }
+
+    function recenterMapOnCurrentSubmission() {
+        if (!submitMap || typeof google === "undefined" || !google.maps) {
+            console.info("WFSMM: recenter skipped – map not ready");
+            return;
+        }
+
+        if (typeof window.currentLat !== "number" || typeof window.currentLng !== "number") {
+            console.info(
+                "WFSMM: recenter skipped – currentLat/currentLng not set",
+                window.currentLat,
+                window.currentLng
+            );
+            return;
+        }
+
+        const latLng = new google.maps.LatLng(window.currentLat, window.currentLng);
+
+        submitMap.setCenter(latLng);
+
+        // Keep Wayfarer’s internal state in sync
+        google.maps.event.trigger(submitMap, "click", { latLng });
+    }
+
+    function hideNativeCenterPin() {
+        const pinContainer = document.querySelector(".center-pin-container");
+        if (!pinContainer) return;
+
+        pinContainer.style.setProperty("display", "none", "important");
     }
 
     function initUploadExifWatcher() {
@@ -941,6 +1101,7 @@
         if (initialCoords) {
             window.currentLat = initialCoords.lat;
             window.currentLng = initialCoords.lng;
+            updateCrosshairFromCurrentLatLng();
             requestPoisAndRefreshMap(initialCoords.lat, initialCoords.lng);
         }
 
@@ -996,10 +1157,7 @@
         window.currentLat = newLat;
         window.currentLng = newLng;
 
-        // Close any info window
-        if (poiInfoWindow) {
-            poiInfoWindow.close();
-        }
+        updateCrosshairFromCurrentLatLng();
 
         // Marker must move a certain distance before loading new POIs
         // Defaults to 25% of POI radius (i.e. 50 metres)
@@ -1059,9 +1217,6 @@
         xhr.onerror = () => console.error("POI network error");
         xhr.send();
     }
-
-    // ------------------ GET GOOGLE MAP INSTANCE ------------------------
-
 
     function getSubmitMap() {
         return new Promise(resolve => {
@@ -1350,6 +1505,7 @@
     async function onPoisFetched() {
         // Treat stale map as "no map"
         if (!submitMap || isMapStale()) {
+            mapClickCloseBound = false;
             submitMap = await getSubmitMap();
             if (!submitMap) {
                 console.warn("WFSMM: getSubmitMap() returned null");
@@ -1362,6 +1518,12 @@
                 cameraControl: false,
                 fullscreenControl: true,
             });
+
+            // If we're currently in mobile mode, use our own center pin
+            if (currentMapMode === MAP_MODE.MOBILE) {
+                hideNativeCenterPin();
+                ensureCenterPinOverlay();
+            }
 
             // Base map (map type) change listener
             if (!mapTypeListenerBound) {
@@ -1389,6 +1551,16 @@
             injectSearchBox();
             initS2Overlay();
             initCustomBaseMaps();
+
+            if (!mapClickCloseBound) {
+                mapClickCloseBound = true;
+
+                submitMap.addListener("click", () => {
+                    if (poiInfoWindow) {
+                        poiInfoWindow.close();
+                    }
+                });
+            }
         }
 
         updatePoisOnMap();
@@ -1622,7 +1794,6 @@
         google.maps.event.trigger(submitMap, "click", { latLng });
     }
 
-
     function injectSearchBox() {
         if (!submitMap) return;
 
@@ -1706,7 +1877,6 @@
             google.maps.event.trigger(submitMap, "click", { latLng });
         });
     }
-
 
     function initCustomBaseMaps() {
         if (!submitMap) return;
@@ -2006,7 +2176,6 @@
         }
     }
 
-
     function updateS2Grid() {
         if (!submitMap || !s2Overlay) return;
 
@@ -2114,7 +2283,203 @@
         document.head.appendChild(style);
     }
 
+    function ensureCrosshairClass() {
+        if (Crosshair) return true;
 
+        if (typeof google === "undefined" ||
+            !google.maps ||
+            !google.maps.OverlayView) {
+            return false;
+        }
+
+        Crosshair = class extends google.maps.OverlayView {
+            constructor(position) {
+                super();
+                this.position = position;
+                this.div = null;
+            }
+
+            onAdd() {
+                const div = document.createElement("div");
+                div.style.position = "absolute";
+                div.style.width = "20px";
+                div.style.height = "20px";
+                div.style.pointerEvents = "none";
+                div.style.zIndex = "999";
+
+                const hLine = document.createElement("div");
+                hLine.style.position = "absolute";
+                hLine.style.left = "0";
+                hLine.style.top = "9px";
+                hLine.style.width = "20px";
+                hLine.style.height = "2px";
+                hLine.style.background = "#0000FF";
+
+                const vLine = document.createElement("div");
+                vLine.style.position = "absolute";
+                vLine.style.left = "9px";
+                vLine.style.top = "0";
+                vLine.style.width = "2px";
+                vLine.style.height = "20px";
+                vLine.style.background = "#0000FF";
+
+                div.appendChild(hLine);
+                div.appendChild(vLine);
+
+                this.div = div;
+                this.getPanes().overlayLayer.appendChild(div);
+            }
+
+            draw() {
+                if (!this.div) return;
+
+                const projection = this.getProjection();
+                if (!projection) return;
+
+                const point = projection.fromLatLngToDivPixel(this.position);
+                if (!point) return;
+
+                this.div.style.left = (point.x - 10) + "px";
+                this.div.style.top = (point.y - 10) + "px";
+            }
+
+            onRemove() {
+                if (this.div?.parentNode) {
+                    this.div.parentNode.removeChild(this.div);
+                }
+                this.div = null;
+            }
+
+            setPosition(latLng) {
+                this.position = latLng;
+                this.draw();
+            }
+        };
+
+        return true;
+    }
+
+    function ensureCrosshair(lat, lng) {
+        if (!submitMap) return;
+
+        if (!ensureCrosshairClass()) {
+            return; // Google Maps not ready yet
+        }
+
+        const pos = new google.maps.LatLng(lat, lng);
+
+        if (!crosshair) {
+            crosshair = new Crosshair(pos);
+            crosshair.setMap(submitMap);
+        } else {
+            crosshair.setPosition(pos);
+        }
+    }
+
+    function updateCrosshairFromCurrentLatLng() {
+        if (typeof window.currentLat !== "number" ||
+            typeof window.currentLng !== "number") {
+            return;
+        }
+
+        if (!enableCrosshairs) {
+            return;
+        }
+
+        ensureCrosshair(window.currentLat, window.currentLng);
+    }
+
+    function ensureCenterPinClass() {
+        if (CenterPinOverlay) return true;
+
+        if (typeof google === "undefined" ||
+            !google.maps ||
+            !google.maps.OverlayView) {
+            return false;
+        }
+
+        CenterPinOverlay = class extends google.maps.OverlayView {
+            constructor(map) {
+                super();
+                this.map = map;
+                this.div = null;
+
+                // Kick off OverlayView lifecycle
+                this.setMap(map);
+            }
+
+            onAdd() {
+                const div = document.createElement("div");
+                div.style.position = "absolute";
+                div.style.pointerEvents = "none";  // don’t block map/info clicks
+                div.style.zIndex = "999";          // under floatPane (InfoWindow), over tiles
+
+                const img = document.createElement("img");
+                img.src = "/img/map_selection_pin.svg";
+                img.alt = "Center pin";
+
+                // 🔹 Match mobile pin size: 40 × 40
+                img.style.width = "40px";
+                img.style.height = "40px";
+                img.style.display = "block";
+
+                div.appendChild(img);
+                this.div = div;
+
+                this.getPanes().overlayLayer.appendChild(div);
+            }
+
+            draw() {
+                if (!this.div) return;
+
+                const projection = this.getProjection();
+                if (!projection) return;
+
+                const map = this.getMap();
+                if (!map) return;
+
+                const center = map.getCenter();
+                if (!center) return;
+
+                const point = projection.fromLatLngToDivPixel(center);
+                if (!point) return;
+
+                const size = 40; // 40 × 40 mobile pin
+
+                // Horizontally: center the pin on x
+                this.div.style.left = (point.x - size / 2) + "px";
+
+                // Vertically: put the *bottom* of the pin on the center point
+                // so the “tip” / bottom edge sits exactly at the map center
+                this.div.style.top  = (point.y - size) + "px";
+            }
+
+            onRemove() {
+                if (this.div && this.div.parentNode) {
+                    this.div.parentNode.removeChild(this.div);
+                }
+                this.div = null;
+            }
+        };
+
+        return true;
+    }
+
+    function ensureCenterPinOverlay() {
+        if (!submitMap) return;
+        if (!ensureCenterPinClass()) return;
+
+        if (!centerPinOverlay) {
+            centerPinOverlay = new CenterPinOverlay(submitMap);
+        }
+    }
+
+    function removeCenterPinOverlay() {
+        if (centerPinOverlay) {
+            centerPinOverlay.setMap(null);
+            centerPinOverlay = null;
+        }
+    }
 
     // start s2 lib code
     (function(exports) {
