@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.17
+// @version      0.0.19
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -93,6 +93,7 @@
         initLatLngElementWatcher();
         getSubmitMap();
         initUploadExifWatcher();
+        initWayspotImageEntryWatcher();
     }
 
     (function (open) {
@@ -1359,6 +1360,7 @@
             submitMap.setOptions({
                 clickableIcons: false,
                 cameraControl: false,
+                fullscreenControl: true,
             });
 
             // Base map (map type) change listener
@@ -1801,49 +1803,35 @@
         return false;
     }
 
-    function resetMapState() {
-        try {
-            // Clear POI markers
-            for (const guid in markersByGuid) {
-                const entry = markersByGuid[guid];
-                if (entry && entry.marker) {
-                    entry.marker.setMap(null);
+    function fixMainPhotoAspectRatioForContainer(container) {
+        // Remove the width restrictions on the main photo to allow proper aspect ratio to show
+        container.style.setProperty("--width", "auto");
+        container.style.display = "inline-flex";
+    }
+
+    function initWayspotImageEntryWatcher() {
+        const observer = new MutationObserver(mutations => {
+            for (const m of mutations) {
+                for (const node of m.addedNodes) {
+                    if (!(node instanceof HTMLElement)) continue;
+
+                    // Must be <div class="image-container">
+                    if (!node.matches("div.image-container")) continue;
+
+                    // Must be inside <app-wayspot-image-entry>
+                    if (!node.closest("app-wayspot-image-entry")) continue;
+
+                    fixMainPhotoAspectRatioForContainer(node);
                 }
             }
-            markersByGuid = {};
+        });
 
-            // Radius circle
-            if (poiRadiusCircle) {
-                poiRadiusCircle.setMap(null);
-                poiRadiusCircle = null;
-            }
-
-            // InfoWindow
-            if (poiInfoWindow) {
-                poiInfoWindow.close();
-                poiInfoWindow = null;
-            }
-
-            // S2 overlay
-            if (s2Overlay) {
-                s2Overlay.clear();
-                s2Overlay = null;
-            }
-
-            // S2 idle listener
-            if (s2IdleListener && google && google.maps && google.maps.event) {
-                google.maps.event.removeListener(s2IdleListener);
-            }
-            s2IdleListener = null;
-
-            // You might also want to clear your user-location marker, etc.,
-            // depending on how you implemented it.
-        } catch (e) {
-            console.warn("WFSMM: error while resetting map state:", e);
-        }
-
-        submitMap = null;
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
     }
+
     class S2Overlay {
         constructor() {
             this.polyLines = [];
@@ -2108,7 +2096,7 @@
         const style = document.createElement('style');
         style.id = "wfsmm-marker-style";
         style.textContent = `
-        /* Your circular thumbnail marker styling… */
+        /* Circular thumbnail marker styling */
         .gm-style img[src*="lh3.googleusercontent.com"][src*="=s36-c"] {
             border-radius: 50% !important;
             width: 36px !important;
@@ -2125,6 +2113,7 @@
     `;
         document.head.appendChild(style);
     }
+
 
 
     // start s2 lib code
