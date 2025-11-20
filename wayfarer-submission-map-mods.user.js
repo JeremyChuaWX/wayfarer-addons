@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.22
+// @version      0.0.23
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -983,6 +983,7 @@
         // If entering MOBILE mode, recenter map on current lat/lng
         // This is to prevent misalignment between coordinates and pin
         if (newMode === MAP_MODE.MOBILE) {
+            console.log('new mobile mode');
             hideNativeCenterPin();
             ensureCenterPinOverlay();
 
@@ -1012,6 +1013,7 @@
 
             if (newMode === MAP_MODE.MOBILE) {
                 // Hide Niantic's overlay and use our own
+                console.log('new mobile mode from initMapWater');
                 hideNativeCenterPin();
                 ensureCenterPinOverlay();
 
@@ -1041,6 +1043,7 @@
 
             // If we’re in mobile mode and Niantic recreates the overlay, hide it again
             if (centerPinTouched && currentMapMode === MAP_MODE.MOBILE) {
+                console.log('mobile mode from initmodemap water part 2');
                 hideNativeCenterPin();
                 ensureCenterPinOverlay();
             }
@@ -1710,6 +1713,11 @@
                         poiInfoWindow.close();
                     }
                 });
+            }
+
+            if (currentMapMode === MAP_MODE.MOBILE) {
+                hideNativeCenterPin();
+                ensureCenterPinOverlay();
             }
         }
 
@@ -2713,10 +2721,14 @@
     }
 
     function ensureCenterPinOverlay() {
+        console.log('ensureCenterPinOverlay is being called')
         if (!submitMap) return;
+        console.log('found the submit map');
         if (!ensureCenterPinClass()) return;
+        console.log('there is a center pin class');
 
         if (!centerPinOverlay) {
+            console.log('making new CenterPinOverlay')
             centerPinOverlay = new CenterPinOverlay(submitMap);
         }
     }
