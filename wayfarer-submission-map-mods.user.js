@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.23
+// @version      0.0.24
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -1541,6 +1541,15 @@
                         }
                     });
                 }
+
+                // Close button handler
+                const closeBtn = document.querySelector(".wf-iw-close");
+                if (closeBtn) {
+                    closeBtn.addEventListener("click", (e) => {
+                        e.stopPropagation(); // prevent clicking map behind it
+                        poiInfoWindow.close();
+                    });
+                }
             });
         });
 
@@ -1572,65 +1581,92 @@
         const latStr = poi.lat.toFixed(6);
         const lngStr = poi.lng.toFixed(6);
 
-        const iwImgUrl  = poi.imageUrl + "=w240"; // preview
-        const fullImgUrl = poi.imageUrl + "=s0";  // open full size
+        const iwImgUrl  = poi.imageUrl + "=w240";
+        const fullImgUrl = poi.imageUrl + "=s0";
 
-        // Inline styles to override site styles when needed
         const titleStyle = darkMode ? 'color:#000;' : '';
         const descStyle  = darkMode ? 'color:#000;' : '';
         const coordStyle = darkMode ? 'color:#333;' : 'color: inherit;';
 
         return `
-        <div class="agm-info-window-content">
-            <div class="wf-nearby-iw-content flex flex-col max-w-[240px]">
+    <div class="agm-info-window-content" style="position:relative;">
 
-                <!-- Title (click to copy) -->
-                <div class="font-medium truncate text-base mb-1"
-                     title="${title}"
-                     style="${titleStyle}">
-                    <span
-                        class="wf-copy-title"
-                        data-copy="${title.replace(/"/g, '&quot;')}"
-                        title="Click to copy title"
-                        style="cursor: pointer; text-decoration: none;"
+<!-- Close button (Wayfarer-style) -->
+<button
+    class="wf-iw-close"
+    title="Close"
+    style="
+        position:absolute;
+        top:6px;
+        right:6px;
+        width:24px;
+        height:24px;
+        border-radius:9999px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:16px;
+        font-weight:600;
+        cursor:pointer;
+        background:#ffffff;
+        color:#000000;
+        border:1px solid rgba(0,0,0,0.15);
+        z-index:9999;
+    "
+>
+    ×
+</button>
+
+        <div class="wf-nearby-iw-content flex flex-col max-w-[240px]">
+
+            <!-- Title -->
+            <div class="font-medium truncate text-base mb-1"
+                 title="${title}"
+                 style="margin-top:6px; ${titleStyle}">
+                <span
+                    class="wf-copy-title"
+                    data-copy="${title.replace(/"/g, '&quot;')}"
+                    title="Click to copy title"
+                    style="cursor: pointer; text-decoration: none;"
+                >
+                    ${title}
+                </span>
+            </div>
+
+            <!-- Coordinates -->
+            <div class="text-xs text-gray-500 mb-2">
+                <span
+                    class="wf-copy-coords"
+                    data-lat="${latStr}"
+                    data-lng="${lngStr}"
+                    title="Click to copy coordinates"
+                    style="cursor: pointer; text-decoration: none; ${coordStyle}"
+                >
+                    ${latStr}, ${lngStr}
+                </span>
+            </div>
+
+            <!-- Image -->
+            <div style="width: 240px; height: 96px; overflow:hidden; margin-bottom:0.5rem;">
+                <a href="${fullImgUrl}" target="_blank" rel="noopener noreferrer"
+                   style="display:block; width:100%; height:100%;">
+                    <img
+                        src="${iwImgUrl}"
+                        alt="${title}"
+                        style="display:block; width:100%; height:100%; object-fit:cover;"
                     >
-                        ${title}
-                    </span>
-                </div>
+                </a>
+            </div>
 
-                <!-- Lat/Lng, looks like text but clickable to copy -->
-                <div class="text-xs text-gray-500 mb-2">
-                    <span
-                        class="wf-copy-coords"
-                        data-lat="${latStr}"
-                        data-lng="${lngStr}"
-                        title="Click to copy coordinates"
-                        style="cursor: pointer; text-decoration: none; ${coordStyle}"
-                    >
-                        ${latStr}, ${lngStr}
-                    </span>
-                </div>
-
-                <!-- Image Banner -->
-                <div style="width: 240px; height: 96px; overflow:hidden; margin-bottom:0.5rem;">
-                    <a href="${fullImgUrl}" target="_blank" rel="noopener noreferrer"
-                       style="display:block; width:100%; height:100%;">
-                        <img
-                            src="${iwImgUrl}"
-                            alt="${title}"
-                            style="display:block; width:100%; height:100%; object-fit:cover;"
-                        >
-                    </a>
-                </div>
-
-                <!-- Description -->
-                <div class="text-sm" style="${descStyle}">
-                    ${desc}
-                </div>
+            <!-- Description -->
+            <div class="text-sm" style="${descStyle}">
+                ${desc}
             </div>
         </div>
+    </div>
     `;
     }
+
 
     async function onPoisFetched() {
         // Treat stale map as "no map"
