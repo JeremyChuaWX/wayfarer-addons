@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map - Contributions Overlay
-// @version      0.3.0
+// @version      0.0.1
 // @description  Loads nominations from the Contributions list and shows them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-contributions-overlay.user.js
