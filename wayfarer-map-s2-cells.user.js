@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map - s2 Cells
-// @version      0.0.1
+// @version      0.1.0
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-s2-cells.user.js
@@ -20,6 +20,18 @@
     let mapAttached = false;
     let idleListener = null;
     let zoomListener = null;
+
+    // Highlighted cell
+    let submitCellHighlight = null;
+    let submitCellLat = null;
+    let submitCellLng = null;
+
+    // For watching the lat/lng element
+    let latLngBodyObserver = null;
+    let latLngObserver = null;
+    let latLngTargetEl = null;
+
+
 
     // LocalStorage key for this plugin
     const SETTINGS_KEY = "wfmap_s2_settings";
@@ -47,6 +59,12 @@
             enabled: true,
             color: "#000000",
             fillOpacity: 0.2
+        },
+        highlightCell: {
+            enabled: true,
+            color: "#FF0000",
+            lineWidth: 4,
+            lineOpacity: 1.0
         }
     };
 
@@ -207,6 +225,98 @@
 
         submitMap = map;
         initS2Overlay();
+    }
+
+    // ==================================
+    // Lat/Lng observers - Find submit location
+    // ==================================
+
+    function parseLatLng(text) {
+        if (!text) return null;
+        const parts = text.split(',');
+        if (parts.length !== 2) return null;
+
+        const lat = parseFloat(parts[0].trim());
+        const lng = parseFloat(parts[1].trim());
+
+        if (isNaN(lat) || isNaN(lng)) return null;
+        return { lat, lng };
+    }
+
+    function handleLatLngChange(newLat, newLng) {
+        // Whenever the marker moves, update the L17 highlight
+        highlightSubmitCell(newLat, newLng);
+    }
+
+    function watchForLatLngElement() {
+        // Only initialise once
+        if (latLngBodyObserver) return;
+
+        function attachToLatLngElement(el) {
+            // If we're already observing this exact element, do nothing
+            if (latLngTargetEl === el && latLngObserver) return;
+
+            // Disconnect old element observer (if any)
+            if (latLngObserver) {
+                latLngObserver.disconnect();
+                latLngObserver = null;
+            }
+
+            latLngTargetEl = el;
+
+            let lastText = (el.textContent || "").trim();
+            const initialCoords = parseLatLng(lastText);
+
+            if (initialCoords) {
+                handleLatLngChange(initialCoords.lat, initialCoords.lng);
+            }
+
+            // Watch for changes to the coordinates text
+            latLngObserver = new MutationObserver(() => {
+                // If element has been removed from DOM, stop observing.
+                if (!document.body.contains(el)) {
+                    latLngObserver.disconnect();
+                    latLngObserver = null;
+                    latLngTargetEl = null;
+                    return;
+                }
+
+                const newText = (el.textContent || "").trim();
+                if (newText === lastText) return;
+                lastText = newText;
+
+                const coords = parseLatLng(newText);
+                if (!coords) return;
+
+                handleLatLngChange(coords.lat, coords.lng);
+            });
+
+            latLngObserver.observe(el, {
+                childList: true,
+                subtree: true,
+                characterData: true
+            });
+        }
+
+        function findAndAttachLatLngElement() {
+            // Adjust this selector if Niantic change their DOM
+            const el = document.querySelector('.text-gray-400.text-xs');
+            if (!el) return;
+            attachToLatLngElement(el);
+        }
+
+        // Body-level observer: watches for the lat/lng element appearing / being replaced
+        latLngBodyObserver = new MutationObserver(() => {
+            findAndAttachLatLngElement();
+        });
+
+        latLngBodyObserver.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+
+        // Try immediately in case the element is already present
+        findAndAttachLatLngElement();
     }
 
     // -----------------------------
@@ -432,6 +542,8 @@
         // --- SHADED CELLS CONTROLS ---
         const poiCells = userSettings.poiCells;
 
+        const highlight = userSettings.highlightCell;
+
         const shadeGroup = document.createElement("div");
         Object.assign(shadeGroup.style, {
             paddingBottom: "4px",
@@ -465,6 +577,52 @@
         shadeGroup.appendChild(makeRow("Shade opacity", shadeOpacityInput));
 
         dialog.appendChild(shadeGroup);
+
+        // --- SUBMISSION CELL HIGHLIGHT CONTROLS ---
+        const highlightGroup = document.createElement("div");
+        Object.assign(highlightGroup.style, {
+            borderTop: "1px solid #e5e7eb",
+            paddingTop: "6px",
+            marginTop: "6px",
+            paddingBottom: "4px",
+            marginBottom: "4px"
+        });
+
+        const highlightHeader = document.createElement("div");
+        highlightHeader.textContent = "Submission cell highlight";
+        Object.assign(highlightHeader.style, {
+            fontWeight: "500",
+            marginBottom: "4px"
+        });
+        highlightGroup.appendChild(highlightHeader);
+
+        const highlightEnabledInput = document.createElement("input");
+        highlightEnabledInput.type = "checkbox";
+        highlightEnabledInput.checked = !!highlight.enabled;
+        highlightGroup.appendChild(makeRow("Enabled", highlightEnabledInput));
+
+        const highlightColorInput = document.createElement("input");
+        highlightColorInput.type = "color";
+        highlightColorInput.value = highlight.color || "#FF0000";
+        highlightGroup.appendChild(makeRow("Line colour", highlightColorInput));
+
+        const highlightWidthInput = document.createElement("input");
+        highlightWidthInput.type = "number";
+        highlightWidthInput.min = "0.5";
+        highlightWidthInput.max = "10";
+        highlightWidthInput.step = "0.5";
+        highlightWidthInput.value = highlight.lineWidth ?? 4;
+        highlightGroup.appendChild(makeRow("Line thickness", highlightWidthInput));
+
+        const highlightOpacityInput = document.createElement("input");
+        highlightOpacityInput.type = "number";
+        highlightOpacityInput.min = "0";
+        highlightOpacityInput.max = "1";
+        highlightOpacityInput.step = "0.05";
+        highlightOpacityInput.value = highlight.lineOpacity ?? 1.0;
+        highlightGroup.appendChild(makeRow("Line opacity", highlightOpacityInput));
+
+        dialog.appendChild(highlightGroup);
 
         // --- Buttons row ---
         const buttonsRow = document.createElement("div");
@@ -516,6 +674,8 @@
                 // If overlay hasn’t been initialised yet
                 initS2Overlay();
             }
+
+            refreshHighlightCell();
         }
 
         cancelBtn.addEventListener("click", () => {
@@ -544,6 +704,12 @@
             poiCells.enabled = !!shadeEnabledInput.checked;
             poiCells.color = shadeColorInput.value || "#000000";
             poiCells.fillOpacity = clamp(shadeOpacityInput.value, 0, 1);
+
+            // SUBMISSION CELL HIGHLIGHT
+            highlight.enabled = !!highlightEnabledInput.checked;
+            highlight.color = highlightColorInput.value || "#FF0000";
+            highlight.lineWidth = clamp(highlightWidthInput.value, 0.5, 10);
+            highlight.lineOpacity = clamp(highlightOpacityInput.value, 0, 1);
 
             // Persist + redraw
             saveSettings();
@@ -597,7 +763,7 @@
                     if (this._s2_url && this._s2_url.includes("/api/v1/vault/live-pois-in-radius")) {
                         const json = JSON.parse(this.responseText);
                         const pois = (json && json.result && Array.isArray(json.result.pois)) ?
-                            json.result.pois : [];
+                              json.result.pois : [];
 
                         s2Pois = pois;
 
@@ -827,18 +993,18 @@
         const seen = new Set();
         const fillColor = s2Settings.color || "#000000";
         const fillOpacity = (typeof s2Settings.fillOpacity === "number") ?
-            s2Settings.fillOpacity :
-            0.2;
+              s2Settings.fillOpacity :
+        0.2;
 
         for (const poi of pois) {
             if (typeof poi.lat !== "number" || typeof poi.lng !== "number") continue;
 
             const cell = S2.S2Cell.FromLatLng({
-                    lat: poi.lat,
-                    lng: poi.lng
-                },
-                POI_CELL_LEVEL
-            );
+                lat: poi.lat,
+                lng: poi.lng
+            },
+                                              POI_CELL_LEVEL
+                                             );
 
             const cellId = cell.toString();
             if (seen.has(cellId)) continue;
@@ -865,6 +1031,62 @@
             poiCellPolygons.push(poly);
         }
     }
+
+    // -----------------------------
+    // Highlight current cell
+    // -----------------------------
+
+    function highlightSubmitCell(lat, lng) {
+        submitCellLat = lat;
+        submitCellLng = lng;
+
+        if (!submitMap || typeof google === "undefined" || !google.maps) return;
+
+        const cfg = userSettings.highlightCell || {};
+        const enabled = cfg.enabled !== false; // default to true if missing
+
+        // Clear existing highlight polygon if any
+        if (submitCellHighlight) {
+            submitCellHighlight.setMap(null);
+            submitCellHighlight = null;
+        }
+
+        if (!enabled) {
+            return; // user has disabled the highlight
+        }
+
+        const strokeColor = cfg.color || "#FF0000";
+        const strokeWeight = typeof cfg.lineWidth === "number" ? cfg.lineWidth : 4;
+        const strokeOpacity = typeof cfg.lineOpacity === "number" ? cfg.lineOpacity : 1.0;
+
+        // Build the L17 S2 cell around the marker
+        const cell = S2.S2Cell.FromLatLng({ lat, lng }, POI_CELL_LEVEL); // POI_CELL_LEVEL = 17
+
+        const corners = cell.getCornerLatLngs();
+        const path = corners.map(c => ({
+            lat: typeof c.lat === "function" ? c.lat() : c.lat,
+            lng: typeof c.lng === "function" ? c.lng() : c.lng
+        }));
+        path.push(path[0]); // close polygon
+
+        submitCellHighlight = new google.maps.Polygon({
+            map: submitMap,
+            paths: path,
+            strokeColor,
+            strokeOpacity,
+            strokeWeight,
+            fillOpacity: 0,
+            clickable: false,
+            zIndex: 9999
+        });
+    }
+
+    // Helper to reapply highlight when settings change
+    function refreshHighlightCell() {
+        if (submitCellLat == null || submitCellLng == null) return;
+        highlightSubmitCell(submitCellLat, submitCellLng);
+    }
+
 
     // -----------------------------
     // S2 library
@@ -1546,6 +1768,7 @@
         loadSettings();
         startMapPanelWatcher();
         injectS2SettingsCSS();
+        watchForLatLngElement();
     }
 
     bootstrap();
