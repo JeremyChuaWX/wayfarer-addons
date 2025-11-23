@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map - Base
-// @version      1.0.2
+// @version      1.1.0
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-base.user.js
@@ -100,6 +100,19 @@
 
     // ----- LocalStorage key for this plugin -----
     const SETTINGS_KEY = "wfmap_settings";
+
+    // ----- Nomination status text -----
+    const STATUS_LABELS = {
+        LIVE: "Live",
+        NOMINATED: "In Queue",
+        NIANTIC_REVIEW: "Niantic Review",
+        APPEALED: "Appeal Pending",
+        HELD: "On Hold",
+        WITHDRAWN: "Withdrawn",
+        REJECTED: "Not Accepted",
+        DUPLICATE: "Duplicate",
+        ACCEPTED: "Accepted",
+    };
 
     // -----------------------------
     // Settings (defaults + storage)
@@ -825,6 +838,16 @@
             });
             titleValue.textContent = "";
 
+            // Status tag row
+            const statusValue = document.createElement("div");
+            statusValue.className = "wfsmm-detail-status";
+            Object.assign(statusValue.style, {
+                minHeight: "18px",
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+            });
+
             // Image box – circular 200x200, clipped, with blue border
             const imageBox = document.createElement("div");
             imageBox.className = "wfsmm-detail-image-box";
@@ -868,6 +891,7 @@
             detailsBody.appendChild(titleValue);
             detailsBody.appendChild(imageBox);
             detailsBody.appendChild(coordsValue);
+            detailsBody.appendChild(statusValue);
             detailsSection.appendChild(detailsBody);
 
             // Divider between search/details and commands/settings
@@ -980,6 +1004,27 @@
         adjustMapControlsForSidePanel();
     }
 
+    function buildStatusTag(statusRaw) {
+        const status = (statusRaw || "LIVE").toString().toUpperCase();
+
+        // --- Determine colour variant ---
+        let variant = "queue"; // default: grey
+        if (status === "ACCEPTED" || status === "LIVE") {
+            variant = "accepted"; // green
+        } else if (status === "REJECTED" || status === "DUPLICATE") {
+            variant = "rejected"; // red
+        }
+
+        // --- Determine display label ---
+        const label = STATUS_LABELS[status] || status;
+
+        const span = document.createElement("span");
+        span.className = `wfsmm-status-tag wfsmm-status-tag--${variant}`;
+        span.textContent = label;
+
+        return span;
+    }
+
     function applySidePanelCollapseState() {
         if (!sidePanelEl) return;
 
@@ -1027,6 +1072,7 @@
         const poiFunctionsSection = sidePanelEl.querySelector(".wfsmm-section-poi-functions");
         const divider = sidePanelEl.querySelector(".wfsmm-section-divider-details");
         const titleEl = sidePanelEl.querySelector(".wfsmm-detail-title");
+        const statusEl = sidePanelEl.querySelector(".wfsmm-detail-status");
         const coordsEl = sidePanelEl.querySelector(".wfsmm-detail-coords");
         const imgBox = sidePanelEl.querySelector(".wfsmm-detail-image-box");
 
@@ -1046,6 +1092,13 @@
             titleEl.title = title; // full title on hover
         }
 
+        // ----- Status tag -----
+        if (statusEl) {
+            const status = poi.status || "LIVE";
+            statusEl.innerHTML = ""; // clear any previous tag
+            statusEl.appendChild(buildStatusTag(status));
+        }
+
         // ----- Status + Coordinates -----
         if (coordsEl) {
             const latStr = (typeof poi.lat === "number" && Number.isFinite(poi.lat)) ?
@@ -1055,9 +1108,7 @@
                   poi.lng.toFixed(6) :
             "--";
 
-            const status = poi.status || "LIVE";
-
-            coordsEl.textContent = `${status}: ${latStr}, ${lngStr}`;
+            coordsEl.textContent = `${latStr}, ${lngStr}`;
             coordsEl.dataset.lat = String(poi.lat ?? "");
             coordsEl.dataset.lng = String(poi.lng ?? "");
 
@@ -4153,6 +4204,32 @@
         opacity: 1 !important;
     }
 
+    /* -------------------------
+       Status tags
+       ------------------------- */
+
+    .wfsmm-status-tag {
+        display: inline-block;
+        white-space: nowrap;
+        border-radius: 9999px; /* pill shape */
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+        line-height: 1rem;
+        text-transform: uppercase;
+        font-weight: 500;
+    }
+    .wfsmm-status-tag--accepted {
+        background-color: rgba(187, 247, 208, 1); /* light green */
+        color: rgba(21, 128, 61, 1);              /* dark green */
+    }
+    .wfsmm-status-tag--rejected {
+        background-color: rgba(254, 202, 202, 1); /* light red */
+        color: rgba(220, 38, 38, 1);              /* dark red */
+    }
+    .wfsmm-status-tag--queue {
+        background-color: rgba(212, 212, 212, 1); /* light grey */
+        color: rgba(23, 23, 23, 1);               /* dark grey */
+    }
     `;
 
         let style = document.getElementById("wfsmm-all-css");
