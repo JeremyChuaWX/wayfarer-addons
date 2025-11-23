@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map - Base
-// @version      1.0.1
+// @version      1.0.2
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-base.user.js
@@ -107,7 +107,7 @@
 
     let userSettings = {
         poi: {
-            markerType: "thumbnail", // "thumbnail" or "generic"
+            markerType: "generic", // "thumbnail" or "generic"
 
             thumbnail: {
                 borderColor: "#ffffff",
@@ -3201,11 +3201,13 @@
             latLng: centerLatLng
         });
 
-        // When POIs for this position load, we’ll auto-select the closest POI
+        // Mark that we still need to auto-select when POIs load
         deepLinkSelectionPending = true;
+        skipRestoreMapViewForThisLoad = true;
     }
 
     function trySelectDeepLinkedPoi() {
+        console.log('trySelectDeepLinkedPoi');
         if (!deepLinkTarget || !Array.isArray(window.currentPois) || window.currentPois.length === 0) {
             return;
         }
@@ -3213,22 +3215,36 @@
         const { lat: targetLat, lng: targetLng } = deepLinkTarget;
         if (!Number.isFinite(targetLat) || !Number.isFinite(targetLng)) return;
 
-        // Look for a wayspot whose lat/lng matches the deep link.
-        const matchedPoi = window.currentPois.find(poi =>
-                                                   Number.isFinite(poi.lat) &&
-                                                   Number.isFinite(poi.lng) &&
-                                                   poi.lat === targetLat &&
-                                                   poi.lng === targetLng
-                                                  );
+        const MAX_DISTANCE_METRES = 2;
 
-        if (matchedPoi) {
-            publishPoiToBridge(matchedPoi, {
-                status: matchedPoi.status || "LIVE",
-                source: "wfsmm-deeplink"
-            });
+        let closestPoi = null;
+        let closestDistance = Infinity;
+
+        console.log(window.currentPois);
+        for (const poi of window.currentPois) {
+            if (!Number.isFinite(poi.lat) || !Number.isFinite(poi.lng)) continue;
+
+            const d = distanceMeters(targetLat, targetLng, poi.lat, poi.lng);
+            if (d <= MAX_DISTANCE_METRES && d < closestDistance) {
+                closestDistance = d;
+                closestPoi = poi;
+            }
         }
 
-        // Reset values
+        // If nothing is within 2m, stay in "pending" mode.
+        // This is to counteract initial fetch on page load messing things up
+        if (!closestPoi) {
+            console.log('Deep Links: No POI within 2m yet; will try again on next POI fetch');
+            return;
+        }
+
+        // We found a match: publish and then clear the deep-link state.
+        publishPoiToBridge(closestPoi, {
+            status: closestPoi.status || "LIVE",
+            source: "wfsmm-deeplink"
+        });
+
+        // Reset values ONLY on success
         deepLinkTarget = null;
         skipRestoreMapViewForThisLoad = false;
         deepLinkSelectionPending = false;
