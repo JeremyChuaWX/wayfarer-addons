@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map - Map Tiles
-// @version      0.0.1
+// @version      0.0.2
 // @description  Adds extra base map providers (Bing, Esri, OSM, etc.) to the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-tiles.user.js
@@ -182,7 +182,7 @@
 
             const link = document.createElement("a");
             link.id = "wfsmm-settings-basemaps";
-            link.textContent = "Base Maps";
+            link.textContent = "Map Tiles";
 
             settingsBody.appendChild(link);
 
@@ -238,7 +238,7 @@
 
         // --- Title ---
         const title = document.createElement("div");
-        title.textContent = "Base Map Options";
+        title.textContent = "Map Tile Options";
         Object.assign(title.style, {
             fontSize: "15px",
             fontWeight: "600",
@@ -279,7 +279,7 @@
         });
 
         const defaultHeader = document.createElement("div");
-        defaultHeader.textContent = "Default base map";
+        defaultHeader.textContent = "Default map tiles";
         Object.assign(defaultHeader.style, {
             fontWeight: "500",
             marginBottom: "4px"
@@ -380,6 +380,8 @@
         });
 
         okBtn.addEventListener("click", () => {
+            if (!mapSettings.providers) mapSettings.providers = {};
+
             mapSettings.defaultType = defaultSelect.value || "last-used";
 
             CUSTOM_PROVIDER_NAMES.forEach(name => {
@@ -428,6 +430,10 @@
         if (submitMap._wfsmmBasemapsInitialised) return;
         submitMap._wfsmmBasemapsInitialised = true;
 
+        // Make sure the structure exists
+        if (!userSettings.map) userSettings.map = {};
+        if (!userSettings.map.providers) userSettings.map.providers = {};
+
         let mapTypeControlOptions = {
             style: google.maps.MapTypeControlStyle.DROPDOWN_MENU,
             position: google.maps.ControlPosition.TOP_LEFT,
@@ -461,14 +467,56 @@
             mapTypeControlOptions
         });
 
-        const savedType = userSettings.map && userSettings.map.defaultType;
-        const preferredType = savedType || "roadmap";
+        // Choose initial map type
+        setInitialMapType();
+
+        // Start tracking "last used"
+        attachLastUsedListener();
+    }
+
+    function setInitialMapType() {
+        if (!submitMap) return;
+
+        const mapSettings = userSettings.map || {};
+        const savedDefault = mapSettings.defaultType;
+        const lastUsed = mapSettings.lastUsedType;
+
+        let preferredType;
+
+        if (savedDefault === "last-used" && lastUsed) {
+            // Use the last used type if we have one
+            preferredType = lastUsed;
+        } else if (savedDefault && savedDefault !== "last-used") {
+            // Use an explicit default type from settings
+            preferredType = savedDefault;
+        } else {
+            // Fallback: keep current map type or go to roadmap
+            preferredType = submitMap.getMapTypeId() || "roadmap";
+        }
 
         const hasType = submitMap.mapTypes && submitMap.mapTypes.get(preferredType);
         if (hasType) {
             submitMap.setMapTypeId(preferredType);
         } else {
             submitMap.setMapTypeId("roadmap");
+        }
+    }
+
+
+    function attachLastUsedListener() {
+        if (!submitMap) return;
+        if (submitMap._wfsmmLastUsedListenerAttached) return;
+        submitMap._wfsmmLastUsedListenerAttached = true;
+
+        if (google.maps && google.maps.event) {
+            google.maps.event.addListener(submitMap, "maptypeid_changed", () => {
+                const current = submitMap.getMapTypeId();
+                if (!current) return;
+
+                if (!userSettings.map) userSettings.map = {};
+                userSettings.map.lastUsedType = current;
+                saveSettings();
+            });
         }
     }
 
