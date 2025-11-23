@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map - Report Wayspots
-// @version      0.0.1
+// @version      0.1.0
 // @description  Adds a "Report Wayspot" link to the side panel and pre-fills the Helpshift form using POI bridge data
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-report-wayspot.user.js
@@ -8,10 +8,6 @@
 // @match        https://wayfarer.nianticlabs.com/*
 // @match        https://niantic.helpshift.com/hc/en/5-report-an-issue-with-a-pokestop-gym/contact-us/*
 // @run-at       document-start
-// @grant        GM_setValue
-// @grant        GM_getValue
-// @grant        GM_deleteValue
-// @grant        GM_addValueChangeListener
 // ==/UserScript==
 
 (function () {
@@ -25,17 +21,23 @@
     const ORIGIN_WAYFARER = 'https://wayfarer.nianticlabs.com';
     const ORIGIN_HELPSHIFT = 'https://niantic.helpshift.com';
 
-    // TODO: Change this to the specific abuse form URL if needed.
     const REPORT_URL = 'https://niantic.helpshift.com/hc/en/5-report-an-issue-with-a-pokestop-gym/contact-us/?p=web&contact=1&l=en';
 
     const CURRENT_ORIGIN = window.location.origin;
+
+    // Message types for postMessage
+    const MSG_EXECUTOR = uuid;
+    const MSG_GET_DATA = 'wf-report-get-data';
+    const MSG_DATA = 'wf-report-data';
+
+    // Cache of last report payload in the Wayfarer tab
+    let lastReportPayload = null;
 
     // ======================================================================
     // WAYFARER SIDE
     // ======================================================================
 
-    const userSettings = {
-    };
+    const userSettings = {};
 
     function mergeDeep(target, source) {
         for (const key in source) {
@@ -79,10 +81,11 @@
     function initWayfarer() {
         startSidePanelWatcher();
         loadSettings();
+        setupWayfarerMessaging();
+        startPoiBridgeWatcherIfReady();
     }
 
     function startSidePanelWatcher() {
-        // Run once immediately
         sidePanelMutationHandler();
 
         const mo = new MutationObserver(sidePanelMutationHandler);
@@ -98,23 +101,90 @@
     }
 
     function insertReportWayspotLinkIfReady() {
-        const settingsBody = document.querySelector('.wfsmm-poi-function-links');
-        if (!settingsBody) return;
+        const reportLinkBody = document.querySelector('.wfsmm-poi-function-links');
+        if (!reportLinkBody) return;
 
-        if (document.getElementById('wfsmm-settings-report-wayspot')) return;
+        const linkId = 'wfsmm-settings-report-wayspot';
+        let link = document.getElementById(linkId);
 
-        const link = document.createElement('a');
-        link.id = 'wfsmm-settings-report-wayspot';
-        link.textContent = 'Report Wayspot';
-        link.style.cursor = 'pointer';
+        // If link already exists, nothing more to do here
+        if (!link) {
+            link = document.createElement('a');
+            link.id = linkId;
+            link.textContent = 'Report';
+            link.style.cursor = 'pointer';
+            // default hidden until we know the status
+            link.style.display = 'none';
 
-        settingsBody.appendChild(link);
+            reportLinkBody.appendChild(link);
 
-        link.addEventListener('click', (ev) => {
-            ev.preventDefault();
-            handleReportWayspotClick();
-        });
+            link.addEventListener('click', (ev) => {
+                ev.preventDefault();
+                handleReportWayspotClick();
+            });
+        }
+
+        // Make sure visibility matches the current POI status
+        updateReportWayspotLinkVisibility();
     }
+
+    function updateReportWayspotLinkVisibility() {
+        const link = document.getElementById('wfsmm-settings-report-wayspot');
+        if (!link) return;
+
+        const status = getCurrentWayspotStatus();
+        const isLive = status === 'LIVE';
+
+        link.style.display = isLive ? '' : 'none';
+    }
+
+    function getCurrentWayspotStatus() {
+        const bridge = document.getElementById('wfsmm-poi-bridge');
+        if (!bridge) return null;
+
+        const payloadAttr = bridge.getAttribute('data-payload');
+        if (!payloadAttr) return null;
+
+        let jsonStr = payloadAttr.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+
+        try {
+            const payload = JSON.parse(jsonStr);
+            if (payload && typeof payload.status === 'string') {
+                return payload.status.toUpperCase();
+            }
+        } catch (e) {
+            console.warn('[Report Wayspot] Failed to parse status from POI bridge:', e);
+        }
+
+        return null;
+    }
+
+    function startPoiBridgeWatcherIfReady() {
+        const bridge = document.getElementById('wfsmm-poi-bridge');
+        if (!bridge) return;
+
+        // Avoid multiple observers on the same element
+        if (bridge._wfPoiBridgeObserver) return;
+
+        const mo = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                if (m.type === 'attributes' && m.attributeName === 'data-payload') {
+                    updateReportWayspotLinkVisibility();
+                }
+            }
+        });
+
+        mo.observe(bridge, {
+            attributes: true,
+            attributeFilter: ['data-payload']
+        });
+
+        bridge._wfPoiBridgeObserver = mo;
+
+        // Ensure correct visibility immediately for current POI
+        updateReportWayspotLinkVisibility();
+    }
+
 
     function insertReportingSettingsLinkIfReady() {
         const settingsBody = document.querySelector(".wfsmm-settings-links");
@@ -135,200 +205,202 @@
         });
     }
 
- function openReportingSettingsWindow() {
-    if (document.getElementById("wfsmm-reporting-modal-backdrop")) return;
+    function openReportingSettingsWindow() {
+        if (document.getElementById("wfsmm-reporting-modal-backdrop")) return;
 
-    // Ensure global settings are loaded into userSettings
-    loadSettings();
+        // Ensure global settings are loaded into userSettings
+        loadSettings();
 
-    // Read existing reporting settings (if any)
-    const reporting = (userSettings.reporting && typeof userSettings.reporting === "object")
+        // Read existing reporting settings (if any)
+        const reporting = (userSettings.reporting && typeof userSettings.reporting === "object")
         ? userSettings.reporting
         : {};
 
-    // --- Backdrop ---
-    const backdrop = document.createElement("div");
-    backdrop.id = "wfsmm-reporting-modal-backdrop";
-    Object.assign(backdrop.style, {
-        position: "fixed",
-        inset: "0",
-        background: "rgba(0,0,0,0.35)",
-        zIndex: "2000",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        overflowY: "auto",
-        paddingTop: "12px",
-        paddingBottom: "12px"
-    });
-
-    function closeModal() {
-        backdrop.remove();
-    }
-
-    // --- Dialog container ---
-    const dialog = document.createElement("div");
-    Object.assign(dialog.style, {
-        background: "#ffffff",
-        borderRadius: "8px",
-        boxShadow: "0 10px 25px rgba(0,0,0,0.35)",
-        width: "260px",
-        maxWidth: "calc(100% - 32px)",
-        padding: "10px 12px 8px",
-        boxSizing: "border-box",
-        fontFamily: "Roboto, Arial, sans-serif",
-        fontSize: "12px",
-        color: "#111827",
-        maxHeight: "90vh",
-        overflowY: "auto"
-    });
-
-    // --- Title ---
-    const title = document.createElement("div");
-    title.textContent = "Reporting";
-    Object.assign(title.style, {
-        fontSize: "15px",
-        fontWeight: "600",
-        marginBottom: "10px"
-    });
-     dialog.appendChild(title);
-
-     // --- Context / helper text ---
-     const helper = document.createElement("div");
-     helper.textContent = "Provide details for auto-import into the Report Wayspot webform.";
-     Object.assign(helper.style, {
-         fontSize: "11px",
-         color: "#4b5563",
-         marginBottom: "10px",
-         lineHeight: "1.4"
-     });
-     dialog.appendChild(helper);
-
-    function makeRow(labelText, inputEl) {
-        const row = document.createElement("div");
-        Object.assign(row.style, {
+        // --- Backdrop ---
+        const backdrop = document.createElement("div");
+        backdrop.id = "wfsmm-reporting-modal-backdrop";
+        Object.assign(backdrop.style, {
+            position: "fixed",
+            inset: "0",
+            background: "rgba(0,0,0,0.35)",
+            zIndex: "2000",
             display: "flex",
             alignItems: "center",
-            marginBottom: "6px",
-            gap: "4px"
+            justifyContent: "center",
+            overflowY: "auto",
+            paddingTop: "12px",
+            paddingBottom: "12px"
         });
 
-        const label = document.createElement("label");
-        label.textContent = labelText;
-        Object.assign(label.style, {
-            flex: "0 0 80px",
+        function closeModal() {
+            backdrop.remove();
+        }
+
+        // --- Dialog container ---
+        const dialog = document.createElement("div");
+        Object.assign(dialog.style, {
+            background: "#ffffff",
+            borderRadius: "8px",
+            boxShadow: "0 10px 25px rgba(0,0,0,0.35)",
+            width: "260px",
+            maxWidth: "calc(100% - 32px)",
+            padding: "10px 12px 8px",
+            boxSizing: "border-box",
+            fontFamily: "Roboto, Arial, sans-serif",
+            fontSize: "12px",
+            color: "#111827",
+            maxHeight: "90vh",
+            overflowY: "auto"
+        });
+
+        // --- Title ---
+        const title = document.createElement("div");
+        title.textContent = "Reporting";
+        Object.assign(title.style, {
+            fontSize: "15px",
+            fontWeight: "600",
+            marginBottom: "10px"
+        });
+        dialog.appendChild(title);
+
+        // --- Context / helper text ---
+        const helper = document.createElement("div");
+        helper.textContent = "Provide details for auto-import into the Report Wayspot webform.";
+        Object.assign(helper.style, {
             fontSize: "11px",
-            color: "#374151"
+            color: "#4b5563",
+            marginBottom: "10px",
+            lineHeight: "1.4"
+        });
+        dialog.appendChild(helper);
+
+        function makeRow(labelText, inputEl) {
+            const row = document.createElement("div");
+            Object.assign(row.style, {
+                display: "flex",
+                alignItems: "center",
+                marginBottom: "6px",
+                gap: "4px"
+            });
+
+            const label = document.createElement("label");
+            label.textContent = labelText;
+            Object.assign(label.style, {
+                flex: "0 0 80px",
+                fontSize: "11px",
+                color: "#374151"
+            });
+
+            inputEl.style.flex = "1 0 auto";
+            inputEl.style.fontSize = "11px";
+            inputEl.style.padding = "3px 4px";
+            inputEl.style.borderRadius = "4px";
+            inputEl.style.border = "1px solid #d1d5db";
+            inputEl.style.boxSizing = "border-box";
+
+            row.appendChild(label);
+            row.appendChild(inputEl);
+            return row;
+        }
+
+        // --- Name ---
+        const nameInput = document.createElement("input");
+        nameInput.type = "text";
+        nameInput.placeholder = "Your full name";
+        nameInput.value = reporting.name || "";
+
+        dialog.appendChild(makeRow("Name:", nameInput));
+
+        // --- Email ---
+        const emailInput = document.createElement("input");
+        emailInput.type = "email";
+        emailInput.placeholder = "name@example.com";
+        emailInput.value = reporting.email || "";
+
+        dialog.appendChild(makeRow("Email:", emailInput));
+
+        // --- Buttons row ---
+        const buttonsRow = document.createElement("div");
+        Object.assign(buttonsRow.style, {
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: "8px",
+            marginTop: "8px"
         });
 
-        inputEl.style.flex = "1 0 auto";
-        inputEl.style.fontSize = "11px";
-        inputEl.style.padding = "3px 4px";
-        inputEl.style.borderRadius = "4px";
-        inputEl.style.border = "1px solid #d1d5db";
-        inputEl.style.boxSizing = "border-box";
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.textContent = "Cancel";
+        Object.assign(cancelBtn.style, {
+            padding: "4px 10px",
+            borderRadius: "4px",
+            border: "1px solid #d1d5db",
+            background: "#ffffff",
+            cursor: "pointer",
+            fontSize: "12px"
+        });
 
-        row.appendChild(label);
-        row.appendChild(inputEl);
-        return row;
+        const saveBtn = document.createElement("button");
+        saveBtn.type = "button";
+        saveBtn.textContent = "Save";
+        Object.assign(saveBtn.style, {
+            padding: "4px 12px",
+            borderRadius: "4px",
+            border: "1px solid #2563eb",
+            background: "#2563eb",
+            color: "#ffffff",
+            cursor: "pointer",
+            fontSize: "12px"
+        });
+
+        buttonsRow.appendChild(cancelBtn);
+        buttonsRow.appendChild(saveBtn);
+        dialog.appendChild(buttonsRow);
+
+        // --- Button handlers ---
+        cancelBtn.addEventListener("click", () => {
+            closeModal();
+        });
+
+        saveBtn.addEventListener("click", () => {
+            if (!userSettings.reporting || typeof userSettings.reporting !== "object") {
+                userSettings.reporting = {};
+            }
+
+            userSettings.reporting.name = nameInput.value.trim();
+            userSettings.reporting.email = emailInput.value.trim();
+
+            // Uses your existing localStorage-based save
+            saveSettings();
+            closeModal();
+        });
+
+        // ESC closes, Enter = Save
+        document.addEventListener("keydown", function escHandler(ev) {
+            if (ev.key === "Escape") {
+                closeModal();
+                document.removeEventListener("keydown", escHandler);
+            } else if (ev.key === "Enter") {
+                ev.preventDefault();
+                saveBtn.click();
+            }
+        });
+
+        backdrop.addEventListener("click", (ev) => {
+            if (ev.target === backdrop) {
+                closeModal();
+            }
+        });
+
+        backdrop.appendChild(dialog);
+        document.body.appendChild(backdrop);
     }
 
-    // --- Name ---
-    const nameInput = document.createElement("input");
-    nameInput.type = "text";
-    nameInput.placeholder = "Your full name";
-    nameInput.value = reporting.name || "";
-
-    dialog.appendChild(makeRow("Name:", nameInput));
-
-    // --- Email ---
-    const emailInput = document.createElement("input");
-    emailInput.type = "email";
-    emailInput.placeholder = "name@example.com";
-    emailInput.value = reporting.email || "";
-
-    dialog.appendChild(makeRow("Email:", emailInput));
-
-    // --- Buttons row ---
-    const buttonsRow = document.createElement("div");
-    Object.assign(buttonsRow.style, {
-        display: "flex",
-        justifyContent: "flex-end",
-        gap: "8px",
-        marginTop: "8px"
-    });
-
-    const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.textContent = "Cancel";
-    Object.assign(cancelBtn.style, {
-        padding: "4px 10px",
-        borderRadius: "4px",
-        border: "1px solid #d1d5db",
-        background: "#ffffff",
-        cursor: "pointer",
-        fontSize: "12px"
-    });
-
-    const saveBtn = document.createElement("button");
-    saveBtn.type = "button";
-    saveBtn.textContent = "Save";
-    Object.assign(saveBtn.style, {
-        padding: "4px 12px",
-        borderRadius: "4px",
-        border: "1px solid #2563eb",
-        background: "#2563eb",
-        color: "#ffffff",
-        cursor: "pointer",
-        fontSize: "12px"
-    });
-
-    buttonsRow.appendChild(cancelBtn);
-    buttonsRow.appendChild(saveBtn);
-    dialog.appendChild(buttonsRow);
-
-    // --- Button handlers ---
-    cancelBtn.addEventListener("click", () => {
-        closeModal();
-    });
-
-    saveBtn.addEventListener("click", () => {
-        if (!userSettings.reporting || typeof userSettings.reporting !== "object") {
-            userSettings.reporting = {};
-        }
-
-        userSettings.reporting.name = nameInput.value.trim();
-        userSettings.reporting.email = emailInput.value.trim();
-
-        // Uses your existing localStorage-based save
-        saveSettings();
-        closeModal();
-    });
-
-    // ESC closes, Enter = Save
-    document.addEventListener("keydown", function escHandler(ev) {
-        if (ev.key === "Escape") {
-            closeModal();
-            document.removeEventListener("keydown", escHandler);
-        } else if (ev.key === "Enter") {
-            ev.preventDefault();
-            saveBtn.click();
-        }
-    });
-
-    backdrop.addEventListener("click", (ev) => {
-        if (ev.target === backdrop) {
-            closeModal();
-        }
-    });
-
-    backdrop.appendChild(dialog);
-    document.body.appendChild(backdrop);
-}
-
-
     function handleReportWayspotClick() {
-        const wayspotData = collectCurrentWayspotData();
+        console.log('handleReportWayspotClick');
+        // Important: don't read address from DOM here; it may be for a different map click.
+        // We only want bridge data at this stage.
+        const wayspotData = collectCurrentWayspotData({ includeDomAddress: false });
 
         // Ensure settings loaded
         loadSettings();
@@ -336,8 +408,9 @@
         ? userSettings.reporting
         : {};
 
-        const payload = Object.assign(
-            { timestamp: Date.now() },
+        // Base payload that we WANT to send to Helpshift
+        const basePayload = Object.assign(
+            {},
             wayspotData || {},
             {
                 name: reporting.name || null,
@@ -345,39 +418,55 @@
             }
         );
 
-        GM_setValue(uuid, payload);
-        window.open(REPORT_URL, '_blank');
+        // Do we already have a good address from the POI bridge?
+        const hasAddress =
+              !!(basePayload.address ||
+                 basePayload.city ||
+                 basePayload.state ||
+                 basePayload.postcode ||
+                 basePayload.country);
+
+        // If we have coords but NOT an address, use the original flow:
+        //  1) simulate a map click at the POI
+        //  2) wait for reverse geocode to fill the "Loading..." field
+        //  3) parse that address and then open Helpshift
+        if (!hasAddress && basePayload.lat != null && basePayload.lng != null) {
+            // Kick off reverse geocoding for THIS POI
+            clickMapAtPoi(basePayload.lat, basePayload.lng);
+
+            // Poll the DOM for the updated address and only then open Helpshift
+            waitForAddressAndOpen(basePayload);
+        } else {
+            // Either we already have a proper address from the bridge,
+            // or we don't have coords to reverse-geocode with.
+            // Go straight to opening Helpshift.
+            openHelpshiftWithData(basePayload);
+        }
     }
 
-    function waitForAddressAndOpen(baseWayspot) {
-        const maxAttempts = 40;
-        let attempts = 0;
+    function setupWayfarerMessaging() {
+        window.addEventListener('message', function (event) {
+            // Only accept messages from Helpshift
+            if (event.origin !== ORIGIN_HELPSHIFT) return;
 
-        const intervalId = setInterval(() => {
-            attempts++;
+            const data = event.data || {};
+            if (data.executor !== MSG_EXECUTOR) return;
 
-            const parsed = extractAddressFromDom();
-            // We expect extractAddressFromDom() to give us { raw, address, city, state, postcode, country }
-            if (parsed && parsed.raw && parsed.raw !== "Loading...") {
-                clearInterval(intervalId);
-
-                const merged = Object.assign({}, baseWayspot);
-
-                if (parsed.address)  merged.address  = parsed.address;
-                if (parsed.city)     merged.city     = parsed.city;
-                if (parsed.state)    merged.state    = parsed.state;
-                if (parsed.postcode) merged.postcode = parsed.postcode;
-                if (parsed.country)  merged.country  = parsed.country;
-
-                openHelpshiftWithData(merged);
-            } else if (attempts >= maxAttempts) {
-                // Timed out waiting → just go with what we already have
-                clearInterval(intervalId);
-                openHelpshiftWithData(baseWayspot);
+            if (data.type === MSG_GET_DATA) {
+                if (lastReportPayload) {
+                    event.source.postMessage({
+                        executor: MSG_EXECUTOR,
+                        type: MSG_DATA,
+                        payload: lastReportPayload
+                    }, ORIGIN_HELPSHIFT);
+                }
             }
-        }, 250);
+        }, false);
     }
 
+    // ======================================================================
+    // MAP UTILITIES
+    // ======================================================================
 
     function getMap() {
         return new Promise(resolve => {
@@ -441,11 +530,45 @@
         });
     }
 
+    // If you decide to use this later, it now just reuses the same pattern
     function openHelpshiftWithData(data) {
         const payload = Object.assign({ timestamp: Date.now() }, data || {});
-        GM_setValue(uuid, payload);
+        lastReportPayload = payload;
         window.open(REPORT_URL, '_blank');
     }
+
+    function waitForAddressAndOpen(baseWayspot) {
+        const maxAttempts = 40;
+        let attempts = 0;
+
+        const intervalId = setInterval(() => {
+            attempts++;
+
+            const parsed = extractAddressFromDom();
+            // We expect extractAddressFromDom() to give us { raw, address, city, state, postcode, country }
+            if (parsed && parsed.raw && parsed.raw !== "Loading...") {
+                clearInterval(intervalId);
+
+                const merged = Object.assign({}, baseWayspot);
+
+                if (parsed.address) merged.address = parsed.address;
+                if (parsed.city) merged.city = parsed.city;
+                if (parsed.state) merged.state = parsed.state;
+                if (parsed.postcode) merged.postcode = parsed.postcode;
+                if (parsed.country) merged.country = parsed.country;
+
+                openHelpshiftWithData(merged);
+            } else if (attempts >= maxAttempts) {
+                // Timed out waiting → just go with what we already have
+                clearInterval(intervalId);
+                openHelpshiftWithData(baseWayspot);
+            }
+        }, 250);
+    }
+
+    // ======================================================================
+    // ADDRESS PARSING + POI BRIDGE
+    // ======================================================================
 
     function parseAddressText(text) {
         const trimmed = (text || "").trim();
@@ -483,7 +606,7 @@
             const tokens = parts[i].split(/\s+/);
             for (let j = tokens.length - 1; j >= 0; j--) {
                 const tok = tokens[j];
-                if (/^\d{3,}$/.test(tok)) { // "6053", "400027", "75017", etc.
+                if (/^\d{3,}$/.test(tok)) {
                     postcode = tok;
                     postcodePartIndex = i;
                     postcodeTokenIndex = j;
@@ -502,7 +625,7 @@
                 result.state = tokens[stateTokenIndex];
             }
 
-            // City may be before state/postcode OR after postcode (e.g. "75017 Paris")
+            // City may be before state/postcode OR after postcode
             const cutoff = (stateTokenIndex !== null) ? stateTokenIndex : postcodeTokenIndex;
             const cityFragment = (cutoff > 0) ? tokens.slice(0, cutoff).join(" ") : "";
             const cityTail = (postcodeTokenIndex + 1 < tokens.length)
@@ -516,7 +639,7 @@
             }
 
             // Address is everything before the postcode part, unless we had to steal
-            // the previous part for city (India-style addresses)
+            // the previous part for city
             if (!cityFragment && !cityTail && postcodePartIndex - 1 >= 0) {
                 // city = previous part, address = everything before that
                 result.city = parts[postcodePartIndex - 1];
@@ -539,7 +662,6 @@
         }
 
         if (remainingParts.length === 1) {
-            // e.g. "4W39+3C Embleton WA"  OR  "Some Place Name"
             const seg = remainingParts[0];
             const tokens = seg.split(/\s+/);
             const plusCode = tokens[0] && tokens[0].includes("+") ? tokens[0] : null;
@@ -549,7 +671,6 @@
                 const rest = tokens.slice(1);
                 const last = rest[rest.length - 1];
                 if (/^[A-Z]{1,3}$/.test(last)) {
-                    // Looks like a state code (e.g. "WA")
                     result.state = last;
                     result.city = rest.slice(0, -1).join(" ") || null;
                 } else {
@@ -560,8 +681,6 @@
             return result;
         }
 
-        // e.g. "RR2R+QH Vĩnh Hưng District, Long An, Vietnam"
-        // remainingParts = ["RR2R+QH Vĩnh Hưng District", "Long An"]
         const first = remainingParts[0];
         const tokens = first.split(/\s+/);
         const plusCode = tokens[0] && tokens[0].includes("+") ? tokens[0] : null;
@@ -609,20 +728,19 @@
         return null;
     }
 
-
     function collectCurrentWayspotData(options = {}) {
+        console.log('collectCurrentWayspotData');
         const includeDomAddress = options.includeDomAddress !== false; // default: true
 
         let title = null;
         let lat = null;
         let lng = null;
-
-        // New: fields for address components
         let address = null;
         let city = null;
         let state = null;
         let country = null;
         let postcode = null;
+        let status = null;
 
         const bridge = document.getElementById('wfsmm-poi-bridge');
 
@@ -653,11 +771,14 @@
                         }
 
                         // In case the Wayfarer-side script already added these to the JSON:
-                        if (payload.address)  address  = payload.address;
-                        if (payload.city)     city     = payload.city;
-                        if (payload.state)    state    = payload.state;
-                        if (payload.country)  country  = payload.country;
+                        if (payload.address) address = payload.address;
+                        if (payload.city) city = payload.city;
+                        if (payload.state) state = payload.state;
+                        if (payload.country) country = payload.country;
                         if (payload.postcode) postcode = payload.postcode;
+
+                        // NEW: grab status from bridge
+                        if (payload.status) status = payload.status;
                     }
                 } catch (err) {
                     console.warn('[Report Wayspot] Failed to parse data-payload JSON:', err);
@@ -672,11 +793,11 @@
         if (includeDomAddress && (!address || !city || !state || !postcode || !country)) {
             const parsed = extractAddressFromDom();
             if (parsed) {
-                if (!address  && parsed.address)  address  = parsed.address;
-                if (!city     && parsed.city)     city     = parsed.city;
-                if (!state    && parsed.state)    state    = parsed.state;
+                if (!address && parsed.address) address = parsed.address;
+                if (!city && parsed.city) city = parsed.city;
+                if (!state && parsed.state) state = parsed.state;
                 if (!postcode && parsed.postcode) postcode = parsed.postcode;
-                if (!country  && parsed.country)  country  = parsed.country;
+                if (!country && parsed.country) country = parsed.country;
             }
         }
 
@@ -701,37 +822,62 @@
             preferredLanguage: null,
 
             // Address bits
-            address: address  || null,
-            city:    city     || null,
-            state:   state    || null,
-            country: country  || null,
+            address: address || null,
+            city: city || null,
+            state: state || null,
+            country: country || null,
             postcode: postcode || null,
 
             // from POI bridge
             title: title || null,
             lat: latNum,
-            lng: lngNum
+            lng: lngNum,
+
+            // wayspot status from bridge
+            status: status || null
         };
 
         return result;
     }
 
     // ======================================================================
-    // HELPSHIFT SIDE (shadow-DOM aware, minimal logging)
+    // HELPSHIFT SIDE (shadow-DOM aware, using postMessage)
     // ======================================================================
 
     function initHelpshift() {
-        const data = GM_getValue(uuid);
+        setupHelpshiftMessaging();
+        requestWayspotDataFromOpener();
+    }
 
-        if (data) {
-            waitForHelpshiftFormAndFill(data);
-        } else {
-            GM_addValueChangeListener(uuid, (name, oldValue, newValue) => {
-                if (name === uuid && newValue) {
-                    waitForHelpshiftFormAndFill(newValue);
-                }
-            });
+    function requestWayspotDataFromOpener() {
+        try {
+            if (!window.opener) {
+                console.warn("[Report Wayspot] No opener window found; cannot request data.");
+                return;
+            }
+
+            window.opener.postMessage({
+                executor: MSG_EXECUTOR,
+                type: MSG_GET_DATA
+            }, ORIGIN_WAYFARER);
+        } catch (e) {
+            console.warn("[Report Wayspot] Failed to request data from opener:", e);
         }
+    }
+
+    function setupHelpshiftMessaging() {
+        window.addEventListener('message', function (event) {
+            // Only accept messages from Wayfarer
+            if (event.origin !== ORIGIN_WAYFARER) return;
+
+            const data = event.data || {};
+            if (data.executor !== MSG_EXECUTOR) return;
+
+            if (data.type === MSG_DATA && data.payload) {
+                // We got the wayspot payload: wait for form, then fill
+                waitForHelpshiftFormAndFill(data.payload);
+            }
+        }, false);
     }
 
     // -----------------------------------------------------------
@@ -868,7 +1014,6 @@
     // -----------------------------------------------------------
 
     function fillHelpshiftForm(wayspot) {
-
         const nameInput = findNameInput();
         setFormValue(nameInput, wayspot.name);
 
@@ -895,10 +1040,11 @@
 
         const postcodeInput = findPostcodeInput();
         setFormValue(postcodeInput, wayspot.postcode);
-
-
     }
 
+    // ======================================================================
+    // ENTRY POINT
+    // ======================================================================
 
     if (CURRENT_ORIGIN === ORIGIN_WAYFARER) {
         initWayfarer();
