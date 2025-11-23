@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         Wayfarer Maps - Base
-// @version      1.0.0
+// @name         Wayfarer Map - Base
+// @version      1.0.1
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-base.user.js
@@ -544,9 +544,21 @@
             removeSidenavPaddingForMapPage();
         } else {
             restoreSidenavPadding();
+            restoreScrolling();
         }
     }
 
+    function restoreScrolling() {
+        let node = document.querySelector('mat-sidenav-content'); // or your root
+        while (node && node !== document.body) {
+            if (node instanceof HTMLElement) {
+                if (node.style.overflowY === 'hidden') {
+                    node.style.overflowY = ''; // remove inline override
+                }
+            }
+            node = node.parentElement;
+        }
+    }
     function initSidenavPaddingRouteWatcher() {
         if (window._wfsmmSidenavPaddingWatcherInitialised) return;
         window._wfsmmSidenavPaddingWatcherInitialised = true;
