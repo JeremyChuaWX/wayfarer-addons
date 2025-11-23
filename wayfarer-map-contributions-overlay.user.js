@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map - Contributions Overlay
-// @version      0.0.1
+// @version      0.1.0
 // @description  Loads nominations from the Contributions list and shows them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-contributions-overlay.user.js
@@ -24,9 +24,14 @@
     let lastSelectedNomMarker = null;
     let lastSelectedNomOriginalIcon = null;
 
-    // These are now only used by the existing settings modal UI.
-    const BUILTIN_TYPES = ["roadmap", "satellite", "hybrid"];
-    const CUSTOM_PROVIDER_NAMES = ["Bing", "Esri", "Esri Clarity", "OSM"];
+    const PERFORMANCE_MAX_VISIBLE_MARKERS = 400;
+
+    const MANAGE_ACTION_STATUS = {
+        releasehold: "NOMINATED",
+        hold: "HELD",
+        withdraw: "WITHDRAWN",
+        appeal: "APPEALED",
+    };
 
     // -----------------------------
     // Settings (defaults + storage)
@@ -35,10 +40,12 @@
     // Default marker config lives here and can be overridden by localStorage.
     // enabled: all true except ACCEPTED: false.
     const userSettings = {
-        map: {},
+        map: {
+            performanceModeEnabled: true,
+            performanceMaxVisibleMarkers: PERFORMANCE_MAX_VISIBLE_MARKERS
+        },
         markers: {
             statuses: {
-                // Fallback style if a status isn't explicitly listed
                 DEFAULT: {
                     strokeColor: "#6b7280",
                     strokeWeight: 2,
@@ -48,87 +55,97 @@
                     scale: 8,
                     enabled: true
                 },
-                ACCEPTED: {
-                    strokeColor: "#22c55e", // green
-                    strokeWeight: 2,
-                    strokeOpacity: 1.0,
-                    fillColor: "#22c55e",
-                    fillOpacity: 0.6,
-                    scale: 8,
-                    enabled: false        // <--- only one disabled by default
-                },
-                REJECTED: {
-                    strokeColor: "#ff0000", // red
-                    strokeWeight: 2,
-                    strokeOpacity: 1.0,
-                    fillColor: "#ff0000",
-                    fillOpacity: 0.7,
-                    scale: 8,
-                    enabled: true
-                },
-                DUPLICATE: {
-                    strokeColor: "#ff0000", // red
-                    strokeWeight: 2,
-                    strokeOpacity: 1.0,
-                    fillColor: "#ff0000",
-                    fillOpacity: 0.7,
-                    scale: 8,
-                    enabled: true
-                },
-                VOTING: {
-                    strokeColor: "#002ec7", // blue
-                    strokeWeight: 2,
-                    strokeOpacity: 1.0,
-                    fillColor: "#002ec7",
-                    fillOpacity: 0.6,
-                    scale: 8,
-                    enabled: true
-                },
+
                 NOMINATED: {
-                    strokeColor: "#38bdf8", // light blue
-                    strokeWeight: 2,
-                    strokeOpacity: 1.0,
-                    fillColor: "#38bdf8",
-                    fillOpacity: 0.6,
-                    scale: 8,
-                    enabled: true
+                    "strokeColor": "#7a7a7a",
+                    "strokeWeight": 2,
+                    "strokeOpacity": 1,
+                    "fillColor": "#bababa",
+                    "fillOpacity": 0.6,
+                    "scale": 8,
+                    "enabled": true
                 },
-                HELD: {
-                    strokeColor: "#facc15", // yellow
-                    strokeWeight: 2,
-                    strokeOpacity: 1.0,
-                    fillColor: "#facc15",
-                    fillOpacity: 0.6,
-                    scale: 8,
-                    enabled: true
+
+                VOTING: {
+                    "strokeColor": "#477eff",
+                    "strokeWeight": 2,
+                    "strokeOpacity": 1,
+                    "fillColor": "#3dbef5",
+                    "fillOpacity": 0.6,
+                    "scale": 8,
+                    "enabled": true
                 },
-                WITHDRAWN: {
-                    strokeColor: "#9ca3af", // grey
-                    strokeWeight: 2,
-                    strokeOpacity: 1.0,
-                    fillColor: "#9ca3af",
-                    fillOpacity: 0.6,
-                    scale: 8,
-                    enabled: true
-                },
+
                 NIANTIC_REVIEW: {
-                    strokeColor: "#001661", // dark blue
-                    strokeWeight: 2,
-                    strokeOpacity: 1.0,
-                    fillColor: "#001661",
-                    fillOpacity: 0.6,
-                    scale: 8,
-                    enabled: true
+                    "strokeColor": "#002ec7",
+                    "strokeWeight": 2,
+                    "strokeOpacity": 1,
+                    "fillColor": "#002ec7",
+                    "fillOpacity": 0.6,
+                    "scale": 8,
+                    "enabled": true
                 },
+
                 APPEALED: {
-                    strokeColor: "#a855f7", // purple
-                    strokeWeight: 2,
-                    strokeOpacity: 1.0,
-                    fillColor: "#a855f7",
-                    fillOpacity: 0.6,
-                    scale: 8,
-                    enabled: true
+                    "strokeColor": "#7013fb",
+                    "strokeWeight": 2,
+                    "strokeOpacity": 1,
+                    "fillColor": "#992af4",
+                    "fillOpacity": 0.6,
+                    "scale": 8,
+                    "enabled": true
+                },
+
+                HELD: {
+                    "strokeColor": "#e4dc07",
+                    "strokeWeight": 2,
+                    "strokeOpacity": 1,
+                    "fillColor": "#fcff33",
+                    "fillOpacity": 0.65,
+                    "scale": 8,
+                    "enabled": true
+                },
+
+                WITHDRAWN: {
+                    "strokeColor": "#383838",
+                    "strokeWeight": 2,
+                    "strokeOpacity": 1,
+                    "fillColor": "#4d4d4d",
+                    "fillOpacity": 0.6,
+                    "scale": 8,
+                    "enabled": true
+                },
+
+                REJECTED: {
+                    "strokeColor": "#bd0000",
+                    "strokeWeight": 2,
+                    "strokeOpacity": 1,
+                    "fillColor": "#f50000",
+                    "fillOpacity": 0.6,
+                    "scale": 8,
+                    "enabled": true
+                },
+
+                DUPLICATE: {
+                    "strokeColor": "#bd0000",
+                    "strokeWeight": 2,
+                    "strokeOpacity": 1,
+                    "fillColor": "#f50000",
+                    "fillOpacity": 0.6,
+                    "scale": 8,
+                    "enabled": true
+                },
+
+                ACCEPTED: {
+                    "strokeColor": "#22c55e",
+                    "strokeWeight": 2,
+                    "strokeOpacity": 1,
+                    "fillColor": "#22c55e",
+                    "fillOpacity": 0,
+                    "scale": 14,
+                    "enabled": true
                 }
+
             }
         }
     };
@@ -270,6 +287,176 @@
             };
         }).catch(err => {
             console.warn("[ContribOverlay] IndexedDB not available (save):", err);
+        });
+    }
+
+    // -----------------------------
+    // Parse Contributions data
+    // -----------------------------
+
+    let nominations = null;
+
+    /**
+     * Overwrite the open method of the XMLHttpRequest.prototype to intercept the server calls
+     */
+    (function (open, send, setRequestHeader) {
+        XMLHttpRequest.prototype.open = function(method, url) {
+            const cleanUrl = typeof url === "string" ? url.split("?")[0] : url;
+
+            // Existing GET nominations hook
+            if (method === "GET" && cleanUrl === "/api/v1/vault/manage") {
+                this.addEventListener("load", parseNominationsFromResponse, false);
+            }
+
+            // Your explicit actions mapping version (from earlier):
+            const ACTIONS = {
+                "/api/v1/vault/manage/hold":        "HELD",
+                "/api/v1/vault/manage/releasehold": "NOMINATED",
+                "/api/v1/vault/manage/withdraw":    "WITHDRAWN",
+                "/api/v1/vault/manage/appeal":      "APPEALED",
+            };
+
+            if (method === "POST" && ACTIONS[cleanUrl]) {
+                this._wfsmmNewStatus = ACTIONS[cleanUrl];
+
+                this.addEventListener("load", function () {
+                    try {
+                        const response = this.responseText || this.response;
+                        const json = response ? JSON.parse(response) : null;
+                        if (!json || json.captcha) return;
+                        if (json.result !== "DONE") return;
+
+                        const id = this._wfsmmId;
+                        if (!id) return;
+
+                        updateSingleNominationStatus(id, this._wfsmmNewStatus);
+
+                    } catch (err) {
+                        console.warn("[ContribOverlay] Error handling manage action:", err);
+                    }
+                }, false);
+            }
+
+            return open.apply(this, arguments);
+        };
+
+        XMLHttpRequest.prototype.send = function (body) {
+            if (this._wfsmmNewStatus && body) {
+                try {
+                    if (typeof body === "string") {
+                        const parsed = JSON.parse(body);
+                        const payload = Array.isArray(parsed) ? parsed[0] : parsed;
+                        if (payload && payload.id) {
+                            this._wfsmmId = payload.id;
+                        }
+                    }
+                } catch (err) {
+                    console.warn("[ContribOverlay] Failed to parse manage action payload:", err);
+                }
+            }
+
+            return send.apply(this, arguments);
+        };
+
+    })(XMLHttpRequest.prototype.open,
+       XMLHttpRequest.prototype.send,
+       XMLHttpRequest.prototype.setRequestHeader);
+
+    function fetchLatestNominations() {
+        // Use absolute URL as requested; relative would also work since we're same-origin.
+        fetch("/api/v1/vault/manage", {
+            method: "GET",
+            credentials: "include" // make sure cookies/session are sent
+        })
+            .then(res => {
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+            return res.json();
+        })
+            .then(json => {
+            handleNominationsJson(json);
+        })
+            .catch(err => {
+            console.warn("[ContribOverlay] Failed to fetch latest nominations:", err);
+        });
+    }
+
+    function parseNominationsFromResponse() {
+        try {
+            const response = this.responseText || this.response;
+            const json = JSON.parse(response);
+            handleNominationsJson(json);
+        } catch (e) {
+            console.log('[ContribOverlay] Error parsing nominations:', e);
+        }
+    }
+
+    function handleNominationsJson(json) {
+        if (!json) {
+            console.log('[ContribOverlay] No JSON payload for nominations');
+            return;
+        }
+
+        // ignore if it's related to captchas
+        if (json.captcha) return;
+
+        const submissions = json.result && json.result.submissions;
+        if (!submissions) {
+            console.log('[ContribOverlay] Wayfarer response did not include submissions.');
+            return;
+        }
+
+        nominations = submissions;
+        saveNominationsToIDB(submissions);
+        refreshNominationMarkers();
+    }
+
+    function updateSingleNominationStatus(id, newStatus) {
+        if (!id || !newStatus) return;
+
+        let updatedNom = null;
+
+        // --- Update in-memory nominations ---
+        if (Array.isArray(nominations)) {
+            const nom = nominations.find(n => n.id === id);
+            if (nom) {
+                nom.status = newStatus;
+                updatedNom = nom;
+            }
+        }
+
+        // --- Update IndexedDB (upsert only this record) ---
+        getIDBInstance().then(db => {
+            const tx = db.transaction(OBJECT_STORE_NAME, "readwrite");
+            const store = tx.objectStore(OBJECT_STORE_NAME);
+
+            if (updatedNom) {
+                store.put(updatedNom);
+            }
+
+            tx.oncomplete = () => {
+                db.close();
+
+                // Refresh markers to reflect new status colours
+                refreshNominationMarkers();
+
+                // If this nomination is currently selected, update the side panel
+                if (updatedNom &&
+                    nominationMarkers &&
+                    nominationMarkers[id] === lastSelectedNomMarker) {
+
+                    sendPoiToBridge(updatedNom);
+                    updateNominationActionLinks(updatedNom);
+                }
+            };
+
+            tx.onerror = () => {
+                console.warn("[ContribOverlay] Transaction error while updating a nomination", tx.error);
+                db.close();
+            };
+        }).catch(err => {
+            console.warn("[ContribOverlay] IndexedDB not available:", err);
         });
     }
 
@@ -420,6 +607,158 @@
         }, 300);
     }
 
+    function openMarkerStyleModal(statusKey, label, cfg, onUpdated) {
+        openSettingsModal({
+            id: `wf-contrib-marker-style-${statusKey}`,
+            title: `Customise marker – ${label}`,
+            buildContent(body) {
+                const section = document.createElement("div");
+                section.className = "wfsmm-modal-section";
+
+                const desc = document.createElement("div");
+                desc.style.fontSize = "11px";
+                desc.style.marginBottom = "6px";
+                desc.textContent = "Adjust how this status appears on the map. Changes will be applied when you click OK.";
+                section.appendChild(desc);
+
+                const form = document.createElement("div");
+                form.style.display = "grid";
+                form.style.gridTemplateColumns = "max-content 1fr";
+                form.style.rowGap = "4px";
+                form.style.columnGap = "8px";
+                form.style.alignItems = "center";
+
+                function makeLabel(text) {
+                    const label = document.createElement("label");
+                    label.textContent = text;
+                    label.style.fontSize = "11px";
+                    return label;
+                }
+
+                function makeColorInput(value) {
+                    const input = document.createElement("input");
+                    input.type = "color";
+                    input.value = value;
+                    input.style.width = "40px";
+                    input.style.padding = "0";
+                    return input;
+                }
+
+                function makeNumberInput(value, min, max, step) {
+                    const input = document.createElement("input");
+                    input.type = "number";
+                    input.value = value;
+                    input.min = String(min);
+                    input.max = String(max);
+                    input.step = String(step);
+                    input.style.width = "70px";
+                    input.style.fontSize = "11px";
+                    input.style.padding = "2px 4px";
+                    input.style.boxSizing = "border-box";
+                    return input;
+                }
+
+                const previewLabel = document.createElement("div");
+                previewLabel.textContent = "Preview";
+                previewLabel.style.marginTop = "8px";
+                previewLabel.style.marginBottom = "4px";
+                previewLabel.style.fontSize = "11px";
+                previewLabel.style.fontWeight = "bold";
+
+                const preview = document.createElement("div");
+                preview.style.display = "inline-block";
+                preview.style.borderRadius = "50%";
+                preview.style.boxSizing = "border-box";
+
+                const strokeColorInput = makeColorInput(cfg.strokeColor || "#000000");
+                const strokeOpacityInput = makeNumberInput(cfg.strokeOpacity ?? 1.0, 0, 1, 0.05);
+                const strokeWidthInput = makeNumberInput(cfg.strokeWeight ?? 2, 0, 10, 0.5);
+                const fillColorInput = makeColorInput(cfg.fillColor || "#000000");
+                const fillOpacityInput = makeNumberInput(cfg.fillOpacity ?? 0.5, 0, 1, 0.05);
+                const scaleInput = makeNumberInput(cfg.scale ?? 8, 2, 30, 1);
+
+                // Layout
+                form.appendChild(makeLabel("Line colour"));
+                form.appendChild(strokeColorInput);
+
+                form.appendChild(makeLabel("Line opacity"));
+                form.appendChild(strokeOpacityInput);
+
+                form.appendChild(makeLabel("Line width"));
+                form.appendChild(strokeWidthInput);
+
+                form.appendChild(makeLabel("Fill colour"));
+                form.appendChild(fillColorInput);
+
+                form.appendChild(makeLabel("Fill opacity"));
+                form.appendChild(fillOpacityInput);
+
+                form.appendChild(makeLabel("Size"));
+                form.appendChild(scaleInput);
+
+                function updatePreview() {
+                    const strokeColor = strokeColorInput.value || "#000000";
+                    const strokeOpacity = clamp(strokeOpacityInput.value, 0, 1, 1.0);
+                    const strokeWidth = clamp(strokeWidthInput.value, 0, 10, 2);
+                    const fillColor = fillColorInput.value || "#000000";
+                    const fillOpacity = clamp(fillOpacityInput.value, 0, 1, 0.5);
+                    const scale = clamp(scaleInput.value, 2, 30, 8);
+
+                    const sizePx = scale * 2;
+                    preview.style.width = `${sizePx}px`;
+                    preview.style.height = `${sizePx}px`;
+                    preview.style.border = `${strokeWidth}px solid ${hexToRgba(strokeColor, strokeOpacity)}`;
+                    preview.style.backgroundColor = hexToRgba(fillColor, fillOpacity);
+                }
+
+                [strokeColorInput, strokeOpacityInput, strokeWidthInput,
+                 fillColorInput, fillOpacityInput, scaleInput]
+                    .forEach(el => el.addEventListener("input", updatePreview));
+
+                updatePreview();
+
+                section.appendChild(form);
+                section.appendChild(previewLabel);
+                section.appendChild(preview);
+
+                body.appendChild(section);
+
+                return {
+                    strokeColorInput,
+                    strokeOpacityInput,
+                    strokeWidthInput,
+                    fillColorInput,
+                    fillOpacityInput,
+                    scaleInput,
+                    updatePreview
+                };
+            },
+            onOk(ctx, closeModal) {
+                const {
+                    strokeColorInput,
+                    strokeOpacityInput,
+                    strokeWidthInput,
+                    fillColorInput,
+                    fillOpacityInput,
+                    scaleInput
+                } = ctx;
+
+                cfg.strokeColor = strokeColorInput.value || cfg.strokeColor || "#6b7280";
+                cfg.strokeOpacity = clamp(strokeOpacityInput.value, 0, 1, cfg.strokeOpacity ?? 1.0);
+                cfg.strokeWeight = clamp(strokeWidthInput.value, 0, 10, cfg.strokeWeight ?? 2);
+                cfg.fillColor = fillColorInput.value || cfg.fillColor || "#6b7280";
+                cfg.fillOpacity = clamp(fillOpacityInput.value, 0, 1, cfg.fillOpacity ?? 0.5);
+                cfg.scale = clamp(scaleInput.value, 2, 30, cfg.scale ?? 8);
+
+                if (typeof onUpdated === "function") {
+                    onUpdated();
+                }
+
+                closeModal();
+            }
+        });
+    }
+
     function openContributionMarkerSettingsWindow() {
         const markersCfgRoot = userSettings.markers || (userSettings.markers = {});
         const markersCfg = markersCfgRoot.statuses || (markersCfgRoot.statuses = {});
@@ -437,8 +776,8 @@
             };
         }
 
+        // Order with ACCEPTED at the bottom
         const STATUS_ROWS = [
-            { key: "ACCEPTED",        label: "Accepted" },
             { key: "NOMINATED",       label: "Nominated" },
             { key: "VOTING",          label: "Voting" },
             { key: "NIANTIC_REVIEW",  label: "Niantic Review" },
@@ -446,7 +785,8 @@
             { key: "HELD",            label: "Hold" },
             { key: "WITHDRAWN",       label: "Withdrawn" },
             { key: "REJECTED",        label: "Rejected" },
-            { key: "DUPLICATE",       label: "Duplicate" }
+            { key: "DUPLICATE",       label: "Duplicate" },
+            { key: "ACCEPTED",        label: "Accepted" }
         ];
 
         function ensureCfgForStatus(key) {
@@ -469,19 +809,65 @@
             id: "wf-contrib-marker-backdrop",
             title: "Contribution marker options",
             buildContent(dialog) {
-                const section = document.createElement("div");
-                section.className = "wfsmm-modal-section";
+                const container = document.createElement("div");
+                container.className = "wfsmm-modal-section";
 
-                const header = document.createElement("div");
-                header.className = "wfsmm-modal-section-header";
-                header.textContent = "Marker style by contribution status";
-                section.appendChild(header);
+                // ---- PERFORMANCE / LOTS OF MARKERS SECTION ----
+                const mapCfg = userSettings.map || (userSettings.map = {});
+                if (typeof mapCfg.performanceModeEnabled !== "boolean") {
+                    mapCfg.performanceModeEnabled = true;
+                }
+                if (typeof mapCfg.performanceMaxVisibleMarkers !== "number") {
+                    mapCfg.performanceMaxVisibleMarkers = PERFORMANCE_MAX_VISIBLE_MARKERS;
+                }
+
+                const perfRow = document.createElement("div");
+                perfRow.style.display = "flex";
+                perfRow.style.alignItems = "center";
+                perfRow.style.marginBottom = "8px";
+                perfRow.style.gap = "6px";
+
+                const perfCheckbox = document.createElement("input");
+                perfCheckbox.type = "checkbox";
+                perfCheckbox.id = "wf-contrib-performance-mode";
+                perfCheckbox.checked = !!mapCfg.performanceModeEnabled;
+
+                const perfLabel = document.createElement("label");
+                perfLabel.htmlFor = perfCheckbox.id;
+                perfLabel.style.fontSize = "11px";
+                perfLabel.textContent = 'Improve performance when lots of markers';
+
+                const perfHelp = document.createElement("div");
+                perfHelp.style.fontSize = "10px";
+                perfHelp.style.color = "#6b7280";
+                perfHelp.style.marginLeft = "20px";
+                perfHelp.style.marginTop = "2px";
+                perfHelp.textContent = 'Hides markers at low zoom levels to prevent lag.';
+
+                perfRow.appendChild(perfCheckbox);
+                perfRow.appendChild(perfLabel);
+                container.appendChild(perfRow);
+                container.appendChild(perfHelp);
+                // ---- END PERFORMANCE SECTION ----
+
+                // ACCEPTED warning banner
+                const warning = document.createElement("div");
+                warning.style.display = "none";
+                warning.style.marginTop = "8px";
+                warning.style.marginBottom = "8px";
+                warning.style.padding = "6px 8px";
+                warning.style.borderRadius = "4px";
+                warning.style.background = "#fef3c7"; // light amber
+                warning.style.color = "#92400e";      // dark amber
+                warning.style.fontSize = "11px";
+                warning.textContent = 'Warning: Showing "Accepted" Wayspots may produce unexpected behaviour, such as showing Wayspots on the map which were later retired or moved. Consider using a different visual style to Live Wayspots.';
+                container.appendChild(warning);
 
                 const hint = document.createElement("div");
                 hint.style.fontSize = "11px";
-                hint.style.marginBottom = "4px";
-                hint.textContent = "Adjust the appearance of markers for each status. Preview updates live; click OK to apply.";
-                section.appendChild(hint);
+                hint.style.marginBottom = "6px";
+                hint.textContent = 'Choose which nomination statuses to show on the map. Click "Customise" to adjust marker appearance for a specific status.';
+                container.appendChild(hint);
 
                 const table = document.createElement("table");
                 table.className = "wfsmm-circle-table";
@@ -495,213 +881,152 @@
                     const th = document.createElement("th");
                     th.textContent = text;
                     th.style.padding = "2px 4px";
-                    th.style.textAlign = "center";
+                    th.style.textAlign = "left";
                     return th;
                 }
 
                 function makeTD() {
                     const td = document.createElement("td");
                     td.style.padding = "2px 4px";
-                    td.style.textAlign = "center";
+                    td.style.verticalAlign = "middle";
                     return td;
                 }
 
-                function styleColorInput(input) {
-                    input.className = "wfsmm-modal-color";
-                    input.style.width = "26px";
-                    input.style.padding = "0";
-                }
-
-                function styleNumericInput(input) {
-                    input.className = "wfsmm-modal-input-small";
-                    input.style.textAlign = "center";
-                    input.style.width = "38px";
-                    input.style.padding = "0 2px";
-                }
-
-                // Header row
                 const headerRow = document.createElement("tr");
                 const thStatus = makeTH("Status");
-                thStatus.style.textAlign = "left";
-                const thEnabled = makeTH("Show");
-                const thStrokeColor = makeTH("Line colour");
-                const thStrokeOpacity = makeTH("Line opacity");
-                const thStrokeWidth = makeTH("Line width");
-                const thFillColor = makeTH("Fill colour");
-                const thFillOpacity = makeTH("Fill opacity");
-                const thScale = makeTH("Size");
+                const thShow = makeTH("Show");
                 const thPreview = makeTH("Preview");
+                const thCustomise = makeTH(" ");
+                thShow.style.textAlign = "center";
+                thPreview.style.textAlign = "center";
 
                 headerRow.appendChild(thStatus);
-                headerRow.appendChild(thEnabled);
-                headerRow.appendChild(thStrokeColor);
-                headerRow.appendChild(thStrokeOpacity);
-                headerRow.appendChild(thStrokeWidth);
-                headerRow.appendChild(thFillColor);
-                headerRow.appendChild(thFillOpacity);
-                headerRow.appendChild(thScale);
+                headerRow.appendChild(thShow);
                 headerRow.appendChild(thPreview);
+                headerRow.appendChild(thCustomise);
                 table.appendChild(headerRow);
 
-                const ctx = { rows: {} };
+                const ctx = {
+                    rows: {},
+                    perfCheckbox
+                };
+                let acceptedRowCheckbox = null;
 
                 STATUS_ROWS.forEach(({ key, label }) => {
                     const cfg = ensureCfgForStatus(key);
 
                     const row = document.createElement("tr");
 
-                    // Status label
                     const tdLabel = makeTD();
-                    tdLabel.style.textAlign = "left";
-                    tdLabel.style.whiteSpace = "nowrap";
                     tdLabel.textContent = label;
+                    tdLabel.style.whiteSpace = "nowrap";
                     row.appendChild(tdLabel);
 
-                    // Enabled checkbox
-                    const tdEnabled = makeTD();
-                    const enabledChk = document.createElement("input");
-                    enabledChk.type = "checkbox";
-                    enabledChk.className = "wfsmm-modal-checkbox";
-                    enabledChk.checked = cfg.enabled !== false;
-                    tdEnabled.appendChild(enabledChk);
-                    row.appendChild(tdEnabled);
+                    const tdShow = makeTD();
+                    tdShow.style.textAlign = "center";
+                    const showChk = document.createElement("input");
+                    showChk.type = "checkbox";
+                    showChk.className = "wfsmm-modal-checkbox";
+                    showChk.checked = cfg.enabled !== false;
+                    tdShow.appendChild(showChk);
+                    row.appendChild(tdShow);
 
-                    // Stroke colour
-                    const tdStrokeColor = makeTD();
-                    const strokeColorInput = document.createElement("input");
-                    strokeColorInput.type = "color";
-                    strokeColorInput.value = cfg.strokeColor || markersCfg.DEFAULT.strokeColor;
-                    styleColorInput(strokeColorInput);
-                    tdStrokeColor.appendChild(strokeColorInput);
-                    row.appendChild(tdStrokeColor);
-
-                    // Stroke opacity
-                    const tdStrokeOpacity = makeTD();
-                    const strokeOpacityInput = document.createElement("input");
-                    strokeOpacityInput.type = "number";
-                    strokeOpacityInput.min = "0";
-                    strokeOpacityInput.max = "1";
-                    strokeOpacityInput.step = "0.05";
-                    strokeOpacityInput.value = cfg.strokeOpacity ?? 1.0;
-                    styleNumericInput(strokeOpacityInput);
-                    tdStrokeOpacity.appendChild(strokeOpacityInput);
-                    row.appendChild(tdStrokeOpacity);
-
-                    // Stroke width
-                    const tdStrokeWidth = makeTD();
-                    const strokeWidthInput = document.createElement("input");
-                    strokeWidthInput.type = "number";
-                    strokeWidthInput.min = "0";
-                    strokeWidthInput.max = "10";
-                    strokeWidthInput.step = "0.5";
-                    strokeWidthInput.value = cfg.strokeWeight ?? 2;
-                    styleNumericInput(strokeWidthInput);
-                    tdStrokeWidth.appendChild(strokeWidthInput);
-                    row.appendChild(tdStrokeWidth);
-
-                    // Fill colour
-                    const tdFillColor = makeTD();
-                    const fillColorInput = document.createElement("input");
-                    fillColorInput.type = "color";
-                    fillColorInput.value = cfg.fillColor || markersCfg.DEFAULT.fillColor;
-                    styleColorInput(fillColorInput);
-                    tdFillColor.appendChild(fillColorInput);
-                    row.appendChild(tdFillColor);
-
-                    // Fill opacity
-                    const tdFillOpacity = makeTD();
-                    const fillOpacityInput = document.createElement("input");
-                    fillOpacityInput.type = "number";
-                    fillOpacityInput.min = "0";
-                    fillOpacityInput.max = "1";
-                    fillOpacityInput.step = "0.05";
-                    fillOpacityInput.value = cfg.fillOpacity ?? 0.5;
-                    styleNumericInput(fillOpacityInput);
-                    tdFillOpacity.appendChild(fillOpacityInput);
-                    row.appendChild(tdFillOpacity);
-
-                    // Scale (marker size)
-                    const tdScale = makeTD();
-                    const scaleInput = document.createElement("input");
-                    scaleInput.type = "number";
-                    scaleInput.min = "2";
-                    scaleInput.max = "30";
-                    scaleInput.step = "1";
-                    scaleInput.value = cfg.scale ?? 8;
-                    styleNumericInput(scaleInput);
-                    tdScale.appendChild(scaleInput);
-                    row.appendChild(tdScale);
-
-                    // Preview
                     const tdPreview = makeTD();
+                    tdPreview.style.textAlign = "center";
                     const preview = document.createElement("div");
                     preview.style.display = "inline-block";
                     preview.style.borderRadius = "50%";
                     preview.style.boxSizing = "border-box";
-                    preview.style.verticalAlign = "middle";
                     tdPreview.appendChild(preview);
                     row.appendChild(tdPreview);
 
+                    const tdCustomise = makeTD();
+                    tdCustomise.style.textAlign = "right";
+                    const customiseLink = document.createElement("button");
+                    customiseLink.type = "button";
+                    customiseLink.textContent = "Customise";
+                    customiseLink.style.background = "transparent";
+                    customiseLink.style.border = "none";
+                    customiseLink.style.color = "#2563eb";
+                    customiseLink.style.cursor = "pointer";
+                    customiseLink.style.fontSize = "11px";
+                    customiseLink.style.textDecoration = "underline";
+                    tdCustomise.appendChild(customiseLink);
+                    row.appendChild(tdCustomise);
+
                     table.appendChild(row);
 
-                    // Live preview update
                     function updatePreview() {
-                        const enabled = !!enabledChk.checked;
-                        const strokeColor = strokeColorInput.value || "#000000";
-                        const strokeOpacity = clamp(strokeOpacityInput.value, 0, 1, 1.0);
-                        const strokeWidth = clamp(strokeWidthInput.value, 0, 10, 2);
-                        const fillColor = fillColorInput.value || "#000000";
-                        const fillOpacity = clamp(fillOpacityInput.value, 0, 1, 0.5);
-                        const scale = clamp(scaleInput.value, 2, 30, 8);
+                        const strokeColor = cfg.strokeColor || "#000000";
+                        const strokeOpacity = typeof cfg.strokeOpacity === "number" ? cfg.strokeOpacity : 1.0;
+                        const strokeWidth = typeof cfg.strokeWeight === "number" ? cfg.strokeWeight : 2;
+                        const fillColor = cfg.fillColor || "#000000";
+                        const fillOpacity = typeof cfg.fillOpacity === "number" ? cfg.fillOpacity : 0.5;
+                        const scale = typeof cfg.scale === "number" ? cfg.scale : 8;
 
-                        const sizePx = scale * 2; // arbitrary but looks reasonable
+                        const sizePx = scale * 2;
                         preview.style.width = `${sizePx}px`;
                         preview.style.height = `${sizePx}px`;
-
                         preview.style.border = `${strokeWidth}px solid ${hexToRgba(strokeColor, strokeOpacity)}`;
                         preview.style.backgroundColor = hexToRgba(fillColor, fillOpacity);
                     }
 
-                    [enabledChk, strokeColorInput, strokeOpacityInput,
-                     strokeWidthInput, fillColorInput, fillOpacityInput, scaleInput]
-                        .forEach(el => el.addEventListener("input", updatePreview));
+                    function syncFromCfg() {
+                        showChk.checked = cfg.enabled !== false;
+                        updatePreview();
+                    }
 
-                    updatePreview();
+                    showChk.addEventListener("change", () => {
+                        cfg.enabled = !!showChk.checked;
+
+                        if (key === "ACCEPTED") {
+                            warning.style.display = showChk.checked ? "block" : "none";
+                        }
+                    });
+
+                    customiseLink.addEventListener("click", () => {
+                        openMarkerStyleModal(key, label, cfg, () => {
+                            updatePreview();
+                        });
+                    });
+
+                    syncFromCfg();
+
+                    if (key === "ACCEPTED") {
+                        acceptedRowCheckbox = showChk;
+                    }
 
                     ctx.rows[key] = {
-                        enabledChk,
-                        strokeColorInput,
-                        strokeOpacityInput,
-                        strokeWidthInput,
-                        fillColorInput,
-                        fillOpacityInput,
-                        scaleInput
+                        showChk,
+                        preview,
+                        cfg,
+                        updatePreview
                     };
                 });
 
-                section.appendChild(table);
-                dialog.appendChild(section);
+                // Initialise warning visibility based on current ACCEPTED setting
+                if (acceptedRowCheckbox && acceptedRowCheckbox.checked) {
+                    warning.style.display = "block";
+                }
+
+                container.appendChild(table);
+                dialog.appendChild(container);
 
                 return ctx;
             },
             onOk(ctx, closeModal) {
-                const rows = ctx.rows || {};
-                Object.keys(rows).forEach(key => {
-                    const row = rows[key];
-                    const cfg = ensureCfgForStatus(key);
+                // Persist performance option
+                const mapCfg = userSettings.map || (userSettings.map = {});
+                mapCfg.performanceModeEnabled = !!(ctx.perfCheckbox && ctx.perfCheckbox.checked);
+                if (typeof mapCfg.performanceMaxVisibleMarkers !== "number") {
+                    mapCfg.performanceMaxVisibleMarkers = PERFORMANCE_MAX_VISIBLE_MARKERS;
+                }
 
-                    cfg.enabled = !!row.enabledChk.checked;
-                    cfg.strokeColor = row.strokeColorInput.value || cfg.strokeColor || "#6b7280";
-                    cfg.strokeOpacity = clamp(row.strokeOpacityInput.value, 0, 1, cfg.strokeOpacity ?? 1.0);
-                    cfg.strokeWeight = clamp(row.strokeWidthInput.value, 0, 10, cfg.strokeWeight ?? 2);
-                    cfg.fillColor = row.fillColorInput.value || cfg.fillColor || "#6b7280";
-                    cfg.fillOpacity = clamp(row.fillOpacityInput.value, 0, 1, cfg.fillOpacity ?? 0.5);
-                    cfg.scale = clamp(row.scaleInput.value, 2, 30, cfg.scale ?? 8);
-                });
-
+                // Styles + enabled flags are already kept in cfg objects by change handlers,
+                // so we just need to save & refresh.
                 saveSettings();
 
-                // Rebuild markers with new styles
+                // Rebuild markers with new styles/visibility
                 clearNominationMarkers();
                 refreshNominationMarkers();
 
@@ -744,8 +1069,8 @@
         Object.assign(dialog.style, {
             background: "#fff",
             color: "#000",
-            minWidth: "550px",
-            maxWidth: "750px",
+            minWidth: "350px",
+            maxWidth: "500px",
             maxHeight: "80vh",
             borderRadius: "4px",
             boxShadow: "0 2px 12px rgba(0,0,0,0.4)",
@@ -872,7 +1197,6 @@
         document.addEventListener("keydown", keyHandler);
     }
 
-
     function clamp(value, min, max, defaultVal) {
         const n = parseFloat(value);
         if (Number.isNaN(n)) return defaultVal;
@@ -898,75 +1222,6 @@
         const b = num & 255;
         return `rgba(${r},${g},${b},${alpha})`;
     }
-
-    // -----------------------------
-    // Parse Contributions data
-    // -----------------------------
-
-    let nominations = null;
-
-    /**
-     * Overwrite the open method of the XMLHttpRequest.prototype to intercept the server calls
-     */
-    (function (open) {
-        XMLHttpRequest.prototype.open = function (method, url) {
-            if (url === '/api/v1/vault/manage' && method === 'GET') {
-                this.addEventListener('load', parseNominationsFromResponse, false);
-            }
-            open.apply(this, arguments);
-        };
-    })(XMLHttpRequest.prototype.open);
-
-    function fetchLatestNominations() {
-        // Use absolute URL as requested; relative would also work since we're same-origin.
-        fetch("/api/v1/vault/manage", {
-            method: "GET",
-            credentials: "include" // make sure cookies/session are sent
-        })
-            .then(res => {
-            if (!res.ok) {
-                throw new Error(`HTTP ${res.status}`);
-            }
-            return res.json();
-        })
-            .then(json => {
-            handleNominationsJson(json);
-        })
-            .catch(err => {
-            console.warn("[ContribOverlay] Failed to fetch latest nominations:", err);
-        });
-    }
-
-    function parseNominationsFromResponse() {
-        try {
-            const response = this.responseText || this.response;
-            const json = JSON.parse(response);
-            handleNominationsJson(json);
-        } catch (e) {
-            console.log('[ContribOverlay] Error parsing nominations:', e);
-        }
-    }
-
-    function handleNominationsJson(json) {
-        if (!json) {
-            console.log('[ContribOverlay] No JSON payload for nominations');
-            return;
-        }
-
-        // ignore if it's related to captchas
-        if (json.captcha) return;
-
-        const submissions = json.result && json.result.submissions;
-        if (!submissions) {
-            console.log('[ContribOverlay] Wayfarer response did not include submissions.');
-            return;
-        }
-
-        nominations = submissions;
-        saveNominationsToIDB(submissions);
-        refreshNominationMarkers();
-    }
-
 
     // -----------------------------
     // Nominations -> Map markers
@@ -1014,18 +1269,24 @@
         });
 
         marker.addListener("click", () => {
+            console.log('click mew');
             // 1) Locally show selection (but preserve colour coding)
             selectNominationMarker(marker);
 
             // 2) Tell the main plugin: this POI is the selected one
             sendPoiToBridge(poi);
+
+            // 3) Update contribution management links on the side panel
+            updateNominationActionLinks(poi);
+
         });
 
         return marker;
     }
 
-
     function clearNominationSelection() {
+        hideNominationActionLinks();
+
         if (lastSelectedNomMarker && lastSelectedNomOriginalIcon) {
             lastSelectedNomMarker.setIcon(lastSelectedNomOriginalIcon);
         }
@@ -1046,11 +1307,6 @@
         lastSelectedNomOriginalIcon = { ...icon };
         lastSelectedNomMarker = marker;
 
-        // Build a "selected" icon that:
-        // - keeps fillColor + fillOpacity (status colour)
-        // - adds a stronger magenta stroke
-        // - thickens stroke
-        // - slightly increases size
         const selectedIcon = {
             ...icon,
             // keep fillColor / fillOpacity as-is
@@ -1063,8 +1319,21 @@
         marker.setIcon(selectedIcon);
     }
 
+    function filterCandidateIdsByStatus(candidateIds, candidatePoisById, excludedStatuses) {
+        const result = [];
+        candidateIds.forEach(id => {
+            const poi = candidatePoisById[id];
+            if (!poi) return;
+            const status = String(poi.status || "").toUpperCase();
+            if (excludedStatuses.has(status)) return;
+            result.push(id);
+        });
+        return result;
+    }
+
     // Bounds-based, marker-reuse, with enabled-flag support
     function refreshNominationMarkers() {
+        console.log('refreshing markers');
         if (!submitMap || !nominations || !Array.isArray(nominations)) {
             return;
         }
@@ -1075,7 +1344,16 @@
             return;
         }
 
-        const inBoundsIds = new Set();
+        const mapCfg = userSettings.map || {};
+        const performanceModeEnabled = !!mapCfg.performanceModeEnabled;
+        const maxVisibleMarkers = typeof mapCfg.performanceMaxVisibleMarkers === "number"
+        ? mapCfg.performanceMaxVisibleMarkers
+        : PERFORMANCE_MAX_VISIBLE_MARKERS;
+
+        // First pass: find all nominations that *would* be visible
+        // respecting status "enabled" flags and map bounds.
+        const candidateIds = [];
+        const candidatePoisById = {};
 
         nominations.forEach(poi => {
             if (!poi || poi.type !== "NOMINATION") return;
@@ -1094,12 +1372,89 @@
             if (!bounds.contains(pos)) return;
 
             const id = poi.id || `${lat},${lng}`;
-            inBoundsIds.add(id);
+            if (!candidatePoisById[id]) {
+                candidateIds.push(id);
+                candidatePoisById[id] = poi;
+            }
+        });
+
+        let finalCandidateIds = candidateIds;
+
+        if (performanceModeEnabled && candidateIds.length > maxVisibleMarkers) {
+            // 1) Try removing ACCEPTED only
+            const excludeAccepted = new Set(["ACCEPTED"]);
+            const withoutAccepted = filterCandidateIdsByStatus(candidateIds, candidatePoisById, excludeAccepted);
+
+            if (withoutAccepted.length <= maxVisibleMarkers) {
+                finalCandidateIds = withoutAccepted;
+            } else {
+                // 2) Try removing ACCEPTED + REJECTED + DUPLICATE + WITHDRAWN
+                const excludeAcceptedRejectedDup = new Set(["ACCEPTED", "REJECTED", "DUPLICATE", "WITHDRAWN"]);
+                const withoutAcceptedRejectedDup = filterCandidateIdsByStatus(candidateIds, candidatePoisById, excludeAcceptedRejectedDup);
+
+                if (withoutAcceptedRejectedDup.length <= maxVisibleMarkers) {
+                    finalCandidateIds = withoutAcceptedRejectedDup;
+                } else {
+                    // 3) Still too many → hide everything
+                    clearNominationMarkers();
+                    return;
+                }
+            }
+        }
+
+        // Second pass: actually create/show markers for the chosen candidate set
+        const inBoundsIds = new Set(finalCandidateIds);
+
+        finalCandidateIds.forEach(id => {
+            const poi = candidatePoisById[id];
+            if (!poi) return;
 
             let marker = nominationMarkers[id];
+            const cfg = getMarkerConfigForStatus(poi.status);
+
+            // Base icon from current status
+            const baseIcon = {
+                path: google.maps.SymbolPath.CIRCLE,
+                fillColor: cfg.fillColor,
+                fillOpacity: cfg.fillOpacity,
+                strokeColor: cfg.strokeColor,
+                strokeOpacity: cfg.strokeOpacity,
+                strokeWeight: cfg.strokeWeight,
+                scale: cfg.scale
+            };
+
             if (!marker) {
-                marker = createNominationMarker(poi);
+                // New marker
+                marker = new google.maps.Marker({
+                    map: null, // attach later when in-bounds
+                    position: { lat: poi.lat, lng: poi.lng },
+                    title: `${poi.title || "No title"} (${String(poi.status || "").toUpperCase() || "UNKNOWN"})`,
+                    icon: baseIcon
+                });
+
+                marker.addListener("click", () => {
+                    selectNominationMarker(marker);
+                    sendPoiToBridge(poi);
+                    updateNominationActionLinks(poi);
+                });
+
                 nominationMarkers[id] = marker;
+            } else {
+                // Existing marker: update its icon to match new status
+                if (marker === lastSelectedNomMarker) {
+                    // Update selected marker styling based on new base icon
+                    lastSelectedNomOriginalIcon = { ...baseIcon };
+                    const selectedIcon = {
+                        ...baseIcon,
+                        strokeColor: "#ff00ff",
+                        strokeOpacity: 1,
+                        strokeWeight: (baseIcon.strokeWeight || 2) + 2,
+                        scale: (baseIcon.scale || 8) + 1
+                    };
+                    marker.setIcon(selectedIcon);
+                } else {
+                    marker.setIcon(baseIcon);
+                }
             }
 
             if (!marker.getMap()) {
@@ -1107,13 +1462,146 @@
             }
         });
 
-        // Hide markers that are no longer in bounds OR are now disabled
+        // Hide markers that are no longer in bounds or no longer eligible
         Object.entries(nominationMarkers).forEach(([id, marker]) => {
             if (!marker) return;
             if (!inBoundsIds.has(id) && marker.getMap()) {
                 marker.setMap(null);
             }
         });
+    }
+
+
+    // -----------------------------
+    // Managing Contribution status via map
+    // -----------------------------
+
+    function getCookie(name) {
+        const match = document.cookie.match(new RegExp("(^|; )" + name + "=([^;]*)"));
+        return match ? decodeURIComponent(match[2]) : null;
+    }
+
+    function getCsrfToken() {
+        return getCookie("XSRF-TOKEN") || "";
+    }
+
+    function sendManageActionForNomination(action, nominationId) {
+        if (!action || !nominationId) return;
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `/api/v1/vault/manage/${action}`, true);
+        xhr.withCredentials = true;
+
+        xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+
+        const csrfToken = getCsrfToken();
+        if (csrfToken) {
+            xhr.setRequestHeader("x-csrf-token", csrfToken);
+        }
+
+        xhr.send(JSON.stringify({ id: nominationId }));
+    }
+
+    function hideNominationActionLinks() {
+        const container = document.querySelector(".wfsmm-poi-function-links");
+        if (!container) return;
+
+        const ids = [
+            "#wfsmm-function-hold",
+            "#wfsmm-function-release-hold",
+            "#wfsmm-function-withdraw"
+        ];
+        ids.forEach(sel => {
+            const el = container.querySelector(sel);
+            if (el) el.style.display = "none";
+        });
+    }
+
+    function updateNominationActionLinks(poi) {
+        if (!poi || poi.type !== "NOMINATION") {
+            hideNominationActionLinks();
+            return;
+        }
+
+        const container = document.querySelector(".wfsmm-poi-function-links");
+        if (!container) return;
+
+        const status = String(poi.status || "").toUpperCase();
+        const id = poi.id;
+        if (!id) return;
+
+        // Ensure links exist (create once, reuse)
+        let holdLink = container.querySelector("#wfsmm-function-hold");
+        if (!holdLink) {
+            holdLink = document.createElement("a");
+            holdLink.id = "wfsmm-function-hold";
+            holdLink.textContent = "Place On Hold";
+            holdLink.style.cursor = "pointer";
+            holdLink.style.marginLeft = "8px";
+            holdLink.addEventListener("click", ev => {
+                ev.preventDefault();
+                const targetId = holdLink.dataset.id;
+                if (!targetId) return;
+                sendManageActionForNomination("hold", targetId);
+            });
+            container.appendChild(holdLink);
+        }
+
+        let releaseHoldLink = container.querySelector("#wfsmm-function-release-hold");
+        if (!releaseHoldLink) {
+            releaseHoldLink = document.createElement("a");
+            releaseHoldLink.id = "wfsmm-function-release-hold";
+            releaseHoldLink.textContent = "Release Hold";
+            releaseHoldLink.style.cursor = "pointer";
+            releaseHoldLink.style.marginLeft = "8px";
+            releaseHoldLink.addEventListener("click", ev => {
+                ev.preventDefault();
+                const targetId = releaseHoldLink.dataset.id;
+                if (!targetId) return;
+                sendManageActionForNomination("releasehold", targetId);
+            });
+            container.appendChild(releaseHoldLink);
+        }
+
+        let withdrawLink = container.querySelector("#wfsmm-function-withdraw");
+        if (!withdrawLink) {
+            withdrawLink = document.createElement("a");
+            withdrawLink.id = "wfsmm-function-withdraw";
+            withdrawLink.textContent = "Withdraw";
+            withdrawLink.style.cursor = "pointer";
+            withdrawLink.style.marginLeft = "8px";
+            withdrawLink.addEventListener("click", ev => {
+                ev.preventDefault();
+                const targetId = withdrawLink.dataset.id;
+                if (!targetId) return;
+                sendManageActionForNomination("withdraw", targetId);
+            });
+            container.appendChild(withdrawLink);
+        }
+
+        // Update the id on each link so they act on the selected POI
+        holdLink.dataset.id = id;
+        releaseHoldLink.dataset.id = id;
+        withdrawLink.dataset.id = id;
+
+        console.log('still going');
+        // Show/hide based on current status
+        if (status === "NOMINATED") {
+            // NOMINATED → can Hold or Withdraw
+            holdLink.style.display = "inline-block";
+            withdrawLink.style.display = "inline-block";
+            releaseHoldLink.style.display = "none";
+        } else if (status === "HELD") {
+            // HELD → can Release Hold or Withdraw
+            holdLink.style.display = "none";
+            withdrawLink.style.display = "none";
+            releaseHoldLink.style.display = "inline-block";
+        } else {
+            // Any other status → hide all three
+            holdLink.style.display = "none";
+            withdrawLink.style.display = "none";
+            releaseHoldLink.style.display = "none";
+        }
     }
 
     // -----------------------------
