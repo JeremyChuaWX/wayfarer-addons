@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map - Contributions Overlay
-// @version      0.1.0
+// @version      0.2.0
 // @description  Loads nominations from the Contributions list and shows them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-contributions-overlay.user.js
@@ -12,17 +12,15 @@
 (function () {
     'use strict';
 
-    let submitMap = null;
-    let mapAttached = false;
+    // -----------------------------
+    // Constants (config & IDs)
+    // -----------------------------
 
     const SETTINGS_KEY = "wfmap_contributions_settings";
     const OBJECT_STORE_NAME = "contributions";
 
     const POI_BRIDGE_ID = "wfsmm-poi-bridge";
     const POI_BRIDGE_SOURCE = "wf-contrib-overlay";
-
-    let lastSelectedNomMarker = null;
-    let lastSelectedNomOriginalIcon = null;
 
     const PERFORMANCE_MAX_VISIBLE_MARKERS = 400;
 
@@ -33,12 +31,39 @@
         appeal: "APPEALED",
     };
 
+
+    // -----------------------------
+    // Runtime state – nominations & appeals
+    // -----------------------------
+
+    let nominations = null;
+    let globalCanAppeal = null;
+
+    // -----------------------------
+    // Runtime state – map & markers
+    // -----------------------------
+
+    let submitMap = null;
+    let mapAttached = false;
+
+    let nominationMarkers = {};
+
+    let lastSelectedNominationId = null;
+    let lastSelectedNomMarker = null;
+    let lastSelectedNomOriginalIcon = null;
+
+
+    // -----------------------------
+    // Runtime state – DOM / panel
+    // -----------------------------
+
+    let lastPanelPresent = false;
+
     // -----------------------------
     // Settings (defaults + storage)
     // -----------------------------
 
     // Default marker config lives here and can be overridden by localStorage.
-    // enabled: all true except ACCEPTED: false.
     const userSettings = {
         map: {
             performanceModeEnabled: true,
@@ -291,10 +316,8 @@
     }
 
     // -----------------------------
-    // Parse Contributions data
+    // Network / API integration (manage endpoint)
     // -----------------------------
-
-    let nominations = null;
 
     /**
      * Overwrite the open method of the XMLHttpRequest.prototype to intercept the server calls
@@ -401,15 +424,29 @@
         // ignore if it's related to captchas
         if (json.captcha) return;
 
-        const submissions = json.result && json.result.submissions;
+        const result = json.result || {};
+        const submissions = result.submissions;
         if (!submissions) {
             console.log('[ContribOverlay] Wayfarer response did not include submissions.');
             return;
         }
 
+        // (1) GLOBAL appeals availability
+        globalCanAppeal = typeof result.canAppeal === "boolean"
+            ? result.canAppeal
+        : null;
+
         nominations = submissions;
         saveNominationsToIDB(submissions);
         refreshNominationMarkers();
+
+        // (2) If a nomination is currently selected, refresh its action links
+        if (lastSelectedNominationId && Array.isArray(nominations)) {
+            const selected = nominations.find(n => n.id === lastSelectedNominationId);
+            if (selected) {
+                updateNominationActionLinks(selected);
+            }
+        }
     }
 
     function updateSingleNominationStatus(id, newStatus) {
@@ -446,6 +483,7 @@
                     nominationMarkers &&
                     nominationMarkers[id] === lastSelectedNomMarker) {
 
+                    lastSelectedNominationId = id;
                     sendPoiToBridge(updatedNom);
                     updateNominationActionLinks(updatedNom);
                 }
@@ -458,6 +496,201 @@
         }).catch(err => {
             console.warn("[ContribOverlay] IndexedDB not available:", err);
         });
+    }
+
+    function updateSingleNominationDetails(id, updates) {
+        if (!id || !updates) return;
+
+        let updatedNom = null;
+
+        // --- Update in-memory nominations ---
+        if (Array.isArray(nominations)) {
+            const nom = nominations.find(n => n.id === id);
+            if (nom) {
+                if (Object.prototype.hasOwnProperty.call(updates, "title")) {
+                    nom.title = updates.title;
+                }
+                if (Object.prototype.hasOwnProperty.call(updates, "description")) {
+                    nom.description = updates.description;
+                }
+                if (Object.prototype.hasOwnProperty.call(updates, "supporting")) {
+                    // stored as "statement" in the data
+                    nom.statement = updates.supporting;
+                }
+                updatedNom = nom;
+            }
+        }
+
+        if (!updatedNom) return;
+
+        // --- Update IndexedDB (upsert only this record) ---
+        getIDBInstance().then(db => {
+            const tx = db.transaction(OBJECT_STORE_NAME, "readwrite");
+            const store = tx.objectStore(OBJECT_STORE_NAME);
+
+            store.put(updatedNom);
+
+            tx.oncomplete = () => {
+                db.close();
+
+                // Update marker title if it exists
+                const marker = nominationMarkers && nominationMarkers[id];
+                if (marker && typeof marker.setTitle === "function") {
+                    const statusStr = String(updatedNom.status || "").toUpperCase() || "UNKNOWN";
+                    marker.setTitle(`${updatedNom.title || "No title"} (${statusStr})`);
+                }
+
+                // If this nomination is currently selected, update the side panel
+                if (nominationMarkers &&
+                    nominationMarkers[id] === lastSelectedNomMarker) {
+                    sendPoiToBridge(updatedNom);
+                    updateNominationActionLinks(updatedNom);
+                }
+            };
+
+            tx.onerror = () => {
+                console.warn("[ContribOverlay] Transaction error while updating nomination details", tx.error);
+                db.close();
+            };
+        }).catch(err => {
+            console.warn("[ContribOverlay] IndexedDB not available:", err);
+        });
+    }
+
+    function getCookie(name) {
+        const match = document.cookie.match(new RegExp("(^|; )" + name + "=([^;]*)"));
+        return match ? decodeURIComponent(match[2]) : null;
+    }
+
+    function getCsrfToken() {
+        return getCookie("XSRF-TOKEN") || "";
+    }
+
+    function sendManageActionForNomination(action, nominationId) {
+        console.log('sending action');
+        if (!action || !nominationId) return;
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `/api/v1/vault/manage/${action}`, true);
+        xhr.withCredentials = true;
+
+        xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+
+        const csrfToken = getCsrfToken();
+        if (csrfToken) {
+            xhr.setRequestHeader("x-csrf-token", csrfToken);
+        }
+
+        xhr.send(JSON.stringify({ id: nominationId }));
+    }
+
+    function sendEditSubmission(nominationId, updates, onDone) {
+        if (!nominationId || !updates) return;
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/api/v1/vault/manage/edit", true);
+        xhr.withCredentials = true;
+
+        xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+
+        const csrfToken = getCsrfToken();
+        if (csrfToken) {
+            xhr.setRequestHeader("x-csrf-token", csrfToken);
+        }
+
+        const payload = {
+            id: nominationId,
+            title: updates.title,
+            description: updates.description,
+            supporting: updates.supporting
+        };
+
+        xhr.onload = function () {
+            if (xhr.status !== 200) {
+                console.warn("[ContribOverlay] Edit submission failed with status", xhr.status);
+                return;
+            }
+
+            let json = null;
+            try {
+                json = JSON.parse(xhr.responseText || "{}");
+            } catch (e) {
+                console.warn("[ContribOverlay] Failed to parse edit response", e);
+                return;
+            }
+
+            if (!json || json.captcha || json.result !== "DONE") {
+                console.warn("[ContribOverlay] Edit submission not accepted by server", json);
+                return;
+            }
+
+            // Update local data + UI
+            updateSingleNominationDetails(nominationId, updates);
+
+            if (typeof onDone === "function") {
+                onDone();
+            }
+        };
+
+        xhr.onerror = function () {
+            console.warn("[ContribOverlay] Network error calling /manage/edit");
+        };
+
+        xhr.send(JSON.stringify(payload));
+    }
+
+    function sendAppeal(nominationId, statement, onDone) {
+        if (!nominationId || !statement) return;
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/api/v1/vault/manage/appeal", true);
+        xhr.withCredentials = true;
+
+        xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+
+        const csrfToken = getCsrfToken();
+        if (csrfToken) {
+            xhr.setRequestHeader("x-csrf-token", csrfToken);
+        }
+
+        const payload = {
+            id: nominationId,
+            statement: statement
+        };
+
+        xhr.onload = function () {
+            if (xhr.status !== 200) {
+                console.warn("[ContribOverlay] Appeal request failed with status", xhr.status);
+                return;
+            }
+
+            let json = null;
+            try {
+                json = JSON.parse(xhr.responseText || "{}");
+            } catch (e) {
+                console.warn("[ContribOverlay] Failed to parse appeal response", e);
+                return;
+            }
+
+            if (!json || json.captcha || json.result !== "DONE") {
+                console.warn("[ContribOverlay] Appeal not accepted by server", json);
+                return;
+            }
+
+            // Check if we still have appeals left...
+            globalCanAppeal = null;
+            fetchLatestNominations();
+
+            if (typeof onDone === "function") {
+                onDone();
+            }
+        };
+
+        xhr.onerror = function () {
+            console.warn("[ContribOverlay] Network error calling /manage/appeal");
+        };
+
+        xhr.send(JSON.stringify(payload));
     }
 
     // -----------------------------
@@ -474,8 +707,6 @@
             subtree: true
         });
     }
-
-    let lastPanelPresent = false;
 
     function handlePanelChange() {
         const panelPresent = !!document.querySelector("#wfsmm-side-panel");
@@ -537,6 +768,14 @@
         });
     }
 
+    function teardownContribOverlayForMap() {
+        if (!mapAttached) return;
+
+        clearNominationMarkers();
+        submitMap = null;
+        mapAttached = false;
+    }
+
     function clearNominationMarkers() {
         if (!nominationMarkers) return;
         Object.values(nominationMarkers).forEach(m => {
@@ -545,14 +784,6 @@
             }
         });
         nominationMarkers = {};
-    }
-
-    function teardownContribOverlayForMap() {
-        if (!mapAttached) return;
-
-        clearNominationMarkers();
-        submitMap = null;
-        mapAttached = false;
     }
 
     async function attachContribOverlayToMapIfNeeded() {
@@ -582,7 +813,732 @@
     }
 
     // -----------------------------
-    // Settings link + modal
+    // Marker creation, selection & visibility
+    // -----------------------------
+
+    function getMarkerConfigForStatus(statusRaw) {
+        const status = String(statusRaw || "").toUpperCase();
+        const markersCfg = (userSettings.markers && userSettings.markers.statuses) || {};
+        const fallback = markersCfg.DEFAULT || {
+            strokeColor: "#6b7280",
+            strokeWeight: 2,
+            strokeOpacity: 1.0,
+            fillColor: "#6b7280",
+            fillOpacity: 0.5,
+            scale: 8,
+            enabled: true
+        };
+
+        return markersCfg[status] || fallback;
+    }
+
+    function createNominationMarker(poi) {
+        const lat = poi.lat;
+        const lng = poi.lng;
+
+        const statusRaw = poi.status || "";
+        const status = String(statusRaw).toUpperCase();
+        const cfg = getMarkerConfigForStatus(statusRaw);
+
+        const marker = new google.maps.Marker({
+            map: null, // attach later when in-bounds
+            position: { lat, lng },
+            title: `${poi.title || "No title"} (${status || "UNKNOWN"})`,
+            icon: {
+                path: google.maps.SymbolPath.CIRCLE,
+                fillColor: cfg.fillColor,
+                fillOpacity: cfg.fillOpacity,
+                strokeColor: cfg.strokeColor,
+                strokeOpacity: cfg.strokeOpacity,
+                strokeWeight: cfg.strokeWeight,
+                scale: cfg.scale
+            }
+        });
+
+        marker.addListener("click", () => {
+            selectNominationMarker(marker);
+            lastSelectedNominationId = poi.id || null;
+            sendPoiToBridge(poi);
+            updateNominationActionLinks(poi);
+        });
+        return marker;
+    }
+
+    function clearNominationSelection() {
+        hideNominationActionLinks();
+
+        if (lastSelectedNomMarker && lastSelectedNomOriginalIcon) {
+            lastSelectedNomMarker.setIcon(lastSelectedNomOriginalIcon);
+        }
+        lastSelectedNomMarker = null;
+        lastSelectedNomOriginalIcon = null;
+        lastSelectedNominationId = null;
+    }
+
+    function selectNominationMarker(marker) {
+        // Remove highlight from previous selected nomination marker
+        clearNominationSelection();
+
+        if (!marker || !marker.getIcon) return;
+
+        const icon = marker.getIcon();
+        if (!icon) return;
+
+        // Remember original so we can restore later
+        lastSelectedNomOriginalIcon = { ...icon };
+        lastSelectedNomMarker = marker;
+
+        const selectedIcon = {
+            ...icon,
+            // keep fillColor / fillOpacity as-is
+            strokeColor: "#ff00ff",
+            strokeOpacity: 1,
+            strokeWeight: (icon.strokeWeight || 2) + 2,
+            scale: (icon.scale || 8) + 1
+        };
+
+        marker.setIcon(selectedIcon);
+    }
+
+    function filterCandidateIdsByStatus(candidateIds, candidatePoisById, excludedStatuses) {
+        const result = [];
+        candidateIds.forEach(id => {
+            const poi = candidatePoisById[id];
+            if (!poi) return;
+            const status = String(poi.status || "").toUpperCase();
+            if (excludedStatuses.has(status)) return;
+            result.push(id);
+        });
+        return result;
+    }
+
+    // Bounds-based, marker-reuse, with enabled-flag support
+    function refreshNominationMarkers() {
+        console.log('refreshing markers');
+        if (!submitMap || !nominations || !Array.isArray(nominations)) {
+            return;
+        }
+
+        const bounds = submitMap.getBounds();
+        if (!bounds) {
+            // Map not fully initialised yet
+            return;
+        }
+
+        const mapCfg = userSettings.map || {};
+        const performanceModeEnabled = !!mapCfg.performanceModeEnabled;
+        const maxVisibleMarkers = typeof mapCfg.performanceMaxVisibleMarkers === "number"
+        ? mapCfg.performanceMaxVisibleMarkers
+        : PERFORMANCE_MAX_VISIBLE_MARKERS;
+
+        // First pass: find all nominations that *would* be visible
+        // respecting status "enabled" flags and map bounds.
+        const candidateIds = [];
+        const candidatePoisById = {};
+
+        nominations.forEach(poi => {
+            if (!poi || poi.type !== "NOMINATION") return;
+
+            const lat = poi.lat;
+            const lng = poi.lng;
+            if (typeof lat !== "number" || typeof lng !== "number") return;
+
+            const statusCfg = getMarkerConfigForStatus(poi.status);
+            if (statusCfg.enabled === false) {
+                // Don't show markers for this status at all
+                return;
+            }
+
+            const pos = new google.maps.LatLng(lat, lng);
+            if (!bounds.contains(pos)) return;
+
+            const id = poi.id || `${lat},${lng}`;
+            if (!candidatePoisById[id]) {
+                candidateIds.push(id);
+                candidatePoisById[id] = poi;
+            }
+        });
+
+        let finalCandidateIds = candidateIds;
+
+        if (performanceModeEnabled && candidateIds.length > maxVisibleMarkers) {
+            // 1) Try removing ACCEPTED only
+            const excludeAccepted = new Set(["ACCEPTED"]);
+            const withoutAccepted = filterCandidateIdsByStatus(candidateIds, candidatePoisById, excludeAccepted);
+
+            if (withoutAccepted.length <= maxVisibleMarkers) {
+                finalCandidateIds = withoutAccepted;
+            } else {
+                // 2) Try removing ACCEPTED + REJECTED + DUPLICATE + WITHDRAWN
+                const excludeAcceptedRejectedDup = new Set(["ACCEPTED", "REJECTED", "DUPLICATE", "WITHDRAWN"]);
+                const withoutAcceptedRejectedDup = filterCandidateIdsByStatus(candidateIds, candidatePoisById, excludeAcceptedRejectedDup);
+
+                if (withoutAcceptedRejectedDup.length <= maxVisibleMarkers) {
+                    finalCandidateIds = withoutAcceptedRejectedDup;
+                } else {
+                    // 3) Still too many → hide everything
+                    clearNominationMarkers();
+                    return;
+                }
+            }
+        }
+
+        // Second pass: actually create/show markers for the chosen candidate set
+        const inBoundsIds = new Set(finalCandidateIds);
+
+        finalCandidateIds.forEach(id => {
+            const poi = candidatePoisById[id];
+            if (!poi) return;
+
+            let marker = nominationMarkers[id];
+            const cfg = getMarkerConfigForStatus(poi.status);
+
+            // Base icon from current status
+            const baseIcon = {
+                path: google.maps.SymbolPath.CIRCLE,
+                fillColor: cfg.fillColor,
+                fillOpacity: cfg.fillOpacity,
+                strokeColor: cfg.strokeColor,
+                strokeOpacity: cfg.strokeOpacity,
+                strokeWeight: cfg.strokeWeight,
+                scale: cfg.scale
+            };
+
+            if (!marker) {
+                // New marker
+                marker = new google.maps.Marker({
+                    map: null, // attach later when in-bounds
+                    position: { lat: poi.lat, lng: poi.lng },
+                    title: `${poi.title || "No title"} (${String(poi.status || "").toUpperCase() || "UNKNOWN"})`,
+                    icon: baseIcon
+                });
+
+                marker.addListener("click", () => {
+                    selectNominationMarker(marker);
+                    lastSelectedNominationId = poi.id || null;
+                    sendPoiToBridge(poi);
+                    updateNominationActionLinks(poi);
+                });
+
+                nominationMarkers[id] = marker;
+            }
+            else {
+                // Existing marker: update its icon to match new status
+                if (marker === lastSelectedNomMarker) {
+                    // Update selected marker styling based on new base icon
+                    lastSelectedNomOriginalIcon = { ...baseIcon };
+                    const selectedIcon = {
+                        ...baseIcon,
+                        strokeColor: "#ff00ff",
+                        strokeOpacity: 1,
+                        strokeWeight: (baseIcon.strokeWeight || 2) + 2,
+                        scale: (baseIcon.scale || 8) + 1
+                    };
+                    marker.setIcon(selectedIcon);
+                } else {
+                    marker.setIcon(baseIcon);
+                }
+            }
+
+            if (!marker.getMap()) {
+                marker.setMap(submitMap);
+            }
+        });
+
+        // Hide markers that are no longer in bounds or no longer eligible
+        Object.entries(nominationMarkers).forEach(([id, marker]) => {
+            if (!marker) return;
+            if (!inBoundsIds.has(id) && marker.getMap()) {
+                marker.setMap(null);
+            }
+        });
+    }
+
+    // -----------------------------
+    // Sidebar actions & contribution editing
+    // -----------------------------
+
+    function hideNominationActionLinks() {
+        const container = document.querySelector(".wfsmm-poi-function-links");
+        if (!container) return;
+
+        const ids = [
+            "#wfsmm-function-hold",
+            "#wfsmm-function-release-hold",
+            "#wfsmm-function-withdraw",
+            "#wfsmm-function-edit-submission",
+            "#wfsmm-function-appeal"
+        ];
+        ids.forEach(sel => {
+            const el = container.querySelector(sel);
+            if (el) el.style.display = "none";
+        });
+    }
+
+    function updateNominationActionLinks(poi) {
+        if (!poi || poi.type !== "NOMINATION") {
+            hideNominationActionLinks();
+            return;
+        }
+
+        const container = document.querySelector(".wfsmm-poi-function-links");
+        if (!container) return;
+
+        const status = String(poi.status || "").toUpperCase();
+        const id = poi.id;
+        if (!id) return;
+
+        let editLink = container.querySelector("#wfsmm-function-edit-submission");
+        if (!editLink) {
+            editLink = document.createElement("a");
+            editLink.id = "wfsmm-function-edit-submission";
+            editLink.textContent = "Edit";
+            editLink.style.cursor = "pointer";
+            editLink.addEventListener("click", ev => {
+                ev.preventDefault();
+                const targetId = editLink.dataset.id;
+                if (!targetId) return;
+
+                // Find full POI object to prefill modal
+                let poiForEdit = null;
+                if (Array.isArray(nominations)) {
+                    poiForEdit = nominations.find(n => n.id === targetId) || null;
+                }
+
+                if (!poiForEdit) {
+                    // Fallback to the poi passed into updateNominationActionLinks
+                    poiForEdit = poi;
+                }
+
+                if (!poiForEdit) return;
+                openEditSubmissionModal(poiForEdit);
+            });
+            container.appendChild(editLink);
+        }
+
+        // Ensure links exist (create once, reuse)
+        let holdLink = container.querySelector("#wfsmm-function-hold");
+        if (!holdLink) {
+            holdLink = document.createElement("a");
+            holdLink.id = "wfsmm-function-hold";
+            holdLink.textContent = "Hold";
+            holdLink.style.cursor = "pointer";
+            holdLink.addEventListener("click", ev => {
+                ev.preventDefault();
+                const targetId = holdLink.dataset.id;
+                if (!targetId) return;
+                sendManageActionForNomination("hold", targetId);
+            });
+            container.appendChild(holdLink);
+        }
+
+        let releaseHoldLink = container.querySelector("#wfsmm-function-release-hold");
+        if (!releaseHoldLink) {
+            releaseHoldLink = document.createElement("a");
+            releaseHoldLink.id = "wfsmm-function-release-hold";
+            releaseHoldLink.textContent = "Release Hold";
+            releaseHoldLink.style.cursor = "pointer";
+            releaseHoldLink.addEventListener("click", ev => {
+                ev.preventDefault();
+                const targetId = releaseHoldLink.dataset.id;
+                if (!targetId) return;
+                sendManageActionForNomination("releasehold", targetId);
+            });
+            container.appendChild(releaseHoldLink);
+        }
+
+        let withdrawLink = container.querySelector("#wfsmm-function-withdraw");
+        if (!withdrawLink) {
+            withdrawLink = document.createElement("a");
+            withdrawLink.id = "wfsmm-function-withdraw";
+            withdrawLink.textContent = "Withdraw";
+            withdrawLink.style.cursor = "pointer";
+            withdrawLink.addEventListener("click", ev => {
+                ev.preventDefault();
+                const targetId = withdrawLink.dataset.id;
+                if (!targetId) return;
+
+                const confirmed = window.confirm(
+                    "Are you sure you would like to withdraw this nomination? This cannot be undone."
+                );
+                if (!confirmed) return;
+
+                sendManageActionForNomination("withdraw", targetId);
+            });
+            container.appendChild(withdrawLink);
+        }
+
+        let appealLink = container.querySelector("#wfsmm-function-appeal");
+        if (!appealLink) {
+            appealLink = document.createElement("a");
+            appealLink.id = "wfsmm-function-appeal";
+            appealLink.textContent = "Appeal";
+            appealLink.style.cursor = "pointer";
+
+            appealLink.addEventListener("click", ev => {
+                ev.preventDefault();
+                if (!globalCanAppeal) {
+                    // Shouldn’t fire because pointerEvents will be none, but double-check
+                    return;
+                }
+
+                const targetId = appealLink.dataset.id;
+                if (!targetId) return;
+
+                // Find full POI object so we have all fields
+                let poiForAppeal = null;
+                if (Array.isArray(nominations)) {
+                    poiForAppeal = nominations.find(n => n.id === targetId) || null;
+                }
+                if (!poiForAppeal) poiForAppeal = poi;
+                if (!poiForAppeal) return;
+
+                openAppealModal(poiForAppeal);
+            });
+            container.appendChild(appealLink);
+        }
+
+        // Show/hide based on current status for hold / withdraw / edit
+        if (status === "NOMINATED") {
+            // NOMINATED → can Hold, Withdraw, Edit
+            holdLink.style.display = "inline-block";
+            withdrawLink.style.display = "inline-block";
+            releaseHoldLink.style.display = "none";
+            if (editLink) editLink.style.display = "inline-block";
+        } else if (status === "HELD") {
+            // HELD → can Release Hold, Edit
+            holdLink.style.display = "none";
+            withdrawLink.style.display = "none";
+            releaseHoldLink.style.display = "inline-block";
+            if (editLink) editLink.style.display = "inline-block";
+        } else {
+            // Any other status → hide hold/release/withdraw/edit
+            holdLink.style.display = "none";
+            withdrawLink.style.display = "none";
+            releaseHoldLink.style.display = "none";
+            if (editLink) editLink.style.display = "none";
+        }
+
+        if (editLink)       editLink.dataset.id       = id;
+        if (holdLink)       holdLink.dataset.id       = id;
+        if (releaseHoldLink) releaseHoldLink.dataset.id = id;
+        if (withdrawLink)   withdrawLink.dataset.id   = id;
+        if (appealLink)     appealLink.dataset.id     = id;
+
+        // ---- Appeal logic ----
+        if (appealLink) {
+            const itemCanAppeal = !!poi.canAppeal; // per-submission flag from API
+
+            if (!itemCanAppeal) {
+                // (4) This particular POI cannot be appealed at all → hide the link
+                appealLink.style.display = "none";
+                appealLink.title = "";
+                appealLink.style.pointerEvents = "none";
+                appealLink.style.cursor = "default";
+                appealLink.style.opacity = "0.6";
+            } else {
+                // POI is appealable in principle
+                appealLink.style.display = "inline-block";
+
+                if (globalCanAppeal === true) {
+                    // POI can be appealed AND we have appeals available → enabled
+                    appealLink.style.pointerEvents = "auto";
+                    appealLink.style.cursor = "pointer";
+                    appealLink.style.opacity = "1";
+                    appealLink.style.color = "#6b7280";
+                    appealLink.title = "";
+                } else if (globalCanAppeal === false) {
+                    // POI can be appealed, but user has no appeals left
+                    appealLink.style.pointerEvents = "none";
+                    appealLink.style.cursor = "default";
+                    appealLink.style.opacity = "0.6";
+                    appealLink.style.color = "#9ca3af"; // greyed out
+                    appealLink.title = "No appeals available";
+                } else {
+                    // globalCanAppeal === null → we don't know yet, loading state
+                    appealLink.style.pointerEvents = "none";
+                    appealLink.style.cursor = "default";
+                    appealLink.style.opacity = "0.6";
+                    appealLink.style.color = "#9ca3af";
+                    appealLink.title = "Checking appeals availability...";
+                }
+            }
+        }
+    }
+
+    function openEditSubmissionModal(poi) {
+        if (!poi || !poi.id) return;
+
+        const currentTitle = poi.title || "";
+        const currentDescription = poi.description || "";
+        const currentSupporting = poi.statement || "";
+
+        const TITLE_MAX = 128;
+        const DESC_MAX = 512;
+        const SUPP_MAX = 3000;
+
+        openSettingsModal({
+            id: "wf-contrib-edit-submission",
+            title: "Edit submission",
+            buildContent(body, okBtn) {
+                const container = document.createElement("div");
+                container.className = "wfsmm-modal-section";
+                container.style.display = "flex";
+                container.style.flexDirection = "column";
+                container.style.gap = "8px";
+
+                function makeLabel(text) {
+                    const label = document.createElement("label");
+                    label.textContent = text;
+                    label.style.fontSize = "11px";
+                    label.style.fontWeight = "bold";
+                    return label;
+                }
+
+                function makeInput() {
+                    const input = document.createElement("input");
+                    input.type = "text";
+                    input.style.width = "100%";
+                    input.style.boxSizing = "border-box";
+                    input.style.fontSize = "12px";
+                    input.style.padding = "4px 6px";
+                    input.style.border = "1px solid #d1d5db";
+                    input.style.borderRadius = "4px";
+                    input.style.backgroundColor = "#ffffff";
+
+                    input.addEventListener("focus", () => {
+                        input.style.outline = "none";
+                        input.style.borderColor = "#2563eb";
+                        input.style.boxShadow = "0 0 0 1px #2563eb";
+                    });
+                    input.addEventListener("blur", () => {
+                        input.style.borderColor = "#d1d5db";
+                        input.style.boxShadow = "none";
+                    });
+
+                    return input;
+                }
+
+                function makeTextarea(rows) {
+                    const ta = document.createElement("textarea");
+                    ta.rows = rows;
+                    ta.style.width = "100%";
+                    ta.style.boxSizing = "border-box";
+                    ta.style.fontSize = "12px";
+                    ta.style.padding = "4px 6px";
+                    ta.style.resize = "vertical";
+                    ta.style.border = "1px solid #d1d5db";
+                    ta.style.borderRadius = "4px";
+                    ta.style.backgroundColor = "#ffffff";
+
+                    ta.addEventListener("focus", () => {
+                        ta.style.outline = "none";
+                        ta.style.borderColor = "#2563eb";
+                        ta.style.boxShadow = "0 0 0 1px #2563eb";
+                    });
+                    ta.addEventListener("blur", () => {
+                        ta.style.borderColor = "#d1d5db";
+                        ta.style.boxShadow = "none";
+                    });
+
+                    return ta;
+                }
+
+                function makeCounter(initial, max) {
+                    const c = document.createElement("div");
+                    c.style.fontSize = "10px";
+                    c.style.color = "#6b7280";
+                    c.style.textAlign = "right";
+                    c.textContent = `${initial} / ${max}`;
+                    return c;
+                }
+
+                // ---- Title ----
+                const titleLabel = makeLabel("Title");
+                const titleInput = makeInput();
+                titleInput.maxLength = TITLE_MAX;
+                titleInput.value = currentTitle;
+                const titleCounter = makeCounter(currentTitle.length, TITLE_MAX);
+
+                container.appendChild(titleLabel);
+                container.appendChild(titleInput);
+                container.appendChild(titleCounter);
+
+                // ---- Description ----
+                const descLabel = makeLabel("Description");
+                const descInput = makeTextarea(3);
+                descInput.maxLength = DESC_MAX;
+                descInput.value = currentDescription;
+                const descCounter = makeCounter(currentDescription.length, DESC_MAX);
+
+                container.appendChild(descLabel);
+                container.appendChild(descInput);
+                container.appendChild(descCounter);
+
+                // ---- Supporting statement ----
+                const suppLabel = makeLabel("Supporting statement");
+                const suppInput = makeTextarea(3);
+                suppInput.maxLength = SUPP_MAX;
+                suppInput.value = currentSupporting;
+                const suppCounter = makeCounter(currentSupporting.length, SUPP_MAX);
+
+                container.appendChild(suppLabel);
+                container.appendChild(suppInput);
+                container.appendChild(suppCounter);
+
+                body.appendChild(container);
+
+                function updateCountsAndValidate() {
+                    const titleLen = titleInput.value.length;
+                    const descLen = descInput.value.length;
+                    const suppLen = suppInput.value.length;
+
+                    titleCounter.textContent = `${titleLen} / ${TITLE_MAX}`;
+                    descCounter.textContent = `${descLen} / ${DESC_MAX}`;
+                    suppCounter.textContent = `${suppLen} / ${SUPP_MAX}`;
+
+                    // All fields must be 1+ chars to enable OK
+                    const allValid =
+                          titleLen >= 1 &&
+                          descLen >= 1 &&
+                          suppLen >= 1;
+
+                    if (okBtn) {
+                        okBtn.disabled = !allValid;
+                        okBtn.style.opacity = allValid ? "1" : "0.6";
+                        okBtn.style.cursor = allValid ? "pointer" : "not-allowed";
+                    }
+                }
+
+                titleInput.addEventListener("input", updateCountsAndValidate);
+                descInput.addEventListener("input", updateCountsAndValidate);
+                suppInput.addEventListener("input", updateCountsAndValidate);
+
+                // Initial state
+                updateCountsAndValidate();
+
+                return {
+                    nominationId: poi.id,
+                    titleInput,
+                    descInput,
+                    suppInput
+                };
+            },
+            onOk(ctx, closeModal) {
+                const id = ctx.nominationId;
+                if (!id) {
+                    closeModal();
+                    return;
+                }
+
+                const updates = {
+                    title: ctx.titleInput.value.trim(),
+                    description: ctx.descInput.value.trim(),
+                    // logical "supporting" key – stored as "statement" in data
+                    supporting: ctx.suppInput.value.trim()
+                };
+
+                // If somehow empty, just refuse to send
+                if (!updates.title || !updates.description || !updates.supporting) {
+                    return;
+                }
+
+                sendEditSubmission(id, updates, closeModal);
+            }
+        });
+    }
+
+    function openAppealModal(poi) {
+        if (!poi || !poi.id) return;
+
+        const currentStatement = ""; // appeals are fresh text, not the original rejection reason
+
+        openSettingsModal({
+            id: "wf-contrib-appeal-submission",
+            title: "Appeal rejection",
+            buildContent(body, okBtn) {
+                const container = document.createElement("div");
+                container.className = "wfsmm-modal-section";
+                container.style.display = "flex";
+                container.style.flexDirection = "column";
+                container.style.gap = "8px";
+
+                const label = document.createElement("label");
+                label.textContent = "Appeal statement";
+                label.style.fontSize = "11px";
+                label.style.fontWeight = "bold";
+
+                const textarea = document.createElement("textarea");
+                textarea.rows = 5;
+                textarea.style.width = "100%";
+                textarea.style.boxSizing = "border-box";
+                textarea.style.fontSize = "12px";
+                textarea.style.padding = "4px 6px";
+                textarea.style.resize = "vertical";
+                textarea.style.border = "1px solid #d1d5db";
+                textarea.style.borderRadius = "4px";
+                textarea.style.backgroundColor = "#ffffff";
+                textarea.placeholder = "Please explain why you think this contribution should be accepted.";
+
+                textarea.value = currentStatement;
+
+                textarea.addEventListener("focus", () => {
+                    textarea.style.outline = "none";
+                    textarea.style.borderColor = "#2563eb";
+                    textarea.style.boxShadow = "0 0 0 1px #2563eb";
+                });
+                textarea.addEventListener("blur", () => {
+                    textarea.style.borderColor = "#d1d5db";
+                    textarea.style.boxShadow = "none";
+                });
+
+                const hint = document.createElement("div");
+                hint.style.fontSize = "10px";
+                hint.style.color = "#6b7280";
+                hint.textContent = "Use this space to clarify why your nomination meets the criteria.";
+
+                container.appendChild(label);
+                container.appendChild(textarea);
+                container.appendChild(hint);
+                body.appendChild(container);
+
+                function updateValidity() {
+                    const text = textarea.value.trim();
+                    const valid = text.length > 0;
+                    if (okBtn) {
+                        okBtn.disabled = !valid;
+                        okBtn.style.opacity = valid ? "1" : "0.6";
+                        okBtn.style.cursor = valid ? "pointer" : "not-allowed";
+                    }
+                }
+
+                textarea.addEventListener("input", updateValidity);
+                updateValidity(); // initial
+
+                return {
+                    nominationId: poi.id,
+                    textarea
+                };
+            },
+            onOk(ctx, closeModal) {
+                const id = ctx.nominationId;
+                if (!id) {
+                    closeModal();
+                    return;
+                }
+
+                const statement = ctx.textarea.value.trim();
+                if (!statement) {
+                    return; // should be prevented by disabled OK, but double-check
+                }
+
+                sendAppeal(id, statement, closeModal);
+            }
+        });
+    }
+
+    // -----------------------------
+    // Settings UI (link + modals)
     // -----------------------------
 
     function insertSettingsLink() {
@@ -597,7 +1553,7 @@
 
             const link = document.createElement("a");
             link.id = "wfsmm-settings-contributions";
-            link.textContent = "My Contributions";
+            link.textContent = "Contributions";
 
             settingsBody.appendChild(link);
 
@@ -947,7 +1903,6 @@
                     customiseLink.textContent = "Customise";
                     customiseLink.style.background = "transparent";
                     customiseLink.style.border = "none";
-                    customiseLink.style.color = "#2563eb";
                     customiseLink.style.cursor = "pointer";
                     customiseLink.style.fontSize = "11px";
                     customiseLink.style.textDecoration = "underline";
@@ -1158,7 +2113,8 @@
         // Build content and get ctx
         let ctx = null;
         if (typeof buildContent === "function") {
-            ctx = buildContent(body) || {};
+            // Pass okBtn so modals can control its disabled state
+            ctx = buildContent(body, okBtn) || {};
         }
 
         function closeModal() {
@@ -1195,413 +2151,6 @@
         });
 
         document.addEventListener("keydown", keyHandler);
-    }
-
-    function clamp(value, min, max, defaultVal) {
-        const n = parseFloat(value);
-        if (Number.isNaN(n)) return defaultVal;
-        if (n < min) return min;
-        if (n > max) return max;
-        return n;
-    }
-
-    function hexToRgba(hex, alpha) {
-        hex = String(hex || "").trim();
-        if (!hex) return `rgba(0,0,0,${alpha})`;
-
-        if (hex[0] === "#") {
-            hex = hex.slice(1);
-        }
-        if (hex.length === 3) {
-            // #rgb → #rrggbb
-            hex = hex.split("").map(ch => ch + ch).join("");
-        }
-        const num = parseInt(hex, 16);
-        const r = (num >> 16) & 255;
-        const g = (num >> 8) & 255;
-        const b = num & 255;
-        return `rgba(${r},${g},${b},${alpha})`;
-    }
-
-    // -----------------------------
-    // Nominations -> Map markers
-    // -----------------------------
-
-    let nominationMarkers = {};
-
-    function getMarkerConfigForStatus(statusRaw) {
-        const status = String(statusRaw || "").toUpperCase();
-        const markersCfg = (userSettings.markers && userSettings.markers.statuses) || {};
-        const fallback = markersCfg.DEFAULT || {
-            strokeColor: "#6b7280",
-            strokeWeight: 2,
-            strokeOpacity: 1.0,
-            fillColor: "#6b7280",
-            fillOpacity: 0.5,
-            scale: 8,
-            enabled: true
-        };
-
-        return markersCfg[status] || fallback;
-    }
-
-    function createNominationMarker(poi) {
-        const lat = poi.lat;
-        const lng = poi.lng;
-
-        const statusRaw = poi.status || "";
-        const status = String(statusRaw).toUpperCase();
-        const cfg = getMarkerConfigForStatus(statusRaw);
-
-        const marker = new google.maps.Marker({
-            map: null, // attach later when in-bounds
-            position: { lat, lng },
-            title: `${poi.title || "No title"} (${status || "UNKNOWN"})`,
-            icon: {
-                path: google.maps.SymbolPath.CIRCLE,
-                fillColor: cfg.fillColor,
-                fillOpacity: cfg.fillOpacity,
-                strokeColor: cfg.strokeColor,
-                strokeOpacity: cfg.strokeOpacity,
-                strokeWeight: cfg.strokeWeight,
-                scale: cfg.scale
-            }
-        });
-
-        marker.addListener("click", () => {
-            console.log('click mew');
-            // 1) Locally show selection (but preserve colour coding)
-            selectNominationMarker(marker);
-
-            // 2) Tell the main plugin: this POI is the selected one
-            sendPoiToBridge(poi);
-
-            // 3) Update contribution management links on the side panel
-            updateNominationActionLinks(poi);
-
-        });
-
-        return marker;
-    }
-
-    function clearNominationSelection() {
-        hideNominationActionLinks();
-
-        if (lastSelectedNomMarker && lastSelectedNomOriginalIcon) {
-            lastSelectedNomMarker.setIcon(lastSelectedNomOriginalIcon);
-        }
-        lastSelectedNomMarker = null;
-        lastSelectedNomOriginalIcon = null;
-    }
-
-    function selectNominationMarker(marker) {
-        // Remove highlight from previous selected nomination marker
-        clearNominationSelection();
-
-        if (!marker || !marker.getIcon) return;
-
-        const icon = marker.getIcon();
-        if (!icon) return;
-
-        // Remember original so we can restore later
-        lastSelectedNomOriginalIcon = { ...icon };
-        lastSelectedNomMarker = marker;
-
-        const selectedIcon = {
-            ...icon,
-            // keep fillColor / fillOpacity as-is
-            strokeColor: "#ff00ff",
-            strokeOpacity: 1,
-            strokeWeight: (icon.strokeWeight || 2) + 2,
-            scale: (icon.scale || 8) + 1
-        };
-
-        marker.setIcon(selectedIcon);
-    }
-
-    function filterCandidateIdsByStatus(candidateIds, candidatePoisById, excludedStatuses) {
-        const result = [];
-        candidateIds.forEach(id => {
-            const poi = candidatePoisById[id];
-            if (!poi) return;
-            const status = String(poi.status || "").toUpperCase();
-            if (excludedStatuses.has(status)) return;
-            result.push(id);
-        });
-        return result;
-    }
-
-    // Bounds-based, marker-reuse, with enabled-flag support
-    function refreshNominationMarkers() {
-        console.log('refreshing markers');
-        if (!submitMap || !nominations || !Array.isArray(nominations)) {
-            return;
-        }
-
-        const bounds = submitMap.getBounds();
-        if (!bounds) {
-            // Map not fully initialised yet
-            return;
-        }
-
-        const mapCfg = userSettings.map || {};
-        const performanceModeEnabled = !!mapCfg.performanceModeEnabled;
-        const maxVisibleMarkers = typeof mapCfg.performanceMaxVisibleMarkers === "number"
-        ? mapCfg.performanceMaxVisibleMarkers
-        : PERFORMANCE_MAX_VISIBLE_MARKERS;
-
-        // First pass: find all nominations that *would* be visible
-        // respecting status "enabled" flags and map bounds.
-        const candidateIds = [];
-        const candidatePoisById = {};
-
-        nominations.forEach(poi => {
-            if (!poi || poi.type !== "NOMINATION") return;
-
-            const lat = poi.lat;
-            const lng = poi.lng;
-            if (typeof lat !== "number" || typeof lng !== "number") return;
-
-            const statusCfg = getMarkerConfigForStatus(poi.status);
-            if (statusCfg.enabled === false) {
-                // Don't show markers for this status at all
-                return;
-            }
-
-            const pos = new google.maps.LatLng(lat, lng);
-            if (!bounds.contains(pos)) return;
-
-            const id = poi.id || `${lat},${lng}`;
-            if (!candidatePoisById[id]) {
-                candidateIds.push(id);
-                candidatePoisById[id] = poi;
-            }
-        });
-
-        let finalCandidateIds = candidateIds;
-
-        if (performanceModeEnabled && candidateIds.length > maxVisibleMarkers) {
-            // 1) Try removing ACCEPTED only
-            const excludeAccepted = new Set(["ACCEPTED"]);
-            const withoutAccepted = filterCandidateIdsByStatus(candidateIds, candidatePoisById, excludeAccepted);
-
-            if (withoutAccepted.length <= maxVisibleMarkers) {
-                finalCandidateIds = withoutAccepted;
-            } else {
-                // 2) Try removing ACCEPTED + REJECTED + DUPLICATE + WITHDRAWN
-                const excludeAcceptedRejectedDup = new Set(["ACCEPTED", "REJECTED", "DUPLICATE", "WITHDRAWN"]);
-                const withoutAcceptedRejectedDup = filterCandidateIdsByStatus(candidateIds, candidatePoisById, excludeAcceptedRejectedDup);
-
-                if (withoutAcceptedRejectedDup.length <= maxVisibleMarkers) {
-                    finalCandidateIds = withoutAcceptedRejectedDup;
-                } else {
-                    // 3) Still too many → hide everything
-                    clearNominationMarkers();
-                    return;
-                }
-            }
-        }
-
-        // Second pass: actually create/show markers for the chosen candidate set
-        const inBoundsIds = new Set(finalCandidateIds);
-
-        finalCandidateIds.forEach(id => {
-            const poi = candidatePoisById[id];
-            if (!poi) return;
-
-            let marker = nominationMarkers[id];
-            const cfg = getMarkerConfigForStatus(poi.status);
-
-            // Base icon from current status
-            const baseIcon = {
-                path: google.maps.SymbolPath.CIRCLE,
-                fillColor: cfg.fillColor,
-                fillOpacity: cfg.fillOpacity,
-                strokeColor: cfg.strokeColor,
-                strokeOpacity: cfg.strokeOpacity,
-                strokeWeight: cfg.strokeWeight,
-                scale: cfg.scale
-            };
-
-            if (!marker) {
-                // New marker
-                marker = new google.maps.Marker({
-                    map: null, // attach later when in-bounds
-                    position: { lat: poi.lat, lng: poi.lng },
-                    title: `${poi.title || "No title"} (${String(poi.status || "").toUpperCase() || "UNKNOWN"})`,
-                    icon: baseIcon
-                });
-
-                marker.addListener("click", () => {
-                    selectNominationMarker(marker);
-                    sendPoiToBridge(poi);
-                    updateNominationActionLinks(poi);
-                });
-
-                nominationMarkers[id] = marker;
-            } else {
-                // Existing marker: update its icon to match new status
-                if (marker === lastSelectedNomMarker) {
-                    // Update selected marker styling based on new base icon
-                    lastSelectedNomOriginalIcon = { ...baseIcon };
-                    const selectedIcon = {
-                        ...baseIcon,
-                        strokeColor: "#ff00ff",
-                        strokeOpacity: 1,
-                        strokeWeight: (baseIcon.strokeWeight || 2) + 2,
-                        scale: (baseIcon.scale || 8) + 1
-                    };
-                    marker.setIcon(selectedIcon);
-                } else {
-                    marker.setIcon(baseIcon);
-                }
-            }
-
-            if (!marker.getMap()) {
-                marker.setMap(submitMap);
-            }
-        });
-
-        // Hide markers that are no longer in bounds or no longer eligible
-        Object.entries(nominationMarkers).forEach(([id, marker]) => {
-            if (!marker) return;
-            if (!inBoundsIds.has(id) && marker.getMap()) {
-                marker.setMap(null);
-            }
-        });
-    }
-
-
-    // -----------------------------
-    // Managing Contribution status via map
-    // -----------------------------
-
-    function getCookie(name) {
-        const match = document.cookie.match(new RegExp("(^|; )" + name + "=([^;]*)"));
-        return match ? decodeURIComponent(match[2]) : null;
-    }
-
-    function getCsrfToken() {
-        return getCookie("XSRF-TOKEN") || "";
-    }
-
-    function sendManageActionForNomination(action, nominationId) {
-        if (!action || !nominationId) return;
-
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", `/api/v1/vault/manage/${action}`, true);
-        xhr.withCredentials = true;
-
-        xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-
-        const csrfToken = getCsrfToken();
-        if (csrfToken) {
-            xhr.setRequestHeader("x-csrf-token", csrfToken);
-        }
-
-        xhr.send(JSON.stringify({ id: nominationId }));
-    }
-
-    function hideNominationActionLinks() {
-        const container = document.querySelector(".wfsmm-poi-function-links");
-        if (!container) return;
-
-        const ids = [
-            "#wfsmm-function-hold",
-            "#wfsmm-function-release-hold",
-            "#wfsmm-function-withdraw"
-        ];
-        ids.forEach(sel => {
-            const el = container.querySelector(sel);
-            if (el) el.style.display = "none";
-        });
-    }
-
-    function updateNominationActionLinks(poi) {
-        if (!poi || poi.type !== "NOMINATION") {
-            hideNominationActionLinks();
-            return;
-        }
-
-        const container = document.querySelector(".wfsmm-poi-function-links");
-        if (!container) return;
-
-        const status = String(poi.status || "").toUpperCase();
-        const id = poi.id;
-        if (!id) return;
-
-        // Ensure links exist (create once, reuse)
-        let holdLink = container.querySelector("#wfsmm-function-hold");
-        if (!holdLink) {
-            holdLink = document.createElement("a");
-            holdLink.id = "wfsmm-function-hold";
-            holdLink.textContent = "Place On Hold";
-            holdLink.style.cursor = "pointer";
-            holdLink.style.marginLeft = "8px";
-            holdLink.addEventListener("click", ev => {
-                ev.preventDefault();
-                const targetId = holdLink.dataset.id;
-                if (!targetId) return;
-                sendManageActionForNomination("hold", targetId);
-            });
-            container.appendChild(holdLink);
-        }
-
-        let releaseHoldLink = container.querySelector("#wfsmm-function-release-hold");
-        if (!releaseHoldLink) {
-            releaseHoldLink = document.createElement("a");
-            releaseHoldLink.id = "wfsmm-function-release-hold";
-            releaseHoldLink.textContent = "Release Hold";
-            releaseHoldLink.style.cursor = "pointer";
-            releaseHoldLink.style.marginLeft = "8px";
-            releaseHoldLink.addEventListener("click", ev => {
-                ev.preventDefault();
-                const targetId = releaseHoldLink.dataset.id;
-                if (!targetId) return;
-                sendManageActionForNomination("releasehold", targetId);
-            });
-            container.appendChild(releaseHoldLink);
-        }
-
-        let withdrawLink = container.querySelector("#wfsmm-function-withdraw");
-        if (!withdrawLink) {
-            withdrawLink = document.createElement("a");
-            withdrawLink.id = "wfsmm-function-withdraw";
-            withdrawLink.textContent = "Withdraw";
-            withdrawLink.style.cursor = "pointer";
-            withdrawLink.style.marginLeft = "8px";
-            withdrawLink.addEventListener("click", ev => {
-                ev.preventDefault();
-                const targetId = withdrawLink.dataset.id;
-                if (!targetId) return;
-                sendManageActionForNomination("withdraw", targetId);
-            });
-            container.appendChild(withdrawLink);
-        }
-
-        // Update the id on each link so they act on the selected POI
-        holdLink.dataset.id = id;
-        releaseHoldLink.dataset.id = id;
-        withdrawLink.dataset.id = id;
-
-        console.log('still going');
-        // Show/hide based on current status
-        if (status === "NOMINATED") {
-            // NOMINATED → can Hold or Withdraw
-            holdLink.style.display = "inline-block";
-            withdrawLink.style.display = "inline-block";
-            releaseHoldLink.style.display = "none";
-        } else if (status === "HELD") {
-            // HELD → can Release Hold or Withdraw
-            holdLink.style.display = "none";
-            withdrawLink.style.display = "none";
-            releaseHoldLink.style.display = "inline-block";
-        } else {
-            // Any other status → hide all three
-            holdLink.style.display = "none";
-            withdrawLink.style.display = "none";
-            releaseHoldLink.style.display = "none";
-        }
     }
 
     // -----------------------------
@@ -1674,6 +2223,36 @@
             attributes: true,
             attributeFilter: ["data-payload"]
         });
+    }
+
+    // -----------------------------
+    // Utility helpers
+    // -----------------------------
+
+    function clamp(value, min, max, defaultVal) {
+        const n = parseFloat(value);
+        if (Number.isNaN(n)) return defaultVal;
+        if (n < min) return min;
+        if (n > max) return max;
+        return n;
+    }
+
+    function hexToRgba(hex, alpha) {
+        hex = String(hex || "").trim();
+        if (!hex) return `rgba(0,0,0,${alpha})`;
+
+        if (hex[0] === "#") {
+            hex = hex.slice(1);
+        }
+        if (hex.length === 3) {
+            // #rgb → #rrggbb
+            hex = hex.split("").map(ch => ch + ch).join("");
+        }
+        const num = parseInt(hex, 16);
+        const r = (num >> 16) & 255;
+        const g = (num >> 8) & 255;
+        const b = num & 255;
+        return `rgba(${r},${g},${b},${alpha})`;
     }
 
     // -----------------------------
