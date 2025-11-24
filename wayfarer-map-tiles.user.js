@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map - Map Tiles
-// @version      0.0.2
+// @version      0.0.3
 // @description  Adds extra base map providers (Bing, Esri, OSM, etc.) to the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-tiles.user.js
@@ -443,7 +443,7 @@
         // Add extra services
         mapTypeControlOptions = setupMapLayer(
             submitMap, mapTypeControlOptions,
-            "Bing", 19, 0,
+            "Bing", 20, 0,
             "https://t0.tiles.virtualearth.net/tiles/a{quadKey}.jpeg?g=1398"
         );
         mapTypeControlOptions = setupMapLayer(
@@ -458,7 +458,7 @@
         );
         mapTypeControlOptions = setupMapLayer(
             submitMap, mapTypeControlOptions,
-            "OSM", 20, 0,
+            "OSM", 19, 0,
             "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
         );
 
