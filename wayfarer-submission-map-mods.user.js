@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.24
+// @version      0.0.25
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -1317,7 +1317,7 @@
     }
 
     function findLatLngDiv() {
-        return document.querySelector('.text-gray-400.text-xs');
+        return document.querySelector('.submit-coordinates-text');
     }
 
     function fetchLivePois(lat, lng) {
