@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Submission Map Mods
-// @version      0.0.25
+// @version      0.0.26
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-submission-map-mods.user.js
@@ -1316,9 +1316,11 @@
         return { lat, lng };
     }
 
-    function findLatLngDiv() {
-        return document.querySelector('.submit-coordinates-text');
-    }
+function findLatLngDiv() {
+    // Backwards compatibility to account for changes to the Wayfarer site
+    return document.querySelector('.submit-coordinates-text')
+        || document.querySelector('.text-gray-400.text-xs');
+}
 
     function fetchLivePois(lat, lng) {
         const url = `/api/v1/vault/live-pois-in-radius?lat=${lat}&lng=${lng}&radius=${radius}`;
