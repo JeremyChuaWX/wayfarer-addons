@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map - Draw Tools
-// @version      0.0.1
+// @version      0.0.2
 // @description  Adds simple drawing tools (markers, polylines, circles) to the Wayfarer submission map, with persistence.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-draw-tools.user.js
@@ -14,6 +14,11 @@
 
     let submitMap = null;
     let mapAttached = false;
+
+    const isTouchDevice = !!(
+        "ontouchstart" in window ||
+        (navigator && (navigator.maxTouchPoints > 0 || navigator.msMaxTouchPoints > 0))
+    );
 
     const SETTINGS_KEY = "wfmap_drawing_tools_settings";
 
@@ -432,13 +437,31 @@
     let deleteMode = false;
 
     let modeListeners = [];
+    let domModeListeners = [];
     let drawingClickHandler = null; // shared handler for drawing clicks
 
     function clearModeListeners() {
         modeListeners.forEach(l => google.maps.event.removeListener(l));
         modeListeners = [];
+
+        domModeListeners.forEach(info => {
+            try {
+                info.target.removeEventListener(info.type, info.handler, info.options || false);
+            } catch {
+                // ignore
+            }
+        });
+        domModeListeners = [];
+
         drawingClickHandler = null;
     }
+
+    function addDomModeListener(target, type, handler, options) {
+        const opts = options || false;
+        target.addEventListener(type, handler, opts);
+        domModeListeners.push({ target, type, handler, options: opts });
+    }
+
 
     function clearInMemoryShapes(keepSettings) {
         allShapes.forEach(entry => {
@@ -671,35 +694,35 @@
         }
     }
 
-function applyControlPosition() {
-    if (!submitMap || !drawingControlDiv) return;
+    function applyControlPosition() {
+        if (!submitMap || !drawingControlDiv) return;
 
-    const drawingSettings = userSettings.drawing || {};
-    const posSetting = drawingSettings.position || "left";
-    const newPos = getControlPositionForSetting(posSetting);
+        const drawingSettings = userSettings.drawing || {};
+        const posSetting = drawingSettings.position || "left";
+        const newPos = getControlPositionForSetting(posSetting);
 
-    if (drawingControlsPosition === newPos) {
-        // Still update layout if the position setting changed but the ControlPosition enum didn't
-        updateControlsLayout();
-        return;
-    }
-
-    // Remove from old position if present
-    if (drawingControlsPosition != null) {
-        const arr = submitMap.controls[drawingControlsPosition];
-        const a = arr.getArray();
-        const idx = a.indexOf(drawingControlDiv);
-        if (idx > -1) {
-            arr.removeAt(idx);
+        if (drawingControlsPosition === newPos) {
+            // Still update layout if the position setting changed but the ControlPosition enum didn't
+            updateControlsLayout();
+            return;
         }
+
+        // Remove from old position if present
+        if (drawingControlsPosition != null) {
+            const arr = submitMap.controls[drawingControlsPosition];
+            const a = arr.getArray();
+            const idx = a.indexOf(drawingControlDiv);
+            if (idx > -1) {
+                arr.removeAt(idx);
+            }
+        }
+
+        drawingControlsPosition = newPos;
+        submitMap.controls[newPos].push(drawingControlDiv);
+
+        // Adjust flex layout for the new position
+        updateControlsLayout();
     }
-
-    drawingControlsPosition = newPos;
-    submitMap.controls[newPos].push(drawingControlDiv);
-
-    // Adjust flex layout for the new position
-    updateControlsLayout();
-}
 
     function applyDrawingEnabledState() {
         ensureDrawingDefaults();
@@ -1013,10 +1036,14 @@ function applyControlPosition() {
         if (!submitMap || !mapProjection) return null;
         const mapDiv = submitMap.getDiv();
         const rect = mapDiv.getBoundingClientRect();
-        const x = ev.clientX - rect.left;
-        const y = ev.clientY - rect.top;
+
+        // MapDiv → overlay pixel coordinates (undo the offset we apply for labels)
+        const x = ev.clientX - rect.left - overlayOffset.x;
+        const y = ev.clientY - rect.top - overlayOffset.y;
+
         return mapProjection.fromDivPixelToLatLng(new google.maps.Point(x, y));
     }
+
 
     // -----------------------------
     // Drawing click helpers
@@ -1059,6 +1086,7 @@ function applyControlPosition() {
 
         const color = currentShapeColor;
         const fixedPoints = []; // committed vertices
+        const vertexMarkers = [];
 
         let tempPolyline = new google.maps.Polyline({
             map: submitMap,
@@ -1079,9 +1107,108 @@ function applyControlPosition() {
             return sum;
         }
 
+        function clearVertexMarkers() {
+            vertexMarkers.forEach(m => {
+                try {
+                    m.setMap(null);
+                } catch {
+                    // ignore
+                }
+            });
+        }
+
+        function finishPolyline() {
+            const path = tempPolyline.getPath().getArray();
+            if (path.length < 2) {
+                tempPolyline.setMap(null);
+                clearVertexMarkers();
+            } else {
+                const storedPath = path.map(ll => ({ lat: ll.lat(), lng: ll.lng() }));
+                registerShape(tempPolyline, {
+                    type: "polyline",
+                    path: storedPath,
+                    color
+                });
+                clearVertexMarkers();
+            }
+            if (labelDiv) {
+                labelDiv.style.display = "none";
+            }
+            setMode(null);
+        }
+
+        // Check if a click is close (in screen pixels) to any existing vertex
+        function isNearExistingVertex(latLng) {
+            if (!mapProjection || !fixedPoints.length) return false;
+
+            const clickPx = mapProjection.fromLatLngToDivPixel(latLng);
+            if (!clickPx) return false;
+
+            const threshold = 10; // pixels
+            const thr2 = threshold * threshold;
+
+            for (const v of fixedPoints) {
+                const vPx = mapProjection.fromLatLngToDivPixel(v);
+                if (!vPx) continue;
+                const dx = vPx.x - clickPx.x;
+                const dy = vPx.y - clickPx.y;
+                if (dx * dx + dy * dy <= thr2) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function addVertexMarker(latLng) {
+            const marker = new google.maps.Marker({
+                map: submitMap,
+                position: latLng,
+                clickable: true,
+                zIndex: 9999,
+                cursor: "pointer",
+                icon: {
+                    // 8×8px square, centred on the point
+                    path: "M -4 -4 L 4 -4 L 4 4 L -4 4 Z",
+                    fillColor: "#ffffff",
+                    fillOpacity: 1,
+                    strokeColor: "#000000",
+                    strokeWeight: 1,
+                    anchor: new google.maps.Point(0, 0),
+                    scale: 1
+                },
+                optimized: false
+            });
+
+            // Clicking the square behaves like clicking at that vertex
+            marker.addListener("click", (ev) => {
+                const pos = marker.getPosition();
+                if (pos && drawingClickHandler) {
+                    drawingClickHandler(pos);
+                }
+                if (ev && ev.domEvent) {
+                    ev.domEvent.stopPropagation();
+                    ev.domEvent.preventDefault();
+                }
+            });
+
+            vertexMarkers.push(marker);
+        }
+
+        // Unified handler used for:
+        // - map clicks
+        // - POI marker snaps (attachMarkerClickCapture)
+        // - white square clicks
         drawingClickHandler = (latLng) => {
+            // If we already have a polyline and click near any existing vertex, terminate
+            if (fixedPoints.length >= 2 && isNearExistingVertex(latLng)) {
+                finishPolyline();
+                return;
+            }
+
+            // Otherwise, add a new vertex
             fixedPoints.push(latLng);
             tempPolyline.setPath(fixedPoints);
+            addVertexMarker(latLng);
         };
 
         const clickListener = submitMap.addListener("click", (ev) => {
@@ -1113,26 +1240,12 @@ function applyControlPosition() {
             finishPolyline();
         });
 
-        function finishPolyline() {
-            const path = tempPolyline.getPath().getArray();
-            if (path.length < 2) {
-                tempPolyline.setMap(null);
-            } else {
-                const storedPath = path.map(ll => ({ lat: ll.lat(), lng: ll.lng() }));
-                registerShape(tempPolyline, {
-                    type: "polyline",
-                    path: storedPath,
-                    color
-                });
-            }
-            if (labelDiv) {
-                labelDiv.style.display = "none";
-            }
-            setMode(null);
-        }
-
         modeListeners.push(clickListener, moveListener, dblClickListener, rightClickListener);
     }
+
+
+
+
 
     // distance between two LatLngs in meters
     function distanceMeters(a, b) {
@@ -1159,6 +1272,12 @@ function applyControlPosition() {
     function enableCircleMode() {
         if (!submitMap) return;
 
+        if (isTouchDevice) {
+            enableCircleModeTouch();
+            return;
+        }
+
+        // --- existing desktop (mouse) behaviour ---
         ensureProjectionHelper();
 
         const color = currentShapeColor;
@@ -1257,6 +1376,148 @@ function applyControlPosition() {
         modeListeners.push(clickListener, moveListener);
     }
 
+    function enableCircleModeTouch() {
+        if (!submitMap) return;
+
+        ensureProjectionHelper();
+
+        const color = currentShapeColor;
+        const mapDiv = submitMap.getDiv();
+        if (!mapDiv) return;
+
+        let center = null;
+        let tempCircle = null;
+        let tempRadiusLine = null;
+        let lastEdge = null;
+
+        const labelDiv = ensureLabelDiv("circle");
+
+        function latLngFromTouch(touch) {
+            if (!submitMap || !mapProjection) return null;
+            const rect = mapDiv.getBoundingClientRect();
+
+            const x = touch.clientX - rect.left - overlayOffset.x;
+            const y = touch.clientY - rect.top - overlayOffset.y;
+
+            return mapProjection.fromDivPixelToLatLng(new google.maps.Point(x, y));
+        }
+
+        function onTouchStart(ev) {
+            if (!isTouchDevice || currentMode !== "circle") return;
+            if (!ev.touches || !ev.touches.length) return;
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            const touch = ev.touches[0];
+            const latLng = latLngFromTouch(touch);
+            if (!latLng) return;
+
+            center = latLng;
+            lastEdge = latLng;
+
+            tempCircle = new google.maps.Circle({
+                map: submitMap,
+                center,
+                radius: 0,
+                strokeColor: color,
+                strokeWeight: 2,
+                fillColor: color,
+                fillOpacity: 0.1,
+                clickable: false
+            });
+
+            tempRadiusLine = new google.maps.Polyline({
+                map: submitMap,
+                path: [center, center],
+                strokeOpacity: 0,
+                clickable: false,
+                icons: [{
+                    icon: {
+                        path: "M 0,-1 0,1",
+                        strokeOpacity: 1,
+                        scale: 2
+                    },
+                    offset: "0",
+                    repeat: "10px"
+                }]
+            });
+
+            if (labelDiv) {
+                positionLabelDiv(labelDiv, center, center, "0.0 m");
+            }
+        }
+
+        function onTouchMove(ev) {
+            if (!center || !tempCircle || !tempRadiusLine) return;
+            if (!ev.touches || !ev.touches.length) return;
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            const touch = ev.touches[0];
+            const edge = latLngFromTouch(touch);
+            if (!edge) return;
+
+            lastEdge = edge;
+
+            const radius = distanceMeters(center, edge);
+            tempCircle.setRadius(radius);
+
+            const factor = 0.95;
+            const lat = center.lat() + (edge.lat() - center.lat()) * factor;
+            const lng = center.lng() + (edge.lng() - center.lng()) * factor;
+            const endPoint = new google.maps.LatLng(lat, lng);
+
+            tempRadiusLine.setPath([center, endPoint]);
+
+            if (labelDiv) {
+                const metres = radius.toFixed(1);
+                positionLabelDiv(labelDiv, center, endPoint, `${metres} m`);
+            }
+        }
+
+        function onTouchEnd(ev) {
+            if (!center || !tempCircle) {
+                setMode(null);
+                return;
+            }
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            const edge = lastEdge || center;
+            const radius = distanceMeters(center, edge);
+
+            if (!tempCircle || radius <= 1) {
+                if (tempCircle) tempCircle.setMap(null);
+                if (tempRadiusLine) tempRadiusLine.setMap(null);
+            } else {
+                tempCircle.setRadius(radius);
+                registerShape(tempCircle, {
+                    type: "circle",
+                    center: { lat: center.lat(), lng: center.lng() },
+                    radius,
+                    color
+                });
+                if (tempRadiusLine) tempRadiusLine.setMap(null);
+            }
+
+            if (labelDiv) {
+                labelDiv.style.display = "none";
+            }
+
+            setMode(null); // cleans up listeners via clearModeListeners
+        }
+
+        // Capture touches on the map DIV before Google Maps sees them
+        addDomModeListener(mapDiv, "touchstart", onTouchStart, { passive: false, capture: true });
+        addDomModeListener(mapDiv, "touchmove", onTouchMove, { passive: false, capture: true });
+        addDomModeListener(mapDiv, "touchend", onTouchEnd, { passive: false, capture: true });
+        addDomModeListener(mapDiv, "touchcancel", onTouchEnd, { passive: false, capture: true });
+    }
+
+
     // -----------------------------
     // Global DOM capture for clicks on markers (snap)
     // -----------------------------
@@ -1266,14 +1527,18 @@ function applyControlPosition() {
         document._wfDrawingToolsCaptureAttached = true;
 
         document.addEventListener("click", (ev) => {
+            // Only active when a drawing mode is on and we have a handler
             if (!currentMode || !drawingClickHandler || !submitMap) return;
 
             const mapDiv = submitMap.getDiv();
             if (!mapDiv) return;
             if (!mapDiv.contains(ev.target)) return;
 
-            // Only intercept marker/POI images
+            // Only intercept *Google* marker / POI images
             if (!(ev.target instanceof HTMLImageElement)) return;
+            const src = ev.target.src || "";
+            // POI/marker images are usually served from gstatic/googleapis
+            if (!/gstatic\.com|googleapis\.com/i.test(src)) return;
 
             ensureProjectionHelper();
             if (!mapProjection) return;
@@ -1281,9 +1546,11 @@ function applyControlPosition() {
             const latLng = latLngFromClientXY(ev);
             if (!latLng) return;
 
+            // Stop the original click so Maps doesn't do its default marker behaviour
             ev.stopPropagation();
             ev.preventDefault();
 
+            // Treat the marker click as a drawing click at that LatLng
             drawingClickHandler(latLng);
         }, true);
     }
