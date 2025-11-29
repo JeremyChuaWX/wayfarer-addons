@@ -1,0 +1,203 @@
+// ==UserScript==
+// @name         Wayfarer Exif Autocenter
+// @version      0.0.1
+// @description  Centre submission map on EXIF GPS coordinates of uploaded photo
+// @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
+// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/wayfarer-exif-autocenter.user.js
+// @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
+// @match        https://wayfarer.nianticlabs.com/*
+// @require      https://unpkg.com/exifr/dist/full.umd.js
+// @run-at       document-start
+// ==/UserScript==
+
+(function () {
+    "use strict";
+
+    let submitMap = null;
+
+    // -----------------------------
+    // Init
+    // -----------------------------
+    function init() {
+        initUploadExifWatcher();
+    }
+
+    // -----------------------------
+    // Watch Step 1 photo section and hook file input
+    // -----------------------------
+    function initUploadExifWatcher() {
+        const intervalMs = 1000;
+
+        const scan = () => {
+            const sections = document.querySelectorAll("div.section");
+
+            sections.forEach(section => {
+                const h4 = section.querySelector("h4 span.step-number");
+                if (!h4) return;
+
+                const stepNum = h4.textContent.trim();
+                if (stepNum !== "1") return;
+
+                const container = section.querySelector("app-wayspot-image-entry .image-entry-container");
+                if (!container) return;
+
+                if (!container._wfeaClickHooked) {
+                    container._wfeaClickHooked = true;
+
+                    container.addEventListener("click", () => {
+                        let attempts = 0;
+                        const maxAttempts = 60;
+
+                        const findInput = () => {
+                            attempts++;
+                            const input = document.querySelector("#file-input");
+
+                            if (input) {
+                                attachExifListenerToFileInput(input);
+                                return;
+                            }
+
+                            if (attempts < maxAttempts) {
+                                setTimeout(findInput, 500);
+                            } else {
+                                console.warn("EXIF Autocenter: #file-input not found (Step 1) after all attempts");
+                            }
+                        };
+
+                        findInput();
+                    });
+                }
+            });
+
+            setTimeout(scan, intervalMs);
+        };
+
+        scan();
+    }
+
+    // -----------------------------
+    // EXIF handling
+    // -----------------------------
+    function attachExifListenerToFileInput(input) {
+        if (!input) return;
+        if (input._wfeaExifHooked) return;
+        input._wfeaExifHooked = true;
+
+        input.addEventListener("change", async (e) => {
+            const files = e.target.files;
+            if (!files || !files.length) return;
+
+            const file = files[0];
+
+            const gps = await extractGpsFromFileOrBuffer(file);
+            if (!gps) {
+                console.info("EXIF Autocenter: No EXIF GPS data found.");
+                return;
+            }
+
+            console.info("EXIF Autocenter: EXIF GPS found:", gps.lat, gps.lng);
+            await moveMapToExifCoords(gps.lat, gps.lng);
+        });
+    }
+
+    async function extractGpsFromFileOrBuffer(fileOrBuffer) {
+        if (typeof exifr === "undefined" || !exifr.gps) {
+            console.warn("EXIF Autocenter: exifr library not available");
+            return null;
+        }
+
+        try {
+            const gps = await exifr.gps(fileOrBuffer);
+
+            if (!gps || gps.latitude == null || gps.longitude == null) return null;
+
+            return { lat: gps.latitude, lng: gps.longitude };
+        } catch (e) {
+            console.warn("EXIF Autocenter: Failed reading EXIF:", e);
+            return null;
+        }
+    }
+
+    // -----------------------------
+    // Map handling
+    // -----------------------------
+    async function moveMapToExifCoords(lat, lng) {
+        const map = await ensureSubmitMap();
+        if (!map) {
+            console.warn("EXIF Autocenter: submit map not available");
+            return;
+        }
+
+        if (typeof google === "undefined" || !google.maps) {
+            console.warn("EXIF Autocenter: google.maps not available");
+            return;
+        }
+
+        const latLng = new google.maps.LatLng(lat, lng);
+
+        map.setCenter(latLng);
+        google.maps.event.trigger(map, "click", { latLng });
+    }
+
+    async function ensureSubmitMap() {
+        if (!submitMap || isMapStale(submitMap)) {
+            submitMap = await getSubmitMap();
+            if (!submitMap) {
+                console.warn("EXIF Autocenter: getSubmitMap() returned null");
+            }
+        }
+        return submitMap;
+    }
+
+    function isMapStale(map) {
+        if (!map || !map.getDiv) return true;
+        const div = map.getDiv();
+        if (!div) return true;
+        return !document.body.contains(div);
+    }
+
+    function getSubmitMap() {
+        return new Promise(resolve => {
+            let attempts = 40;
+
+            function tryFindMap() {
+                const candidates = document.querySelectorAll("app-submit-wayspot-map nia-map");
+                let foundMap = null;
+
+                candidates.forEach(el => {
+                    if (foundMap || !el.__ngContext__) return;
+
+                    const ctx = el.__ngContext__;
+
+                    for (const entry of ctx) {
+                        if (!entry) continue;
+
+                        try {
+                            if (entry.componentRef && entry.componentRef.map) {
+                                foundMap = entry.componentRef.map;
+                                break;
+                            }
+                        } catch { }
+                    }
+                });
+
+                if (foundMap) {
+                    resolve(foundMap);
+                    return;
+                }
+
+                if (attempts-- <= 0) {
+                    console.warn("EXIF Autocenter: Could not find submit map");
+                    resolve(null);
+                    return;
+                }
+
+                setTimeout(tryFindMap, 250);
+            }
+
+            tryFindMap();
+        });
+    }
+
+    init();
+})();
