@@ -1,12 +1,11 @@
 // ==UserScript==
 // @name         Wayfarer Map - Base
-// @version      1.1.0
+// @version      1.2.0
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-base.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
-// @require      https://unpkg.com/exifr/dist/full.umd.js
 // @run-at       document-start
 // ==/UserScript==
 
@@ -140,9 +139,6 @@
             defaultType: "roadmap",
             rememberLastView: true,
 
-            // Use EXIF data from the main photo to initialise the map
-            useExifInit: true,
-
             // 200 m “Nearby Wayspots” radius around the current marker
             nearbyRadius: {
                 enabled: true,
@@ -268,53 +264,6 @@
     // ==================================
     // Navigation state & sidebar integration
     // ==================================
-
-    function updateSidebarActiveForMapMode() {
-        const fromMap = sessionStorage.getItem('wf_map_nav') === '1';
-        const onMapPage = location.pathname === '/new/submit/new';
-
-        // Only care about the special case: map-nav + correct route
-        if (!onMapPage || !fromMap) return;
-
-        let tries = 30; // 30 * 100ms = 3s max
-
-        const interval = setInterval(() => {
-            const sidebar = document.querySelector('app-sidebar');
-            if (!sidebar) {
-                if (--tries <= 0) {
-                    console.warn("Wayfarer Map: Sidebar not found to update active state");
-                    clearInterval(interval);
-                }
-                return;
-            }
-
-            const wrappers = sidebar.querySelectorAll('app-sidebar-link');
-            if (wrappers.length < 3) {
-                if (--tries <= 0) {
-                    console.warn("Wayfarer Map: Not enough sidebar items (need at least 3)");
-                    clearInterval(interval);
-                }
-                return;
-            }
-
-            const submitLink = wrappers[1].querySelector('a.sidebar-link');
-            const mapLink = wrappers[2].querySelector('a.sidebar-link');
-
-            if (!submitLink || !mapLink) {
-                if (--tries <= 0) {
-                    console.warn("Wayfarer Map: Could not find submit/map anchors");
-                    clearInterval(interval);
-                }
-                return;
-            }
-
-            // Remove highlight from Submit, give it to Map
-            submitLink.classList.remove('sidebar-link--active');
-            mapLink.classList.add('sidebar-link--active');
-
-            clearInterval(interval);
-        }, 100);
-    }
 
     function setupSidebarTracking(sidebar) {
         if (window._wfsmmSidebarTrackingSetup) return;
@@ -483,6 +432,9 @@
         if (location.pathname !== '/new/submit/new') return;
 
         const interval = setInterval(() => {
+            // --- Change the active highlight to the Map button ----
+            setSidebarActiveForMapMode();
+
             const root = document.querySelector('app-submit-wayspot.ng-star-inserted');
             if (!root) return;
 
@@ -500,15 +452,35 @@
             }
 
             // --- Hide everything other than the map ----
-            if (mapComp.parentElement !== root) {
-                root.appendChild(mapComp);
+            if (!container) {
+                console.warn("Wayfarer Map: container div not found under app-submit-wayspot");
+                return;
             }
 
-            Array.from(root.children).forEach(child => {
-                if (child !== mapComp) {
-                    child.style.display = 'none';
+            // 1) Hide all children of the inner container
+            //    except the one that contains the map.
+            Array.from(container.children).forEach((child) => {
+                if (child.contains(mapComp)) {
+                    // keep the section that has the map
+                    return;
                 }
+                child.style.display = 'none';
             });
+
+            // 2) Inside the map section, hide everything except the map host itself
+            const mapSection = Array.from(container.children).find((child) =>
+                                                                   child.contains(mapComp)
+                                                                  );
+
+            if (mapSection) {
+                Array.from(mapSection.children).forEach((child) => {
+                    if (child === mapComp || child.contains(mapComp)) {
+                        // keep the map host (and any wrapper immediately around it)
+                        return;
+                    }
+                    child.style.display = 'none';
+                });
+            }
 
             // --- Remove padding from mat-sidenav-content (full-screen map) ----
             const sidenavContent = document.querySelector('mat-sidenav-content');
@@ -531,8 +503,23 @@
             // --- Resize map to fill viewport ----
             resizeSubmitMapToViewport();
             window.addEventListener('resize', resizeSubmitMapToViewport);
-
         }, 150);
+    }
+
+    function setSidebarActiveForMapMode() {
+        const sidebar = document.querySelector('app-sidebar');
+        if (!sidebar) return;
+
+        const wrappers = sidebar.querySelectorAll('app-sidebar-link');
+        if (wrappers.length < 3) return;
+
+        const submitLink = wrappers[1].querySelector('a.sidebar-link');
+        const mapLink = wrappers[2].querySelector('a.sidebar-link');
+
+        if (!submitLink || !mapLink) return;
+
+        submitLink.classList.remove('sidebar-link--active');
+        mapLink.classList.add('sidebar-link--active');
     }
 
     function removeSidenavPaddingForMapPage() {
@@ -572,6 +559,7 @@
             node = node.parentElement;
         }
     }
+
     function initSidenavPaddingRouteWatcher() {
         if (window._wfsmmSidenavPaddingWatcherInitialised) return;
         window._wfsmmSidenavPaddingWatcherInitialised = true;
@@ -619,9 +607,6 @@
 
         // Adjust immediately
         adjustHeight();
-
-        // Re-adjust on resize
-        window.addEventListener('resize', adjustHeight);
     }
 
     // ==================================
@@ -1395,108 +1380,53 @@
         const fullImgUrl = poi.imageUrl + "=s0";
 
         return `
-<div class="agm-info-window-content" style="position:relative;">
+<div class="agm-info-window-content wfsmm-iw-root">
 
-    <div class="wf-nearby-iw-content flex flex-col max-w-[240px]">
+    <div class="wfsmm-iw-content">
 
-        <!-- Header: title + close button -->
-        <div class="wf-iw-header"
-             style="
-                 display:flex;
-                 align-items:flex-start;
-                 gap:4px;
-                 margin-top:6px;
-                 margin-bottom:4px;
-             "
-        >
-            <!-- Title (flexes, clips with …) -->
-            <div
-                class="wf-iw-title font-medium text-base"
-                title="${title}"
-                style="
-                    flex:1 1 auto;
-                    min-width:0;
-                    color:#000;
-                "
-            >
+        <!-- Header -->
+        <div class="wfsmm-iw-header">
+            <div class="wfsmm-iw-title" title="${title}">
                 <span
-                    class="wf-copy-title"
+                    class="wfsmm-iw-copy-title"
                     data-copy="${title.replace(/"/g, '&quot;')}"
                     title="Click to copy title"
-                    style="
-                        cursor:pointer;
-                        text-decoration:none;
-                        display:block;
-                        white-space:nowrap;
-                        overflow:hidden;
-                        text-overflow:ellipsis;
-                    "
-                >
-                    ${title}
-                </span>
+                >${title}</span>
             </div>
 
-            <!-- Close button (fixed width on the right) -->
-            <button
-                class="wf-iw-close"
-                title="Close"
-                style="
-                    flex:0 0 24px;
-                    width:24px;
-                    height:24px;
-                    border-radius:9999px;
-                    display:flex;
-                    align-items:center;
-                    justify-content:center;
-                    font-size:16px;
-                    font-weight:600;
-                    cursor:pointer;
-                    background:#ffffff;
-                    color:#000000;
-                    border:1px solid rgba(0,0,0,0.15);
-                "
-            >
-                ×
-            </button>
+            <button class="wfsmm-iw-close" title="Close">×</button>
         </div>
 
         <!-- Coordinates -->
-        <div class="text-xs text-gray-500 mb-2">
+        <div class="wfsmm-iw-coords">
             <span
-                class="wf-copy-coords"
+                class="wfsmm-iw-copy-coords"
                 data-lat="${latStr}"
                 data-lng="${lngStr}"
                 title="Click to copy coordinates"
-                style="cursor:pointer; text-decoration:none; color:#333;"
             >
                 ${latStr}, ${lngStr}
             </span>
         </div>
 
         <!-- Image -->
-        <div style="width:240px; height:96px; overflow:hidden; margin-bottom:0.5rem;">
-            <a href="${fullImgUrl}" target="_blank" rel="noopener noreferrer"
-               style="display:block; width:100%; height:100%;">
-                <img
-                    src="${iwImgUrl}"
-                    alt="${title}"
-                    style="display:block; width:100%; height:100%; object-fit:cover;"
-                >
+        <div class="wfsmm-iw-img-wrapper">
+            <a href="${fullImgUrl}" target="_blank" rel="noopener noreferrer" class="wfsmm-iw-img-link">
+                <img src="${iwImgUrl}" alt="${title}" class="wfsmm-iw-img"/>
             </a>
         </div>
 
         <!-- Description -->
-        <div class="text-sm" style="color:#000;">
-            ${desc}
-        </div>
+        <div class="wfsmm-iw-desc">${desc}</div>
+
     </div>
-</div>
-`;
+</div>`;
     }
+
 
     function attachInfoWindowDomHandlers() {
         // ---- Copy Coordinates ----
-        const coordEl = document.querySelector(".wf-copy-coords");
+        const coordEl = document.querySelector(".wfsmm-iw-copy-coords");
         if (coordEl) {
             coordEl.addEventListener("click", () => {
                 const lat = coordEl.getAttribute("data-lat");
@@ -1516,7 +1446,7 @@
         }
 
         // ---- Copy Title ----
-        const titleEl = document.querySelector(".wf-copy-title");
+        const titleEl = document.querySelector(".wfsmm-iw-copy-title");
         if (titleEl) {
             titleEl.addEventListener("click", () => {
                 const text = titleEl.getAttribute("data-copy");
@@ -1672,16 +1602,6 @@
                 rememberChk.checked = !!mapCfg.rememberLastView;
                 generalSection.appendChild(
                     createSettingsRow("Remember last map view", rememberChk, {
-                        narrowLabel: true
-                    })
-                );
-
-                const exifChk = document.createElement("input");
-                exifChk.type = "checkbox";
-                exifChk.className = "wfsmm-modal-checkbox";
-                exifChk.checked = (mapCfg.useExifInit !== false);
-                generalSection.appendChild(
-                    createSettingsRow("Use EXIF to initialise map marker when submitting", exifChk, {
                         narrowLabel: true
                     })
                 );
@@ -2024,7 +1944,6 @@
                 // Return references needed by onOk
                 return {
                     rememberChk,
-                    exifChk,
                     nr,
                     sr,
                     spr,
@@ -2051,7 +1970,6 @@
             onOk(ctx, closeModal) {
                 const {
                     rememberChk,
-                    exifChk,
                     nr,
                     sr,
                     spr,
@@ -2076,7 +1994,6 @@
                 } = ctx;
 
                 mapCfg.rememberLastView = !!rememberChk.checked;
-                mapCfg.useExifInit = !!exifChk.checked;
 
                 // Nearby
                 nr.enabled = !!nearbyEnabledChk.checked;
@@ -2659,6 +2576,7 @@
     // ==================================
 
     function watchForLatLngElement() {
+        console.log('watchForLatLngElement');
         // Only initialise once
         if (latLngBodyObserver) return;
 
@@ -2671,6 +2589,8 @@
                 latLngObserver.disconnect();
                 latLngObserver = null;
             }
+
+            console.log('found element');
 
             latLngTargetEl = el;
 
@@ -2716,7 +2636,7 @@
         }
 
         function findAndAttachLatLngElement() {
-            const el = document.querySelector('.text-gray-400.text-xs');
+            const el = document.querySelector('.submit-coordinates-text') || document.querySelector('.text-gray-400.text-xs');
             if (!el) return;
             attachToLatLngElement(el);
         }
@@ -2772,6 +2692,7 @@
     // ==================================
 
     function fetchLivePois(lat, lng) {
+        console.log('fetching live poi');
         const url = `/api/v1/vault/live-pois-in-radius?lat=${lat}&lng=${lng}&radius=${radius}`;
 
         const xhr = new XMLHttpRequest();
@@ -2782,6 +2703,7 @@
                 try {
                     const json = JSON.parse(xhr.responseText);
                     window.currentPois = json?.result?.pois || [];
+                    console.log(window.currentPois);
                     onPoisFetched();
 
                 } catch (e) {
@@ -3678,127 +3600,6 @@
     }
 
     // ==================================
-    // Exif Data
-    // ==================================
-
-    function watchForMainPhotoUploadAndApplyExif() {
-        const intervalMs = 1000;
-
-        const scan = () => {
-            const sections = document.querySelectorAll('div.section');
-
-            sections.forEach(section => {
-                const h4 = section.querySelector('h4 span.step-number');
-                if (!h4) return;
-
-                const stepNum = h4.textContent.trim();
-
-                // Only add event listening to the "Step 1" (Wayspot Photo) button
-                // This is to avoid supporting photo exif overwriting main photo
-                if (stepNum !== "1") return;
-
-                const container = section.querySelector('app-wayspot-image-entry .image-entry-container');
-                if (!container) return;
-
-                if (!container._wfsmmClickHooked) {
-                    container._wfsmmClickHooked = true;
-
-                    container.addEventListener("click", () => {
-                        let attempts = 0;
-                        const maxAttempts = 60;
-
-                        const findInput = () => {
-                            attempts++;
-                            const input = document.querySelector("#file-input");
-
-                            if (input) {
-                                attachExifListenerToFileInput(input);
-                                return;
-                            }
-
-                            if (attempts < maxAttempts) {
-                                setTimeout(findInput, 500);
-                            } else {
-                                console.warn("Wayfarer Map: #file-input not found (Section 1) after all attempts");
-                            }
-                        };
-
-                        findInput();
-                    });
-                }
-            });
-
-            setTimeout(scan, intervalMs);
-        };
-
-        scan();
-    }
-
-    function attachExifListenerToFileInput(input) {
-        if (!input) return;
-        if (input._wfsmmExifHooked) return;
-        input._wfsmmExifHooked = true;
-
-        input.addEventListener('change', async (e) => {
-            const files = e.target.files;
-            if (!files || !files.length) return;
-
-            const file = files[0];
-
-            const type = file.type || "";
-            const name = file.name || "";
-
-            const gps = await extractGpsFromFileOrBuffer(file);
-            if (!gps) {
-                console.info("Wayfarer Map: No GPS EXIF data found in selected image (or not supported).");
-                return;
-            }
-
-            console.info("Wayfarer Map: EXIF GPS found:", gps.lat, gps.lng);
-            moveMapToExifCoords(gps.lat, gps.lng);
-        });
-    }
-
-    async function extractGpsFromFileOrBuffer(fileOrBuffer) {
-        if (typeof exifr === "undefined" || !exifr.gps) {
-            console.warn("Wayfarer Map: exifr library not available");
-            return null;
-        }
-
-        try {
-            // exifr can take File, Blob, ArrayBuffer, etc.
-            const gps = await exifr.gps(fileOrBuffer);
-
-            // gps is usually { latitude, longitude, altitude, ... }
-            if (!gps || gps.latitude == null || gps.longitude == null) {
-                return null;
-            }
-
-            return {
-                lat: gps.latitude,
-                lng: gps.longitude
-            };
-        } catch (e) {
-            console.warn("Wayfarer Map: Failed to read EXIF with exifr:", e);
-            return null;
-        }
-    }
-
-    function moveMapToExifCoords(lat, lng) {
-        if (!submitMap || typeof google === "undefined" || !google.maps) return;
-
-        const latLng = new google.maps.LatLng(lat, lng);
-
-        // Center the map
-        submitMap.setCenter(latLng);
-
-        // Trigger Wayfarer’s own handler so the pin + address update
-        google.maps.event.trigger(submitMap, "click", {
-            latLng
-        });
-    }
-
-    // ==================================
     // Wayspot image entry tweaks
     // ==================================
 
@@ -3845,7 +3646,7 @@
 
         const cssText = `
     /* ============================================================
-       WAYFARER MAP MOD - COMBINED CSS (MODAL + MARKERS + SIDEBAR)
+       WAYFARER MAP MOD
        ============================================================ */
 
     /* -------------------------
@@ -4161,10 +3962,10 @@
 
     #wfsmm-sidepanel-toggle {
         position: absolute;
-        top: 50%;
-        left: -20px;              /* stick it on the left edge */
+        top: 30%;
+        left: -25px;              /* stick it on the left edge */
         transform: translateY(-50%);
-        width: 20px;
+        width: 25px;
         height: 56px;
         border-radius: 8px 0 0 8px;
         border: 1px solid #d1d5db;
@@ -4230,6 +4031,119 @@
         background-color: rgba(212, 212, 212, 1); /* light grey */
         color: rgba(23, 23, 23, 1);               /* dark grey */
     }
+
+    /* -------------------------
+   Wayfarer Map - Info Window Styles
+   ------------------------- */
+
+.wfsmm-iw-root {
+    position: relative;
+}
+
+.wfsmm-iw-content {
+    display: flex;
+    flex-direction: column;
+    max-width: 220px;
+    font-family: Roboto, Arial, sans-serif;
+    color: #000;
+}
+
+/* Header row */
+.wfsmm-iw-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+    margin-top: 6px;
+    margin-bottom: 4px;
+}
+
+/* Title container */
+.wfsmm-iw-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 500;
+        margin-top: 6px;
+}
+
+/* Actual title text */
+.wfsmm-iw-copy-title {
+    display: block;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Close button */
+.wfsmm-iw-close {
+    flex: 0 0 24px;
+    width: 24px;
+    height: 24px;
+    background: #fff;
+    border: 1px solid rgba(0,0,0,0.15);
+    border-radius: 9999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+}
+
+/* Coordinates row */
+.wfsmm-iw-coords {
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 8px;
+}
+
+.wfsmm-iw-copy-coords {
+    cursor: pointer;
+}
+
+/* Image wrapper */
+.wfsmm-iw-img-wrapper {
+    width: 220px;
+    height: 96px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.wfsmm-iw-img-link {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.wfsmm-iw-img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* Description */
+.wfsmm-iw-desc {
+    font-size: 14px;
+}
+
+/* -------------------------
+   Google Maps info window: hide default close button
+   ------------------------- */
+
+/* Hide the default Google Maps close "X" */
+.gm-style-iw-chr .gm-ui-hover-effect {
+    display: none !important;
+}
+
+/* Collapse the header chrome so there isn't a big white bar */
+.gm-style-iw-chr {
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
     `;
 
         let style = document.getElementById("wfsmm-all-css");
@@ -4258,12 +4172,12 @@
 
     // Initial map-mode layout on load
     formatPageForMapMode();
-    updateSidebarActiveForMapMode();
+    // updateSidebarActiveForMapMode();
 
     // Keep behaviour in sync with SPA navigation
     window.addEventListener('popstate', () => {
         formatPageForMapMode();
-        updateSidebarActiveForMapMode();
+        // updateSidebarActiveForMapMode();
     });
 
 
@@ -4279,7 +4193,6 @@
         loadSettings();
         injectCss();
         watchForLatLngElement();
-        watchForMainPhotoUploadAndApplyExif();
         initWayspotImageEntryWatcher();
         initMapModeWatcher();
         startPoiBridgeObserver();
