@@ -4865,30 +4865,32 @@
 
 console.log('candidates');
 console.log(candidates);
-                candidates.forEach(el => {
-                    if (foundMap || !el.__ngContext__) return;
+candidates.forEach(el => {
+    if (foundMap) return;
 
-                    const ctx = el.__ngContext__;
+    // Get the underlying "real" element if we’re in a wrapped environment
+    const host = el.wrappedJSObject || el;
 
-                    console.log('ctx')
-                    console.log(ctx);
-                    for (const entry of ctx) {
-                        if (!entry) continue;
+    // Now look for Angular's Ivy context on the *host* element
+    const ctx = host.__ngContext__;
+    if (!ctx) return;
 
-                        console.log('entry');
-                        console.log(entry);
-                        try {
-                            if (entry.componentRef && entry.componentRef.map) {
-                                foundMap = entry.componentRef.map;
-                                console.log('found map');
-                                console.log(foundMap);
-                                break;
-                            }
-                        } catch {
-                            /* ignore invalid entries */
-                        }
-                    }
-                });
+    console.log('ctx', ctx);
+
+    for (const entry of ctx) {
+        if (!entry) continue;
+
+        try {
+            if (entry.componentRef && entry.componentRef.map) {
+                foundMap = entry.componentRef.map;
+                console.log('found map', foundMap);
+                break;
+            }
+        } catch {
+            /* ignore invalid entries */
+        }
+    }
+});
 
                 if (foundMap) {
                     resolve(foundMap);
