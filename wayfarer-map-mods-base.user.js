@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.0.1
+// @version      2.0.2
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -8,8 +8,6 @@
 // @match        https://wayfarer.nianticlabs.com/*
 // @run-at       document-start
 // @grant        none
-// @connect      lh3.googleusercontent.com
-// @connect      storage.googleapis.com
 // @require      https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js
 // ==/UserScript==
 
@@ -1981,10 +1979,6 @@
     }
 
     // ==================================
-    // Submission API Helpers
-    // ==================================
-
-    // ==================================
     // Submission API helpers
     // ==================================
 
@@ -2031,42 +2025,34 @@
         });
     }
 
-    // NOTE: requires @grant GM_xmlhttpRequest in the Base userscript header
+    // NOTE: Works only if the target server (lh3.googleusercontent.com, etc.)
+    // sends appropriate CORS headers. No @grant required.
     function fetchImageBlobForSubmit(url) {
-        return new Promise((resolve, reject) => {
+        return new Promise(async (resolve, reject) => {
             if (!url) {
                 resolve(null);
                 return;
             }
-            GM_xmlhttpRequest({
-                method: "GET",
-                url: url,
-                responseType: "arraybuffer",
-                onload: function (res) {
-                    if (res.status < 200 || res.status >= 300) {
-                        reject(new Error("Image fetch failed: HTTP " + res.status));
-                        return;
-                    }
 
-                    let contentType = "image/jpeg";
-                    const ctMatch = res.responseHeaders &&
-                          res.responseHeaders.match(/content-type:\s*([^\n]+)/i);
-                    if (ctMatch && ctMatch[1]) {
-                        contentType = ctMatch[1].split(";")[0].trim();
-                    }
+            try {
+                const res = await fetch(url, {
+                    // Most lh3 URLs used by Niantic are public, so no credentials needed.
+                    // mode: "cors" is default for cross-origin fetch; you can omit it.
+                    mode: "cors",
+                    credentials: "omit"
+                });
 
-                    try {
-                        const buf = res.response; // ArrayBuffer
-                        const blob = new Blob([buf], { type: contentType });
-                        resolve(blob);
-                    } catch (e) {
-                        reject(e);
-                    }
-                },
-                onerror: function () {
-                    reject(new Error("GM_xmlhttpRequest image fetch error"));
+                if (!res.ok) {
+                    reject(new Error("Image fetch failed: HTTP " + res.status));
+                    return;
                 }
-            });
+
+                const blob = await res.blob();
+                resolve(blob);
+            } catch (err) {
+                console.error("fetchImageBlobForSubmit: fetch() failed for", url, err);
+                reject(err);
+            }
         });
     }
 
@@ -4856,7 +4842,6 @@
     // ==================================
 
     function getMap() {
-        console.log('Running getMap()');
         return new Promise(resolve => {
             let attempts = 40;
 
@@ -4864,12 +4849,7 @@
                 const candidates = document.querySelectorAll('app-submit-wayspot-map nia-map');
                 let foundMap = null;
 
-                console.log('candidates...');
-                console.log(candidates);
-
                 candidates.forEach(el => {
-                    console.log('el')
-
                     if (foundMap || !el.__ngContext__) return;
 
                     const ctx = el.__ngContext__;
