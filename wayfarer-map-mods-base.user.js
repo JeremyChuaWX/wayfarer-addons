@@ -4868,12 +4868,18 @@
 
                     const ctx = el.__ngContext__;
 
+                    console.log('ctx')
+                    console.log(ctx);
                     for (const entry of ctx) {
                         if (!entry) continue;
 
+                        console.log('entry');
+                        console.log(entry);
                         try {
                             if (entry.componentRef && entry.componentRef.map) {
                                 foundMap = entry.componentRef.map;
+                                console.log('found map');
+                                console.log(foundMap);
                                 break;
                             }
                         } catch {
