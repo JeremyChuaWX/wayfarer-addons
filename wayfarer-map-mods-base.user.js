@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.0.4
+// @version      2.1.0
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -1540,6 +1540,10 @@
         if (imgBox) {
             imgBox.innerHTML = "";
 
+            // Always (re)set the border based on latest POI data
+            const borderColor = poi.borderColor || "#154AAB";
+            imgBox.style.border = `10px solid ${borderColor}`;
+
             if (poi.imageUrl) {
                 const img = document.createElement("img");
                 img.className = "wfmapmods-detail-image";
@@ -1858,6 +1862,7 @@
             source: payload.source || "",
             sourceLogo: payload.sourceLogo || "",
             sourceText: payload.sourceText || "",
+            borderColor: payload.borderColor || "",
         };
 
         populateSidePanelFromPoi(poi);
