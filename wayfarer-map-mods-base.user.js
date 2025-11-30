@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.0.0
+// @version      2.0.1
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -4856,6 +4856,7 @@
     // ==================================
 
     function getMap() {
+        console.log('Running getMap()');
         return new Promise(resolve => {
             let attempts = 40;
 
@@ -4863,7 +4864,12 @@
                 const candidates = document.querySelectorAll('app-submit-wayspot-map nia-map');
                 let foundMap = null;
 
+                console.log('candidates...');
+                console.log(candidates);
+
                 candidates.forEach(el => {
+                    console.log('el')
+
                     if (foundMap || !el.__ngContext__) return;
 
                     const ctx = el.__ngContext__;
