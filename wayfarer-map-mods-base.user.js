@@ -3,7 +3,7 @@
 // @version      2.0.0
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-base.user.js
+// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
 // @run-at       document-start
