@@ -4863,34 +4863,33 @@
                 const candidates = document.querySelectorAll('app-submit-wayspot-map nia-map');
                 let foundMap = null;
 
-console.log('candidates');
-console.log(candidates);
-candidates.forEach(el => {
-    if (foundMap) return;
+                candidates.forEach(el => {
+                    if (foundMap) return;
+                    console.log('el');
+                    console.log(el);
 
-    // Get the underlying "real" element if we’re in a wrapped environment
-    const host = el.wrappedJSObject || el;
+                    // Get the underlying "real" element if we’re in a wrapped environment
+                    const host = el.wrappedJSObject || el;
 
-    // Now look for Angular's Ivy context on the *host* element
-    const ctx = host.__ngContext__;
-    if (!ctx) return;
+                    // Now look for Angular's Ivy context on the *host* element
+                    const ctx = host.__ngContext__;
+                    console.log('ctx', ctx);
+                    if (!ctx) return;
 
-    console.log('ctx', ctx);
+                    for (const entry of ctx) {
+                        if (!entry) continue;
 
-    for (const entry of ctx) {
-        if (!entry) continue;
-
-        try {
-            if (entry.componentRef && entry.componentRef.map) {
-                foundMap = entry.componentRef.map;
-                console.log('found map', foundMap);
-                break;
-            }
-        } catch {
-            /* ignore invalid entries */
-        }
-    }
-});
+                        try {
+                            if (entry.componentRef && entry.componentRef.map) {
+                                foundMap = entry.componentRef.map;
+                                console.log('found map', foundMap);
+                                break;
+                            }
+                        } catch {
+                            /* ignore invalid entries */
+                        }
+                    }
+                });
 
                 if (foundMap) {
                     resolve(foundMap);
