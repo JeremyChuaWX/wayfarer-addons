@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.0.0
+// @version      2.0.1
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -4866,20 +4866,23 @@
                 candidates.forEach(el => {
                     if (foundMap || !el.__ngContext__) return;
 
-                    const ctx = el.__ngContext__;
+                    const ctx = document.querySelector('app-submit-wayspot-map nia-map').__ngContext__;
 
-                    for (const entry of ctx) {
-                        if (!entry) continue;
+                    ctx.forEach((entry, i) => {
+                        if (!entry || typeof entry !== 'object') return;
 
-                        try {
-                            if (entry.componentRef && entry.componentRef.map) {
-                                foundMap = entry.componentRef.map;
-                                break;
-                            }
-                        } catch {
-                            /* ignore invalid entries */
+                        const keys = Object.keys(entry);
+                        console.log(i, entry.constructor && entry.constructor.name, keys);
+
+                        // Quick map-ish check:
+                        if (typeof entry.getCenter === 'function' && typeof entry.setZoom === 'function') {
+                            console.log('Found something that looks like a map at index', i, entry);
                         }
-                    }
+
+                        if (entry.map && typeof entry.map.getCenter === 'function') {
+                            console.log('Found map-like entry.map at index', i, entry.map);
+                        }
+                    });
                 });
 
                 if (foundMap) {
