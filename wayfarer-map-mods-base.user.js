@@ -4864,17 +4864,9 @@
                 let foundMap = null;
 
                 candidates.forEach(el => {
-                    if (foundMap) return;
-                    console.log('el');
-                    console.log(el);
+                    if (foundMap || !el.__ngContext__) return;
 
-                    // Get the underlying "real" element if we’re in a wrapped environment
-                    const host = el.wrappedJSObject || el;
-
-                    // Now look for Angular's Ivy context on the *host* element
-                    const ctx = host.__ngContext__;
-                    console.log('ctx', ctx);
-                    if (!ctx) return;
+                    const ctx = el.__ngContext__;
 
                     for (const entry of ctx) {
                         if (!entry) continue;
@@ -4882,7 +4874,6 @@
                         try {
                             if (entry.componentRef && entry.componentRef.map) {
                                 foundMap = entry.componentRef.map;
-                                console.log('found map', foundMap);
                                 break;
                             }
                         } catch {
