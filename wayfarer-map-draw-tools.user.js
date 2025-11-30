@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         Wayfarer Map - Draw Tools
-// @version      0.0.2
+// @name         Wayfarer Map Mods - Draw Tools
+// @version      0.0.3
 // @description  Adds simple drawing tools (markers, polylines, circles) to the Wayfarer submission map, with persistence.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-draw-tools.user.js
@@ -104,13 +104,17 @@
     let lastPanelPresent = false;
 
     function handlePanelChange() {
-        const panelPresent = !!document.querySelector("#wfsmm-side-panel");
+        const panelPresent = !!document.querySelector("#wfmapmods-side-panel");
 
         if (panelPresent && !lastPanelPresent) {
             attachDrawingToolsToMapIfNeeded();
             insertDrawingSettingsLink();
         } else if (!panelPresent && lastPanelPresent) {
             teardownDrawingToolsForMap();
+        }
+
+        if (panelPresent) {
+            insertDrawingLayersOption();
         }
 
         lastPanelPresent = panelPresent;
@@ -210,15 +214,15 @@
 
     function insertDrawingSettingsLink() {
         const panelCheck = setInterval(() => {
-            const settingsBody = document.querySelector(".wfsmm-settings-links");
+            const settingsBody = document.querySelector(".wfmapmods-settings-links");
             if (!settingsBody) return;
 
             clearInterval(panelCheck);
 
-            if (document.getElementById("wfsmm-settings-drawing")) return;
+            if (document.getElementById("wfmapmods-settings-drawing")) return;
 
             const link = document.createElement("a");
-            link.id = "wfsmm-settings-drawing";
+            link.id = "wfmapmods-settings-drawing";
             link.textContent = "Drawing Tools";
 
             settingsBody.appendChild(link);
@@ -230,7 +234,7 @@
     }
 
     function openDrawingSettingsWindow() {
-        if (document.getElementById("wfsmm-drawing-modal-backdrop")) return;
+        if (document.getElementById("wfmapmods-drawing-modal-backdrop")) return;
 
         const drawingSettings = userSettings.drawing || {};
         const currentColor = drawingSettings.color || "#ff0000";
@@ -238,7 +242,7 @@
         const currentPosition = drawingSettings.position || "left";
 
         const backdrop = document.createElement("div");
-        backdrop.id = "wfsmm-drawing-modal-backdrop";
+        backdrop.id = "wfmapmods-drawing-modal-backdrop";
         Object.assign(backdrop.style, {
             position: "fixed",
             inset: "0",
@@ -432,13 +436,15 @@
     let drawingControlDiv = null;
     let drawingControlsPosition = null;
 
-    let allShapes = []; // [{ overlay, data }]
+    let allShapes = [];
     let currentShapeColor = "#ff0000";
     let deleteMode = false;
 
     let modeListeners = [];
     let domModeListeners = [];
-    let drawingClickHandler = null; // shared handler for drawing clicks
+    let drawingClickHandler = null;
+
+    let layersOptionCheckbox = null;
 
     function clearModeListeners() {
         modeListeners.forEach(l => google.maps.event.removeListener(l));
@@ -629,6 +635,59 @@
     }
 
     // -----------------------------
+    // Layers options
+    // -----------------------------
+
+    function syncLayersCheckboxFromSettings() {
+        if (!layersOptionCheckbox) return;
+        ensureDrawingDefaults();
+        layersOptionCheckbox.checked = userSettings.drawing.enabled !== false;
+    }
+
+    function insertDrawingLayersOption() {
+        // Find the layers menu created by your other plugin
+        const menu = document.querySelector(".wfmapmods-layers-menu");
+        if (!menu) return;
+
+        // If we've already added our option, just resync its state
+        let existingLabel = menu.querySelector(".wfmapmods-layers-option-drawing");
+        if (existingLabel) {
+            const cb = existingLabel.querySelector('input[type="checkbox"]');
+            if (cb) {
+                layersOptionCheckbox = cb;
+                syncLayersCheckboxFromSettings();
+            }
+            return;
+        }
+
+        ensureDrawingDefaults();
+        const enabled = userSettings.drawing.enabled !== false;
+
+        const label = document.createElement("label");
+        label.className = "wfmapmods-layers-option wfmapmods-layers-option-drawing";
+
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = enabled;
+
+        input.addEventListener("change", () => {
+            ensureDrawingDefaults();
+            userSettings.drawing.enabled = input.checked;
+            saveSettings();
+            applyDrawingEnabledState(); // this will handle showing/hiding tools + shapes
+        });
+
+        const span = document.createElement("span");
+        span.textContent = "Draw tools";
+
+        label.appendChild(input);
+        label.appendChild(span);
+        menu.appendChild(label);
+
+        layersOptionCheckbox = input;
+    }
+
+    // -----------------------------
     // Map controls + modes
     // -----------------------------
 
@@ -735,6 +794,8 @@
         clearModeListeners();
         document.body.classList.remove("wf-drawing-active");
         refreshOverlayClickability();
+
+        syncLayersCheckboxFromSettings();
 
         if (!submitMap) return;
 
