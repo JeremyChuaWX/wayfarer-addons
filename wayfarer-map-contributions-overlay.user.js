@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         Wayfarer Map - Contributions Overlay
-// @version      0.2.0
+// @name         Wayfarer Map Mods - Contributions Overlay
+// @version      1.0.0
 // @description  Loads nominations from the Contributions list and shows them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-contributions-overlay.user.js
@@ -19,8 +19,9 @@
     const SETTINGS_KEY = "wfmap_contributions_settings";
     const OBJECT_STORE_NAME = "contributions";
 
-    const POI_BRIDGE_ID = "wfsmm-poi-bridge";
+    const POI_BRIDGE_ID = "wfmapmods-poi-bridge";
     const POI_BRIDGE_SOURCE = "wf-contrib-overlay";
+    const SUBMISSION_BRIDGE_ID = "wfmapmods-submit-bridge";
 
     const PERFORMANCE_MAX_VISIBLE_MARKERS = 400;
 
@@ -31,17 +32,8 @@
         appeal: "APPEALED",
     };
 
-
-    // -----------------------------
-    // Runtime state – nominations & appeals
-    // -----------------------------
-
     let nominations = null;
     let globalCanAppeal = null;
-
-    // -----------------------------
-    // Runtime state – map & markers
-    // -----------------------------
 
     let submitMap = null;
     let mapAttached = false;
@@ -52,10 +44,9 @@
     let lastSelectedNomMarker = null;
     let lastSelectedNomOriginalIcon = null;
 
+    const MAX_RESUBMIT_DISTANCE_KM = 10;
 
-    // -----------------------------
-    // Runtime state – DOM / panel
-    // -----------------------------
+    let submitterLocation = null;
 
     let lastPanelPresent = false;
 
@@ -67,7 +58,8 @@
     const userSettings = {
         map: {
             performanceModeEnabled: true,
-            performanceMaxVisibleMarkers: PERFORMANCE_MAX_VISIBLE_MARKERS
+            performanceMaxVisibleMarkers: PERFORMANCE_MAX_VISIBLE_MARKERS,
+            contributionsEnabled: true
         },
         markers: {
             statuses: {
@@ -340,7 +332,7 @@
             };
 
             if (method === "POST" && ACTIONS[cleanUrl]) {
-                this._wfsmmNewStatus = ACTIONS[cleanUrl];
+                this._wfmapmodsNewStatus = ACTIONS[cleanUrl];
 
                 this.addEventListener("load", function () {
                     try {
@@ -349,10 +341,10 @@
                         if (!json || json.captcha) return;
                         if (json.result !== "DONE") return;
 
-                        const id = this._wfsmmId;
+                        const id = this._wfmapmodsId;
                         if (!id) return;
 
-                        updateSingleNominationStatus(id, this._wfsmmNewStatus);
+                        updateSingleNominationStatus(id, this._wfmapmodsNewStatus);
 
                     } catch (err) {
                         console.warn("[ContribOverlay] Error handling manage action:", err);
@@ -364,13 +356,13 @@
         };
 
         XMLHttpRequest.prototype.send = function (body) {
-            if (this._wfsmmNewStatus && body) {
+            if (this._wfmapmodsNewStatus && body) {
                 try {
                     if (typeof body === "string") {
                         const parsed = JSON.parse(body);
                         const payload = Array.isArray(parsed) ? parsed[0] : parsed;
                         if (payload && payload.id) {
-                            this._wfsmmId = payload.id;
+                            this._wfmapmodsId = payload.id;
                         }
                     }
                 } catch (err) {
@@ -386,10 +378,9 @@
        XMLHttpRequest.prototype.setRequestHeader);
 
     function fetchLatestNominations() {
-        // Use absolute URL as requested; relative would also work since we're same-origin.
         fetch("/api/v1/vault/manage", {
             method: "GET",
-            credentials: "include" // make sure cookies/session are sent
+            credentials: "include"
         })
             .then(res => {
             if (!res.ok) {
@@ -567,7 +558,6 @@
     }
 
     function sendManageActionForNomination(action, nominationId) {
-        console.log('sending action');
         if (!action || !nominationId) return;
 
         const xhr = new XMLHttpRequest();
@@ -709,12 +699,16 @@
     }
 
     function handlePanelChange() {
-        const panelPresent = !!document.querySelector("#wfsmm-side-panel");
+        const panelPresent = !!document.querySelector("#wfmapmods-side-panel");
 
         if (panelPresent && !lastPanelPresent) {
             // We just arrived on the map page
             attachContribOverlayToMapIfNeeded();
             insertSettingsLink();
+            insertLayersToggle();
+
+            // Update contributions list in the background
+            fetchLatestNominations();
         } else if (!panelPresent && lastPanelPresent) {
             // We just left the map page
             teardownContribOverlayForMap();
@@ -751,6 +745,7 @@
                 });
 
                 if (foundMap) {
+                    getSubmitterLocation();
                     resolve(foundMap);
                     return;
                 }
@@ -914,8 +909,19 @@
 
     // Bounds-based, marker-reuse, with enabled-flag support
     function refreshNominationMarkers() {
-        console.log('refreshing markers');
         if (!submitMap || !nominations || !Array.isArray(nominations)) {
+            return;
+        }
+
+        // Load settings
+        const mapCfg = userSettings.map;
+        const contributionsEnabled = mapCfg.contributionsEnabled;
+        const performanceModeEnabled = mapCfg.performanceModeEnabled;
+
+
+        // If master is OFF, remove all of the Contribution markers.
+        if (contributionsEnabled === false) {
+            clearNominationMarkers();
             return;
         }
 
@@ -925,8 +931,6 @@
             return;
         }
 
-        const mapCfg = userSettings.map || {};
-        const performanceModeEnabled = !!mapCfg.performanceModeEnabled;
         const maxVisibleMarkers = typeof mapCfg.performanceMaxVisibleMarkers === "number"
         ? mapCfg.performanceMaxVisibleMarkers
         : PERFORMANCE_MAX_VISIBLE_MARKERS;
@@ -1059,15 +1063,16 @@
     // -----------------------------
 
     function hideNominationActionLinks() {
-        const container = document.querySelector(".wfsmm-poi-function-links");
+        const container = document.querySelector(".wfmapmods-poi-function-links");
         if (!container) return;
 
         const ids = [
-            "#wfsmm-function-hold",
-            "#wfsmm-function-release-hold",
-            "#wfsmm-function-withdraw",
-            "#wfsmm-function-edit-submission",
-            "#wfsmm-function-appeal"
+            "#wfmapmods-function-hold",
+            "#wfmapmods-function-release-hold",
+            "#wfmapmods-function-withdraw",
+            "#wfmapmods-function-edit-submission",
+            "#wfmapmods-function-appeal",
+            "#wfmapmods-function-resubmit-contrib"
         ];
         ids.forEach(sel => {
             const el = container.querySelector(sel);
@@ -1081,17 +1086,17 @@
             return;
         }
 
-        const container = document.querySelector(".wfsmm-poi-function-links");
+        const container = document.querySelector(".wfmapmods-poi-function-links");
         if (!container) return;
 
         const status = String(poi.status || "").toUpperCase();
         const id = poi.id;
         if (!id) return;
 
-        let editLink = container.querySelector("#wfsmm-function-edit-submission");
+        let editLink = container.querySelector("#wfmapmods-function-edit-submission");
         if (!editLink) {
             editLink = document.createElement("a");
-            editLink.id = "wfsmm-function-edit-submission";
+            editLink.id = "wfmapmods-function-edit-submission";
             editLink.textContent = "Edit";
             editLink.style.cursor = "pointer";
             editLink.addEventListener("click", ev => {
@@ -1117,10 +1122,10 @@
         }
 
         // Ensure links exist (create once, reuse)
-        let holdLink = container.querySelector("#wfsmm-function-hold");
+        let holdLink = container.querySelector("#wfmapmods-function-hold");
         if (!holdLink) {
             holdLink = document.createElement("a");
-            holdLink.id = "wfsmm-function-hold";
+            holdLink.id = "wfmapmods-function-hold";
             holdLink.textContent = "Hold";
             holdLink.style.cursor = "pointer";
             holdLink.addEventListener("click", ev => {
@@ -1132,10 +1137,10 @@
             container.appendChild(holdLink);
         }
 
-        let releaseHoldLink = container.querySelector("#wfsmm-function-release-hold");
+        let releaseHoldLink = container.querySelector("#wfmapmods-function-release-hold");
         if (!releaseHoldLink) {
             releaseHoldLink = document.createElement("a");
-            releaseHoldLink.id = "wfsmm-function-release-hold";
+            releaseHoldLink.id = "wfmapmods-function-release-hold";
             releaseHoldLink.textContent = "Release Hold";
             releaseHoldLink.style.cursor = "pointer";
             releaseHoldLink.addEventListener("click", ev => {
@@ -1147,10 +1152,10 @@
             container.appendChild(releaseHoldLink);
         }
 
-        let withdrawLink = container.querySelector("#wfsmm-function-withdraw");
+        let withdrawLink = container.querySelector("#wfmapmods-function-withdraw");
         if (!withdrawLink) {
             withdrawLink = document.createElement("a");
-            withdrawLink.id = "wfsmm-function-withdraw";
+            withdrawLink.id = "wfmapmods-function-withdraw";
             withdrawLink.textContent = "Withdraw";
             withdrawLink.style.cursor = "pointer";
             withdrawLink.addEventListener("click", ev => {
@@ -1168,10 +1173,10 @@
             container.appendChild(withdrawLink);
         }
 
-        let appealLink = container.querySelector("#wfsmm-function-appeal");
+        let appealLink = container.querySelector("#wfmapmods-function-appeal");
         if (!appealLink) {
             appealLink = document.createElement("a");
-            appealLink.id = "wfsmm-function-appeal";
+            appealLink.id = "wfmapmods-function-appeal";
             appealLink.textContent = "Appeal";
             appealLink.style.cursor = "pointer";
 
@@ -1196,6 +1201,37 @@
                 openAppealModal(poiForAppeal);
             });
             container.appendChild(appealLink);
+        }
+
+        let resubmitLink = container.querySelector("#wfmapmods-function-resubmit-contrib");
+        if (!resubmitLink) {
+            resubmitLink = document.createElement("a");
+            resubmitLink.id = "wfmapmods-function-resubmit-contrib";
+            resubmitLink.textContent = "Resubmit";
+            resubmitLink.style.cursor = "pointer";
+
+            resubmitLink.addEventListener("click", (ev) => {
+                ev.preventDefault();
+
+                // Extra safety: if marked disabled by distance, do nothing
+                if (resubmitLink.dataset.disabled === "distance") {
+                    return;
+                }
+
+                const nid = resubmitLink.dataset.id;
+                let poiForResubmit = null;
+
+                if (Array.isArray(nominations)) {
+                    poiForResubmit = nominations.find(n => n.id === nid) || null;
+                }
+                if (!poiForResubmit) poiForResubmit = poi; // fallback to current
+                if (!poiForResubmit) return;
+
+                sendResubmitToBase(poiForResubmit);
+            });
+
+
+            container.appendChild(resubmitLink);
         }
 
         // Show/hide based on current status for hold / withdraw / edit
@@ -1224,6 +1260,7 @@
         if (releaseHoldLink) releaseHoldLink.dataset.id = id;
         if (withdrawLink)   withdrawLink.dataset.id   = id;
         if (appealLink)     appealLink.dataset.id     = id;
+        if (resubmitLink)     resubmitLink.dataset.id   = id;
 
         // ---- Appeal logic ----
         if (appealLink) {
@@ -1264,6 +1301,22 @@
                 }
             }
         }
+
+        // ---- Resubmit logic: REJECTED / WITHDRAWN / DUPLICATE ----
+        if (resubmitLink) {
+            const canResubmitStatuses = new Set(["REJECTED", "WITHDRAWN", "DUPLICATE"]);
+            if (canResubmitStatuses.has(status)) {
+                resubmitLink.style.display = "inline-block";
+                applyResubmitDistanceRule(poi, resubmitLink);
+            } else {
+                resubmitLink.style.display = "none";
+                resubmitLink.dataset.disabled = "";
+                resubmitLink.title = "";
+                resubmitLink.style.cursor = "pointer";
+                resubmitLink.style.opacity = "1";
+                resubmitLink.style.color = "";
+            }
+        }
     }
 
     function openEditSubmissionModal(poi) {
@@ -1282,7 +1335,7 @@
             title: "Edit submission",
             buildContent(body, okBtn) {
                 const container = document.createElement("div");
-                container.className = "wfsmm-modal-section";
+                container.className = "wfmapmods-modal-section";
                 container.style.display = "flex";
                 container.style.flexDirection = "column";
                 container.style.gap = "8px";
@@ -1458,7 +1511,7 @@
             title: "Appeal rejection",
             buildContent(body, okBtn) {
                 const container = document.createElement("div");
-                container.className = "wfsmm-modal-section";
+                container.className = "wfmapmods-modal-section";
                 container.style.display = "flex";
                 container.style.flexDirection = "column";
                 container.style.gap = "8px";
@@ -1538,21 +1591,182 @@
     }
 
     // -----------------------------
+    // Resubmit helpers – distance & location
+    // -----------------------------
+
+    function distanceKmBetween(lat1, lng1, lat2, lng2) {
+        const toRad = (deg) => deg * Math.PI / 180;
+
+        const R = 6371; // km
+        const φ1 = toRad(lat1);
+        const φ2 = toRad(lat2);
+        const Δφ = toRad(lat2 - lat1);
+        const Δλ = toRad(lng2 - lng1);
+
+        const a =
+              Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c; // km
+    }
+
+    function getSubmitterLocation() {
+        // Read from location bridge provided by the base map plugin
+        const bridge = document.getElementById("wfmapmods-submit-location-bridge");
+
+        if (!submitterLocation && bridge) {
+            const latAttr = bridge.getAttribute("data-lat");
+            const lngAttr = bridge.getAttribute("data-lng");
+
+            const lat = latAttr ? parseFloat(latAttr) : NaN;
+            const lng = lngAttr ? parseFloat(lngAttr) : NaN;
+
+            if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+                submitterLocation = { lat, lng };
+            }
+        }
+    }
+
+    function applyResubmitDistanceRule(poi, linkEl) {
+        if (!linkEl) return;
+
+        let isAllowed = true;
+        let distanceKm = null;
+
+        if (typeof poi.lat === "number" && typeof poi.lng === "number") {
+            if (!submitterLocation) {
+                getSubmitterLocation();
+            }
+            if (submitterLocation) {
+                distanceKm = distanceKmBetween(
+                    submitterLocation.lat,
+                    submitterLocation.lng,
+                    poi.lat,
+                    poi.lng
+                );
+                if (distanceKm > MAX_RESUBMIT_DISTANCE_KM) {
+                    isAllowed = false;
+                }
+            }
+        }
+
+        if (!isAllowed && distanceKm !== null) {
+            linkEl.dataset.disabled = "distance";
+            linkEl.style.cursor = "not-allowed";
+            linkEl.style.opacity = "0.5";
+            linkEl.style.color = "#9ca3af";
+            linkEl.title =
+                `Resubmission disabled: This nomination is ${distanceKm.toFixed(1)} km ` +
+                `from your initial location (max ${MAX_RESUBMIT_DISTANCE_KM} km).`;
+        } else {
+            linkEl.dataset.disabled = "";
+            linkEl.style.cursor = "pointer";
+            linkEl.style.opacity = "1";
+            linkEl.style.color = "";
+            linkEl.title = "Resubmit this nomination";
+        }
+    }
+
+    // -----------------------------
+    // Layers option
+    // -----------------------------
+
+    function insertLayersToggle() {
+        const menuCheck = setInterval(() => {
+            const menu = document.querySelector(".wfmapmods-layers-menu");
+            if (!menu) return; // wait until layers plugin has created the menu
+
+            clearInterval(menuCheck);
+
+            // Avoid duplicates
+            if (menu.querySelector("#wfmapmods-layer-contributions")) return;
+
+            const mapCfg = userSettings.map || (userSettings.map = {});
+            if (typeof mapCfg.contributionsEnabled !== "boolean") {
+                mapCfg.contributionsEnabled = true;
+            }
+
+            const label = document.createElement("label");
+            label.className = "wfmapmods-layers-option";
+            label.id = "wfmapmods-layer-contributions";
+
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.checked = mapCfg.contributionsEnabled !== false;
+
+            const text = document.createElement("span");
+            text.textContent = "Contributions";
+
+            label.appendChild(checkbox);
+            label.appendChild(text);
+            menu.appendChild(label);
+
+            checkbox.addEventListener("change", () => {
+                const enabled = checkbox.checked;
+                const mapCfg = userSettings.map || (userSettings.map = {});
+                mapCfg.contributionsEnabled = enabled;
+                saveSettings();
+
+                if (!enabled) {
+                    // Master off: hide everything & clear selection UI
+                    clearNominationMarkers();
+                    clearNominationSelection();
+                    hideNominationActionLinks();
+                } else {
+                    // Master on: if all sub-statuses are disabled, re-enable them
+                    ensureAnyStatusEnabledWhenMasterOn();
+                    // Then re-draw markers based on current zoom/bounds and status settings
+                    refreshNominationMarkers();
+                }
+            });
+        }, 300);
+    }
+
+
+    function ensureAnyStatusEnabledWhenMasterOn() {
+        const markersCfgRoot = userSettings.markers || {};
+        const markersCfg = markersCfgRoot.statuses || {};
+
+        // Only consider real statuses, not DEFAULT
+        const statusKeys = Object.keys(markersCfg).filter(k => k !== "DEFAULT");
+
+        if (!statusKeys.length) return;
+
+        // If EVERY status is disabled, re-enable them all so the user sees something.
+        const allDisabled = statusKeys.every(key => {
+            const cfg = markersCfg[key];
+            return cfg && cfg.enabled === false;
+        });
+
+        if (!allDisabled) return;
+
+        statusKeys.forEach(key => {
+            const cfg = markersCfg[key] || (markersCfg[key] = {});
+            cfg.enabled = true;
+        });
+
+        // Persist change
+        saveSettings();
+    }
+
+    // -----------------------------
     // Settings UI (link + modals)
     // -----------------------------
 
     function insertSettingsLink() {
         const panelCheck = setInterval(() => {
-            const settingsBody = document.querySelector(".wfsmm-settings-links");
+            const settingsBody = document.querySelector(".wfmapmods-settings-links");
             if (!settingsBody) return; // retry
 
             clearInterval(panelCheck);
 
             // Prevent duplicate link insertion
-            if (document.getElementById("wfsmm-settings-contributions")) return;
+            if (document.getElementById("wfmapmods-settings-contributions")) return;
 
             const link = document.createElement("a");
-            link.id = "wfsmm-settings-contributions";
+            link.id = "wfmapmods-settings-contributions";
             link.textContent = "Contributions";
 
             settingsBody.appendChild(link);
@@ -1569,7 +1783,7 @@
             title: `Customise marker – ${label}`,
             buildContent(body) {
                 const section = document.createElement("div");
-                section.className = "wfsmm-modal-section";
+                section.className = "wfmapmods-modal-section";
 
                 const desc = document.createElement("div");
                 desc.style.fontSize = "11px";
@@ -1766,7 +1980,7 @@
             title: "Contribution marker options",
             buildContent(dialog) {
                 const container = document.createElement("div");
-                container.className = "wfsmm-modal-section";
+                container.className = "wfmapmods-modal-section";
 
                 // ---- PERFORMANCE / LOTS OF MARKERS SECTION ----
                 const mapCfg = userSettings.map || (userSettings.map = {});
@@ -1826,7 +2040,7 @@
                 container.appendChild(hint);
 
                 const table = document.createElement("table");
-                table.className = "wfsmm-circle-table";
+                table.className = "wfmapmods-circle-table";
                 Object.assign(table.style, {
                     width: "100%",
                     borderCollapse: "collapse",
@@ -1882,7 +2096,7 @@
                     tdShow.style.textAlign = "center";
                     const showChk = document.createElement("input");
                     showChk.type = "checkbox";
-                    showChk.className = "wfsmm-modal-checkbox";
+                    showChk.className = "wfmapmods-modal-checkbox";
                     showChk.checked = cfg.enabled !== false;
                     tdShow.appendChild(showChk);
                     row.appendChild(tdShow);
@@ -2007,7 +2221,7 @@
         // Backdrop
         const backdrop = document.createElement("div");
         backdrop.id = id;
-        backdrop.className = "wfsmm-modal-backdrop";
+        backdrop.className = "wfmapmods-modal-backdrop";
         Object.assign(backdrop.style, {
             position: "fixed",
             inset: "0",
@@ -2020,7 +2234,7 @@
 
         // Dialog
         const dialog = document.createElement("div");
-        dialog.className = "wfsmm-modal-dialog";
+        dialog.className = "wfmapmods-modal-dialog";
         Object.assign(dialog.style, {
             background: "#fff",
             color: "#000",
@@ -2037,7 +2251,7 @@
 
         // Header
         const header = document.createElement("div");
-        header.className = "wfsmm-modal-header";
+        header.className = "wfmapmods-modal-header";
         Object.assign(header.style, {
             padding: "8px 12px",
             borderBottom: "1px solid #ddd",
@@ -2066,7 +2280,7 @@
 
         // Body
         const body = document.createElement("div");
-        body.className = "wfsmm-modal-body";
+        body.className = "wfmapmods-modal-body";
         Object.assign(body.style, {
             padding: "8px 12px",
             overflowY: "auto",
@@ -2075,7 +2289,7 @@
 
         // Footer
         const footer = document.createElement("div");
-        footer.className = "wfsmm-modal-footer";
+        footer.className = "wfmapmods-modal-footer";
         Object.assign(footer.style, {
             padding: "8px 12px",
             borderTop: "1px solid #ddd",
@@ -2171,7 +2385,9 @@
             lng: (typeof poi.lng === "number") ? poi.lng : null,
             imageUrl: poi.imageUrl || "",
             status: poi.status || "",
-            source: POI_BRIDGE_SOURCE
+            source: POI_BRIDGE_SOURCE,
+            sourceLogo: "WAYFARER",
+            sourceText: "Wayfarer Contribution",
         };
 
         try {
@@ -2226,6 +2442,44 @@
     }
 
     // -----------------------------
+    // Submission bridge (for resubmit)
+    // -----------------------------
+
+    function sendResubmitToBase(poi) {
+        if (!poi) return;
+
+        const bridge = document.getElementById(SUBMISSION_BRIDGE_ID);
+        if (!bridge) {
+            console.warn("[ContribOverlay] Submission bridge not found");
+            return;
+        }
+
+        const payload = {
+            source: POI_BRIDGE_SOURCE,
+            poi: {
+                id: poi.id || poi.guid || null,
+                title: poi.title || "",
+                description: poi.description || "",
+                supportingStatement: poi.statement || "",
+                lat: (typeof poi.lat === "number") ? poi.lat : null,
+                lng: (typeof poi.lng === "number") ? poi.lng : null
+            },
+            images: {
+                mainUrl: poi.imageUrl || "",
+                supportingUrls: Array.isArray(poi.supportingImageUrls)
+                ? poi.supportingImageUrls
+                : []
+            }
+        };
+
+        try {
+            bridge.setAttribute("data-submission", JSON.stringify(payload));
+        } catch (e) {
+            console.warn("[ContribOverlay] Failed to serialise payload for submission bridge", e, payload);
+        }
+    }
+
+    // -----------------------------
     // Utility helpers
     // -----------------------------
 
@@ -2263,7 +2517,6 @@
         loadSettings();
         loadNominationsFromIDB();
         startMapPanelWatcher();
-        fetchLatestNominations();
         setupBridgeSelectionWatcher();
     }
 
