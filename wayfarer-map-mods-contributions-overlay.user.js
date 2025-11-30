@@ -3,7 +3,7 @@
 // @version      1.0.0
 // @description  Loads nominations from the Contributions list and shows them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-contributions-overlay.user.js
+// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-contributions-overlay.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
 // @run-at       document-start
