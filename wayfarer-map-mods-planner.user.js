@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Planner
-// @version      0.1.1
+// @version      0.1.2
 // @description  Load and edit planner POIs from a Google Sheet and show them as pins on the Wayfarer submission map.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-planner.user.js
@@ -868,7 +868,8 @@
             position: { lat, lng },
             title: "",
             icon,
-            draggable: !!(userSettings.planner && userSettings.planner.enableDragging)
+            draggable: !!(userSettings.planner && userSettings.planner.enableDragging),
+            optimized: false,
         });
 
         // Clicking it again just re-opens the editor
@@ -979,7 +980,8 @@
                     position: { lat: poi.lat, lng: poi.lng },
                     title: titleText,
                     icon: baseIcon,
-                    draggable: !!(userSettings.planner && userSettings.planner.enableDragging)
+                    draggable: !!(userSettings.planner && userSettings.planner.enableDragging),
+                    optimized: false,
                 });
 
                 marker.addListener("click", () => {
