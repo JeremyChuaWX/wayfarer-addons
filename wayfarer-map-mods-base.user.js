@@ -7,9 +7,7 @@
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
 // @run-at       document-start
-// @grant        GM_xmlhttpRequest
-// @connect      lh3.googleusercontent.com
-// @connect      storage.googleapis.com
+
 // @require      https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js
 // ==/UserScript==
 
