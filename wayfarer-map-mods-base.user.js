@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.0.3
+// @version      2.0.4
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -55,6 +55,8 @@
     let poiInfoWindow = null;
     let CenterPinOverlay = null;
     let centerPinOverlay = null;
+    let desktopSubmitMarker = null;
+    let desktopSubmitMarkerIcon = null;
 
     // ----- POI & marker state -----
     let markersByGuid = {};
@@ -92,7 +94,6 @@
     let userLocationMarker = null;
     let submitterLocation = null;
 
-
     // ----- Behaviour flags -----
     let mapTypeListenerBound = false;
     let mapClickCloseBound = false;
@@ -126,6 +127,8 @@
     const INGRESS_LOGO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 80 91.5"><g fill="none" stroke="black" stroke-width="4"><path d="m40 11l30 17.3v34.6l-30 17.3-30-17.3v-34.6zm0 56.6l20-33.8h-40z"/><path id="i" d="m40 11v15.5m0 17.5v20"/><use xlink:href="#i" transform="rotate(120,40,45)"/><use xlink:href="#i" transform="rotate(-120,40,45)"/></g></svg>';
     const WAYFARER_LOGO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 168.64822 385.63867"><g transform="translate(-1713.3254,-206.92756)"><path fill="#000000" d="m 1796.8177,206.93648 c -1.4336,0.0214 -2.8694,0.0811 -4.3086,0.17968 -46.5329,3.18681 -81.4741,42.22048 -79.0664,88.33008 0.6634,12.70543 1.194,14.21682 45.043,128.26758 12.3703,32.17497 22.7806,59.4 23.1328,60.5 0.9228,2.88168 3.7726,6.02575 7.6817,8.47656 7.3893,4.63273 19.8475,0.73709 23.4296,-7.32617 2.4087,-5.42181 55.0508,-143.34771 61.4317,-160.95508 6.7916,-18.74043 8.5934,-28.23315 7.5273,-39.66015 -2.0038,-21.47603 -10.6317,-39.26432 -26.3027,-54.23633 -16.3041,-15.57678 -37.0635,-23.89663 -58.5684,-23.57617 z m 0.6875,51.41406 a 33.067028,33.067028 0 0 1 33.0664,33.0664 33.067028,33.067028 0 0 1 -33.0664,33.06641 33.067028,33.067028 0 0 1 -33.0683,-33.06641 33.067028,33.067028 0 0 1 33.0683,-33.0664 z m 0.8184,269.64648 c -4.5709,-0.16021 -9.2407,0.67626 -13.7168,2.65625 -5.8988,2.6093 -13.0929,9.51789 -16.1582,15.51953 -3.6613,7.16844 -4.2239,17.96942 -1.3359,25.6211 3.4496,9.13947 10.5363,16.08888 19.9726,19.58789 5.5946,2.0745 18.5971,1.31232 24.1582,-1.41602 14.0914,-6.91328 21.5412,-22.84569 17.5488,-37.52539 -3.945,-14.50608 -16.7561,-23.96272 -30.4687,-24.44336 z" /></g></svg>';
     const LIGHTSHIP_LOGO_SVG = '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" fill-rule="evenodd"><path d="M32 8c3.812 0 7.465.874 10.856 2.598a.208.208 0 01.037.348l-.04.026-4.591 2.256a.208.208 0 01-.158.01A19.714 19.714 0 0032 12.273a19.598 19.598 0 00-13.95 5.779A19.598 19.598 0 0012.27 32c0 1.53.518 2.646 1.539 3.316 2.098 1.379 5.996.795 9.625-.252l.656-.195.647-.203.637-.21.313-.106.613-.215.596-.217.852-.322.537-.21.51-.205.923-.385.408-.175a.939.939 0 011.054.199.938.938 0 01.2 1.053l-.362.854-.297.73-.313.796-.214.563-.215.586-.215.605-.213.622-.105.317-.206.643-.199.652-.19.66c-.982 3.535-1.487 7.264-.151 9.296.667 1.016 1.777 1.53 3.299 1.53a19.6 19.6 0 0013.95-5.778A19.599 19.599 0 0051.73 32c0-2.234-.376-4.434-1.115-6.54a.208.208 0 01-.008-.11l.017-.051 2.22-4.517a.209.209 0 01.183-.116c.07-.002.15.041.188.11A24.05 24.05 0 0156 32.002c0 13.233-10.767 24-24 24S8 45.234 8 32C8 18.767 18.767 8 32 8zm19.336 2.399c1.257-.618 2.58.653 2.069 1.913l-.048.108-11.31 23.018c-.57 1.161-2.22 1.104-2.73-.04l-.05-.122-2.574-7.293a1.509 1.509 0 00-.794-.87l-.127-.051-7.292-2.574c-1.22-.43-1.356-2.075-.279-2.717l.116-.062 23.019-11.31z"/></svg>';
+
+    const SUBMISSION_PIN = '<svg width="30" height="47" viewBox="0 0 30 47" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5146 0C22.5308 1.85546e-05 29.0293 6.49846 29.0293 14.5146C29.0293 22.0646 23.2643 28.2678 15.8965 28.9639V44.2354C15.8963 44.9986 15.278 45.6172 14.5146 45.6172C13.7513 45.6172 13.132 44.9986 13.1318 44.2354V28.9639C5.76427 28.2676 1.65052e-05 22.0644 0 14.5146C0 6.49845 6.49845 0 14.5146 0ZM14.5176 9.67676C11.8457 9.67693 9.67969 11.8427 9.67969 14.5146C9.67978 17.1865 11.8457 19.3524 14.5176 19.3525C17.1896 19.3525 19.3564 17.1866 19.3564 14.5146C19.3564 11.8426 17.1896 9.67676 14.5176 9.67676Z" fill="#FF4713"/><path opacity="0.3" d="M14.5145 46.9998C16.4231 46.9998 17.9703 46.2262 17.9703 45.2719C17.9703 44.3176 16.4231 43.5439 14.5145 43.5439C12.6058 43.5439 11.0586 44.3176 11.0586 45.2719C11.0586 46.2262 12.6058 46.9998 14.5145 46.9998Z" fill="#FF4713"/></svg>';
 
     // -----------------------------
     // Settings (defaults + storage)
@@ -1209,29 +1212,12 @@
             });
 
             // Pin icon SVG
-            const pinIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-            pinIcon.setAttribute("width", "14");
-            pinIcon.setAttribute("height", "21");
-            pinIcon.setAttribute("viewBox", "0 0 30 47");
-            pinIcon.setAttribute("aria-hidden", "true");
-
-            const pinPath1 = document.createElementNS("http://www.w3.org/2000/svg", "path");
-            pinPath1.setAttribute(
-                "d",
-                "M14.5146 0C22.5308 1.85546e-05 29.0293 6.49846 29.0293 14.5146C29.0293 22.0646 23.2643 28.2678 15.8965 28.9639V44.2354C15.8963 44.9986 15.278 45.6172 14.5146 45.6172C13.7513 45.6172 13.132 44.9986 13.1318 44.2354V28.9639C5.76427 28.2676 1.65052e-05 22.0644 0 14.5146C0 6.49845 6.49845 0 14.5146 0ZM14.5176 9.67676C11.8457 9.67693 9.67969 11.8427 9.67969 14.5146C9.67978 17.1865 11.8457 19.3524 14.5176 19.3525C17.1896 19.3525 19.3564 17.1866 19.3564 14.5146C19.3564 11.8426 17.1896 9.67676 14.5176 9.67676Z"
-            );
-            pinPath1.setAttribute("fill", "#FF4713");
-
-            const pinPath2 = document.createElementNS("http://www.w3.org/2000/svg", "path");
-            pinPath2.setAttribute(
-                "d",
-                "M14.5145 46.9998C16.4231 46.9998 17.9703 46.2262 17.9703 45.2719C17.9703 44.3176 16.4231 43.5439 14.5145 43.5439C12.6058 43.5439 11.0586 44.3176 11.0586 45.2719C11.0586 46.2262 12.6058 46.9998 14.5145 46.9998Z"
-            );
-            pinPath2.setAttribute("fill", "#FF4713");
-            pinPath2.setAttribute("opacity", "0.3");
-
-            pinIcon.appendChild(pinPath1);
-            pinIcon.appendChild(pinPath2);
+            const parser = new DOMParser();
+            const pinIconSvg = parser.parseFromString(SUBMISSION_PIN, "image/svg+xml").documentElement;
+            pinIconSvg.setAttribute("width", "14");
+            pinIconSvg.setAttribute("height", "21");
+            pinIconSvg.setAttribute("aria-hidden", "true");
+            const pinIcon = pinIconSvg;
 
             // Links row (same styling as other link blocks)
             const locationLinksRow = document.createElement("div");
@@ -3369,6 +3355,7 @@
                 position: { lat, lng },
                 map: submitMap,
                 title: poi.title || "Draft nomination",
+                optimized: false,
 
                 // You can customise icon here if you like:
                 // icon: "data:image/svg+xml;base64,...."
@@ -4601,6 +4588,9 @@
         hideNativeCenterPin();
         ensureCenterPinOverlay();
 
+        // Hide our custom made desktop pin
+        removeDesktopSubmitMarker();
+
         // Recenter on the current submission coordinates
         // This is to prevent misalignment between lat,lng and visual pin
         recenterMapOnCurrentSubmission();
@@ -4620,6 +4610,9 @@
         // Remove our mobile overlay in desktop mode
         removeCenterPinOverlay();
 
+        // Ensure desktop submission marker exists
+        ensureDesktopSubmitMarker();
+
         // Side panel: expand in desktop
         sidePanelCollapsed = false;
         applySidePanelCollapseState();
@@ -4629,6 +4622,56 @@
             poiInfoWindow.close();
         }
     }
+
+    function getDesktopSubmitMarkerIcon() {
+        if (desktopSubmitMarkerIcon) return desktopSubmitMarkerIcon;
+        if (typeof google === "undefined" || !google.maps) return null;
+
+        desktopSubmitMarkerIcon = {
+            url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(SUBMISSION_PIN),
+            // match Niantic desktop pin size
+            scaledSize: new google.maps.Size(36, 56),
+            // bottom-centre of the image sits on the LatLng
+            anchor: new google.maps.Point(18, 56)
+        };
+
+        return desktopSubmitMarkerIcon;
+    }
+
+    function ensureDesktopSubmitMarker() {
+        if (!submitMap || typeof google === "undefined" || !google.maps) return;
+
+        const icon = getDesktopSubmitMarkerIcon();
+        if (!icon) return;
+
+        if (!desktopSubmitMarker) {
+            desktopSubmitMarker = new google.maps.Marker({
+                map: submitMap,
+                clickable: false,
+                zIndex: 999,
+                optimized: false,
+                icon: icon   // includes scaledSize + anchor from helper
+            });
+        }
+
+        updateDesktopSubmitMarkerPosition();
+    }
+
+    function updateDesktopSubmitMarkerPosition() {
+        if (!desktopSubmitMarker || !submitMap) return;
+        if (typeof window.currentLat !== "number" || typeof window.currentLng !== "number") return;
+
+        const latLng = new google.maps.LatLng(window.currentLat, window.currentLng);
+        desktopSubmitMarker.setPosition(latLng);
+    }
+
+    function removeDesktopSubmitMarker() {
+        if (desktopSubmitMarker) {
+            desktopSubmitMarker.setMap(null);
+            desktopSubmitMarker = null;
+        }
+    }
+
 
     function initMapModeWatcher() {
         const updateMode = () => {
@@ -4837,6 +4880,9 @@
                 // Update 22m powerSpot radius circle
                 updatePowerSpotRadiusCircle(initialCoords.lat, initialCoords.lng);
 
+                if (currentMapMode === MAP_MODE.DESKTOP) {
+                    updateDesktopSubmitMarkerPosition();
+                }
             }
 
             // Watch for changes to the coordinates text
@@ -4892,6 +4938,11 @@
 
         // Update 22m Power Spot radius circle
         updatePowerSpotRadiusCircle(newLat, newLng);
+
+        // Move our custom desktop submission marker (desktop mode only)
+        if (currentMapMode === MAP_MODE.DESKTOP) {
+            updateDesktopSubmitMarkerPosition();
+        }
 
         // Save map coordinates so we can restore view after refresh
         saveMapView();
@@ -5048,6 +5099,8 @@
         if (currentMapMode === MAP_MODE.MOBILE) {
             hideNativeCenterPin();
             ensureCenterPinOverlay();
+        } else if (currentMapMode === MAP_MODE.DESKTOP) {
+            ensureDesktopSubmitMarker();
         }
 
         submitMap.addListener("idle", () => {
@@ -5095,6 +5148,7 @@
             map,
             clickable: false,
             zIndex: 9999,
+            optimized: false,
             icon: {
                 path: google.maps.SymbolPath.CIRCLE,
                 scale: 8,
@@ -5718,7 +5772,8 @@
                     url: iconUrl,
                     scaledSize: new google.maps.Size(size, size),
                     anchor: new google.maps.Point(size / 2, size / 2)
-                }
+                },
+                optimized: false,
             });
 
             addListenersToPoiMarker(marker, poi);
@@ -5742,7 +5797,8 @@
                 fillColor: g.fillColor,
                 fillOpacity: g.fillOpacity,
                 scale: 8 // tweak if you want bigger/smaller circle
-            }
+            },
+            optimized: false,
         });
 
         addListenersToPoiMarker(marker, poi);
@@ -6038,10 +6094,17 @@
         display: none !important;
     }
 
-    .gm-style div[style*="z-index: 1000"][style*="width: 36px"][style*="height: 56px"] {
-        display: block !important;            /* make visible again */
-        pointer-events: none !important;      /* cannot be clicked */
+    .gm-style div[style*="z-index: 999"][style*="width: 36px"][style*="height: 56px"] {
+        display: block !important;
+        pointer-events: none !important;
     }
+
+    /* Hide marker overlay canvases (canvas-based markers) */
+.gm-style div[style*="z-index: 103"] div[style*="z-index: -1"] canvas {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+}
 
     /* -------------------------
        Sidebar Icon & Link
