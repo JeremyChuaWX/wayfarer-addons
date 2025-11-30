@@ -4863,6 +4863,8 @@
                 const candidates = document.querySelectorAll('app-submit-wayspot-map nia-map');
                 let foundMap = null;
 
+console.log('candidates');
+console.log(candidates);
                 candidates.forEach(el => {
                     if (foundMap || !el.__ngContext__) return;
 
