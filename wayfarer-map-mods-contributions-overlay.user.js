@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Contributions Overlay
-// @version      1.0.2
+// @version      1.1.0
 // @description  Loads nominations from the Contributions list and shows them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-contributions-overlay.user.js
@@ -36,6 +36,9 @@
         appeal: "APPEALED",
     };
 
+    // Pending submissions tracking
+    const PENDING_SUBMITS_KEY = "wfmap_contrib_pending_submits";
+    const PENDING_SUBMIT_EXPIRY_MS = 6 * 60 * 1000; // 6 minutes
 
     // -----------------------------
     // Global state – data & flags
@@ -59,6 +62,12 @@
 
     // UI / DOM state flags
     let lastPanelPresent = false;
+
+    // Pending submissions created via /submit/start
+    let pendingSubmissions = {};          // id -> { id, title, description, lat, lng, submittedAt }
+    let pendingSubmissionMarkers = {};    // id -> google.maps.Marker
+    let pendingSubmissionTimers = {};     // id -> timeout ID (for 3-minute recheck)
+    let pendingSubmissionsLoaded = false; // avoid double-load from localStorage
 
     // -----------------------------
     // Settings (defaults + storage)
@@ -433,17 +442,24 @@
     // Network & Wayfarer API Integration
     // -----------------------------
 
+
     /**
      * Monkey-patch XMLHttpRequest to:
      *  - watch GET /api/v1/vault/manage responses and update local nominations
      *  - watch POST /api/v1/vault/manage/* actions and update local status
+     *  - watch POST /api/v1/vault/submit/start to track pending submissions
      */
-    (function (open, send, setRequestHeader) {
+    (function (open, send) {
         XMLHttpRequest.prototype.open = function (method, url) {
+            // Normalise method + URL and store them for use in send()
+            const upperMethod = (method || "GET").toUpperCase();
             const cleanUrl = typeof url === "string" ? url.split("?")[0] : url;
 
+            this._wfmapmodsMethod = upperMethod;
+            this._wfmapmodsUrl = cleanUrl;
+
             // Attach handler for responses listing nominations
-            if (method === "GET" && cleanUrl === "/api/v1/vault/manage") {
+            if (upperMethod === "GET" && cleanUrl === "/api/v1/vault/manage") {
                 this.addEventListener("load", parseNominationsFromResponse, false);
             }
 
@@ -456,7 +472,7 @@
             };
 
             // Track successful POSTs to manage endpoints so we can update local state
-            if (method === "POST" && ACTIONS[cleanUrl]) {
+            if (upperMethod === "POST" && ACTIONS[cleanUrl]) {
                 this._wfmapmodsNewStatus = ACTIONS[cleanUrl];
 
                 this.addEventListener("load", function () {
@@ -477,11 +493,15 @@
                 }, false);
             }
 
+            // Let the original open() run
             return open.apply(this, arguments);
         };
 
         XMLHttpRequest.prototype.send = function (body) {
-            // Extract the nomination id from the POST body so we can match it on success
+            const method = this._wfmapmodsMethod || "GET";
+            const url = this._wfmapmodsUrl || "";
+
+            // Extract the nomination id from /manage POST bodies so we can match on success
             if (this._wfmapmodsNewStatus && body) {
                 try {
                     if (typeof body === "string") {
@@ -496,12 +516,27 @@
                 }
             }
 
+            // Detect POST /api/v1/vault/submit/start and record a pending submission
+            if (method === "POST" && url === "/api/v1/vault/submit/start" && body) {
+                try {
+                    if (typeof body === "string") {
+                        const payload = JSON.parse(body);
+                        // startPayload has title, description, supportingStatement, lat, lng, etc.
+                        console.log("[ContribOverlay] Detected submit/start via XHR:", payload);
+                        handleSubmitStartPayload(payload);
+                    } else {
+                        console.log("[ContribOverlay] submit/start body is not a string:", body);
+                    }
+                } catch (e) {
+                    console.warn("[ContribOverlay] Failed to parse submit/start payload:", e);
+                }
+            }
+
+            // Let the original send() run
             return send.apply(this, arguments);
         };
 
-    })(XMLHttpRequest.prototype.open,
-       XMLHttpRequest.prototype.send,
-       XMLHttpRequest.prototype.setRequestHeader);
+    })(XMLHttpRequest.prototype.open, XMLHttpRequest.prototype.send);
 
     /**
      * Fetch the latest nominations list directly from the Wayfarer API
@@ -579,6 +614,9 @@
                 updateNominationActionLinks(selected);
             }
         }
+
+        // Try to match any locally pending submissions against this fresh /manage data
+        reconcilePendingSubmissionsWithManageList();
     }
 
     /**
@@ -735,6 +773,404 @@
     }
 
     // -----------------------------
+    // Pending submissions tracking
+    // -----------------------------
+
+    /**
+     * Load pending submissions from localStorage into memory.
+     * Also prunes any entries older than the expiry window.
+     */
+    function loadPendingSubmissionsFromLocalStorage() {
+        if (pendingSubmissionsLoaded) return;
+        pendingSubmissionsLoaded = true;
+
+        pendingSubmissions = {};
+
+        try {
+            const raw = window.localStorage.getItem(PENDING_SUBMITS_KEY);
+            if (!raw) return;
+
+            const arr = JSON.parse(raw);
+            if (!Array.isArray(arr)) return;
+
+            const now = Date.now();
+
+            arr.forEach(entry => {
+                if (!entry || typeof entry !== "object") return;
+
+                const { id, title, description, lat, lng, submittedAt } = entry;
+
+                if (!id) return;
+                if (typeof lat !== "number" || typeof lng !== "number") return;
+                if (typeof submittedAt !== "number") return;
+
+                // Drop entries older than expiry window
+                if (now - submittedAt > PENDING_SUBMIT_EXPIRY_MS) return;
+
+                pendingSubmissions[id] = {
+                    id,
+                    title: title || "",
+                    description: description || "",
+                    lat,
+                    lng,
+                    submittedAt
+                };
+            });
+        } catch (e) {
+            console.warn("[ContribOverlay] Failed to load pending submissions from localStorage:", e);
+        }
+    }
+
+    /**
+     * Persist current pending submissions to localStorage as an array.
+     */
+    function savePendingSubmissionsToLocalStorage() {
+        try {
+            const arr = Object.values(pendingSubmissions);
+            window.localStorage.setItem(PENDING_SUBMITS_KEY, JSON.stringify(arr));
+        } catch (e) {
+            console.warn("[ContribOverlay] Failed to save pending submissions to localStorage:", e);
+        }
+    }
+
+    /**
+ * Create a map marker for a pending submission, if the map is attached
+ * and the Contributions layer is enabled. Clicking the marker will:
+ *  - highlight it
+ *  - send a POI-like payload to the shared POI bridge
+ *  - clear any nomination action links (pending submissions have no actions)
+ */
+    function createPendingSubmissionMarker(pending) {
+        if (!submitMap) return;
+
+        const mapCfg = userSettings.map || {};
+        if (mapCfg.contributionsEnabled === false) return;
+
+        if (typeof pending.lat !== "number" || typeof pending.lng !== "number") return;
+
+        const cfg = getMarkerConfigForStatus("NOMINATED");
+
+        const marker = new google.maps.Marker({
+            map: submitMap,
+            position: { lat: pending.lat, lng: pending.lng },
+            title: `${pending.title || "Pending nomination"} (NOMINATED – syncing…)`,
+            icon: {
+                path: google.maps.SymbolPath.CIRCLE,
+                fillColor: cfg.fillColor,
+                fillOpacity: cfg.fillOpacity,
+                strokeColor: cfg.strokeColor,
+                strokeOpacity: cfg.strokeOpacity,
+                strokeWeight: cfg.strokeWeight,
+                scale: cfg.scale
+            }
+        });
+
+        marker.addListener("click", () => {
+            // Visually select this marker
+            selectNominationMarker(marker);
+
+            // Pending submissions do not have a /manage id yet
+            lastSelectedNominationId = null;
+
+            // Build a POI-like object for the bridge and sidebar logic
+            const pendingPoi = {
+                id: null,
+                type: "PENDING", // ensures updateNominationActionLinks will hide actions
+                title: pending.title || "",
+                description: pending.description || "",
+                lat: pending.lat,
+                lng: pending.lng,
+                status: "NOMINATED",
+                imageUrl: pending.imageUrl || "" // if you ever add this to pending entries
+            };
+
+            // Notify other scripts via the POI bridge
+            sendPoiToBridge(pendingPoi);
+
+            // Pending items have no server-side actions (hold/withdraw/appeal etc.)
+            hideNominationActionLinks();
+        });
+
+        pendingSubmissionMarkers[pending.id] = marker;
+    }
+
+
+    /**
+     * Remove all pending submission markers from the map and clear the cache.
+     */
+    function clearPendingSubmissionMarkers() {
+        Object.values(pendingSubmissionMarkers).forEach(marker => {
+            if (marker && typeof marker.setMap === "function") {
+                marker.setMap(null);
+            }
+        });
+        pendingSubmissionMarkers = {};
+    }
+
+    /**
+     * Schedule the next reconciliation check for a pending submission.
+     *
+     * The backend processes submissions every 3 minutes (:00, :03, :06…).
+     * This script checks:
+     *   • 30 seconds after the first expected processing time
+     *   • 1 minute after that processing time
+     *   • Every 3 minutes thereafter until the pending item resolves
+     *
+     * The first processing time is the earliest batch that is >= the submission
+     * time (including exact batch-boundary submissions). Future checks always
+     * advance in 3-minute intervals and are scheduled only for times in the future.
+     *
+     * Each scheduled check triggers fetchLatestNominations(); reconciliation logic
+     * removes matched items or discards entries older than the expiry window.
+     *
+     *
+     * @param {string} id - Pending submission identifier
+     */
+    function schedulePendingSubmissionRecheck(id) {
+        const pending = pendingSubmissions[id];
+        if (!pending) return;
+
+        const submittedAt = pending.submittedAt;
+        if (typeof submittedAt !== "number") return;
+
+        const now = Date.now();
+
+        // Compute the earliest backend batch time (minute % 3 === 0, seconds=0)
+        // that is >= submittedAt, with special handling for exact boundaries.
+        function computeFirstBatchTime(afterTimestamp) {
+            const d = new Date(afterTimestamp);
+
+            const submittedSeconds = d.getSeconds();
+            const submittedMs = d.getMilliseconds();
+
+            // Work from a minute-truncated copy
+            d.setSeconds(0, 0);
+
+            let minute = d.getMinutes();
+            const minuteMod = minute % 3;
+            const baseMinute = minute - minuteMod; // floor to nearest multiple of 3
+
+            d.setMinutes(baseMinute);
+
+            const candidateBatch = d.getTime();
+
+            // If we're exactly on the batch boundary, keep it
+            if (
+                candidateBatch === afterTimestamp &&
+                submittedSeconds === 0 &&
+                submittedMs === 0
+            ) {
+                return candidateBatch;
+            }
+
+            // Otherwise, if the batch time is before the submission, move to the next batch
+            if (candidateBatch < afterTimestamp) {
+                return candidateBatch + 3 * 60 * 1000; // +3 minutes
+            }
+
+            return candidateBatch;
+        }
+
+        const firstBatchTime = computeFirstBatchTime(submittedAt);
+        const firstCheckTime = firstBatchTime + 1 * 60 * 1000;   // batch + 1 minute
+        const preCheckTime   = firstCheckTime - 30 * 1000;       // 30 seconds before first check
+
+        let nextCheckTime;
+        const stepMs = 3 * 60 * 1000; // 3 minutes
+
+        if (now <= preCheckTime) {
+            // Earliest opportunity: 30 seconds before the first full check
+            nextCheckTime = preCheckTime;
+        } else if (now <= firstCheckTime) {
+            // Pre-check window has passed, schedule the first full check
+            nextCheckTime = firstCheckTime;
+        } else {
+            // Past the first full check → schedule the next slot in the
+            // repeating sequence: firstCheckTime + 3n minutes
+            const diff = now - firstCheckTime;
+            const steps = Math.floor(diff / stepMs) + 1;
+            nextCheckTime = firstCheckTime + steps * stepMs;
+        }
+
+        const delay = Math.max(0, nextCheckTime - now);
+
+        if (pendingSubmissionTimers[id]) {
+            clearTimeout(pendingSubmissionTimers[id]);
+        }
+
+        pendingSubmissionTimers[id] = setTimeout(() => {
+            fetchLatestNominations();
+        }, delay);
+    }
+
+    /**
+     * Record a new pending submission from the /submit/start payload.
+     * This is called by the fetch instrumentation when a Wayspot is submitted via API.
+     */
+    function handleSubmitStartPayload(startPayload) {
+        // Defensive checks: rely on the plugin's validation but re-validate here
+        if (!startPayload) return;
+
+        const title = (startPayload.title || "").trim();
+        const description = (startPayload.description || "").trim();
+        const supportingStatement = (startPayload.supportingStatement || "").trim();
+        const lat = startPayload.lat;
+        const lng = startPayload.lng;
+
+        if (!title || !description || !supportingStatement) {
+            // If the caller somehow skipped validation, don't record a pending entry
+            return;
+        }
+
+        if (typeof lat !== "number" || typeof lng !== "number" ||
+            !Number.isFinite(lat) || !Number.isFinite(lng)) {
+            return;
+        }
+
+        loadPendingSubmissionsFromLocalStorage();
+
+        const id = `pending_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        const submittedAt = Date.now();
+
+        const entry = {
+            id,
+            title,
+            description,
+            lat,
+            lng,
+            submittedAt
+        };
+
+        pendingSubmissions[id] = entry;
+        savePendingSubmissionsToLocalStorage();
+
+        // Draw marker if the map is ready
+        createPendingSubmissionMarker(entry);
+
+        // Schedule a manage API refresh after 3 minutes
+        schedulePendingSubmissionRecheck(id);
+    }
+
+    /**
+     * Remove a single pending submission: marker, in-memory entry, timer, and storage.
+     */
+    function removePendingSubmission(id) {
+        if (!id) return;
+
+        const marker = pendingSubmissionMarkers[id];
+        if (marker && typeof marker.setMap === "function") {
+            marker.setMap(null);
+        }
+        delete pendingSubmissionMarkers[id];
+
+        if (pendingSubmissionTimers[id]) {
+            clearTimeout(pendingSubmissionTimers[id]);
+            delete pendingSubmissionTimers[id];
+        }
+
+        if (pendingSubmissions[id]) {
+            delete pendingSubmissions[id];
+            savePendingSubmissionsToLocalStorage();
+        }
+    }
+
+    /**
+     * Helper: return a Set of 'YYYY-MM-DD' strings for yesterday, today, and tomorrow
+     * in the local timezone. This is used to decide whether a nomination from /manage
+     * counts as "new" compared to a pending submission.
+     */
+    function getNearbyDayStrings() {
+        const millisPerDay = 24 * 60 * 60 * 1000;
+        const now = new Date();
+        const baseTime = now.getTime();
+
+        const dates = [-1, 0, 1].map(offset => {
+            const d = new Date(baseTime + offset * millisPerDay);
+            return d.toISOString().slice(0, 10);
+        });
+
+        return new Set(dates);
+    }
+
+    /**
+     * Attempt to match all pending submissions against the current 'nominations'
+     * from /api/v1/vault/manage, and prune any entries older than the expiry window.
+     *
+     * A nomination is considered a match if:
+     *  - its lat/lng match the pending submission when rounded to 6 decimals, and
+     *  - its 'day' property is yesterday, today, or tomorrow.
+     */
+    function reconcilePendingSubmissionsWithManageList() {
+        loadPendingSubmissionsFromLocalStorage();
+
+        if (!pendingSubmissions || Object.keys(pendingSubmissions).length === 0) {
+            return;
+        }
+
+        const now = Date.now();
+        const nearbyDays = getNearbyDayStrings();
+        const noms = Array.isArray(nominations) ? nominations : [];
+
+        Object.values(pendingSubmissions).forEach(pending => {
+            if (!pending) return;
+
+            const age = now - pending.submittedAt;
+
+            // Drop any pending entry older than the expiry window
+            if (age > PENDING_SUBMIT_EXPIRY_MS) {
+                removePendingSubmission(pending.id);
+                return;
+            }
+
+            if (!noms.length) return;
+
+            // Pre-normalise pending coords to fixed-6
+            const pLat = Number(pending.lat.toFixed(6));
+            const pLng = Number(pending.lng.toFixed(6));
+
+            const match = noms.find(nom => {
+                if (!nom || nom.type !== "NOMINATION") return false;
+                if (!nearbyDays.has(nom.day)) return false;
+
+                const nomLat = nom.lat;
+                const nomLng = nom.lng;
+                if (typeof nomLat !== "number" || typeof nomLng !== "number") return false;
+
+                // Compare to server-style precision (6 decimals)
+                const nLat = Number(nomLat.toFixed(6));
+                const nLng = Number(nomLng.toFixed(6));
+
+                return nLat === pLat && nLng === pLng;
+            });
+
+            if (match) {
+                removePendingSubmission(pending.id);
+            }
+        });
+    }
+
+    /**
+     * After the map is attached, restore any pending submission markers still within
+     * the valid time window.
+     */
+    function restorePendingSubmissionMarkersIfNeeded() {
+        loadPendingSubmissionsFromLocalStorage();
+        clearPendingSubmissionMarkers();
+
+        const now = Date.now();
+
+        Object.values(pendingSubmissions).forEach(pending => {
+            if (!pending) return;
+            if (now - pending.submittedAt > PENDING_SUBMIT_EXPIRY_MS) {
+                removePendingSubmission(pending.id);
+                return;
+            }
+            createPendingSubmissionMarker(pending);
+            schedulePendingSubmissionRecheck(pending.id);
+        });
+    }
+
+    // -----------------------------
     // Map lifecycle + DOM watchers
     // -----------------------------
 
@@ -856,6 +1292,9 @@
 
         // Draw any nominations we already have cached
         refreshNominationMarkers();
+
+        // Draw any pending submissions that were created before this page load
+        restorePendingSubmissionMarkersIfNeeded();
     }
 
     /**
@@ -865,6 +1304,7 @@
         if (!mapAttached) return;
 
         clearNominationMarkers();
+        clearPendingSubmissionMarkers();
         submitMap = null;
         mapAttached = false;
     }
@@ -1784,15 +2224,17 @@
                 saveSettings();
 
                 if (!enabled) {
-                    // Master toggle off: hide markers and clear related UI
+                    // Master off: hide everything & clear selection UI
                     clearNominationMarkers();
+                    clearPendingSubmissionMarkers();
                     clearNominationSelection();
                     hideNominationActionLinks();
                 } else {
-                    // Master toggle on: ensure at least one status is visible…
+                    // Master on: if all sub-statuses are disabled, re-enable them
                     ensureAnyStatusEnabledWhenMasterOn();
-                    // …then re-draw markers based on current zoom/bounds and status settings
+                    // Then re-draw markers based on current zoom/bounds and status settings
                     refreshNominationMarkers();
+                    restorePendingSubmissionMarkersIfNeeded();
                 }
             });
         }, 300);
