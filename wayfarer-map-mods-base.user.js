@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.0.2
+// @version      2.0.3
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -47,7 +47,7 @@
     let poiMovementThreshold = radius * 0.25;
 
     // ----- Radius for submitting POIs -----
-    let submitRadius = 10000;
+    let submitRadius = 20000;
 
     // ----- Map instance & core map state -----
     let submitMap = null;
@@ -1816,7 +1816,6 @@
     // ==================================
 
     function createBridges() {
-        ensureSubmitterLocationBridge();
         startPoiBridgeObserver();
         startSubmissionBridgeObserver();
     }
@@ -2582,50 +2581,16 @@
                     const startLat = (typeof submitData.poi.lat === "number" ? submitData.poi.lat : window.currentLat);
                     const startLng = (typeof submitData.poi.lng === "number" ? submitData.poi.lng : window.currentLng);
 
-                    backdrop.style.display = "none"; // temporarily hide modal so user sees the map
+                    // Hide modal so user can see the map
+                    backdrop.style.display = "none";
 
-                    const epsilon = 1e-7;
-                    const intervalMs = 400;
-
-                    const timerId = window.setInterval(() => {
-                        const modalStillExists = document.getElementById("wfmapmods-submission-edit");
-                        if (!modalStillExists) {
-                            // Modal was closed; stop watching.
-                            window.clearInterval(timerId);
-                            return;
-                        }
-
-                        const newLat = window.currentLat;
-                        const newLng = window.currentLng;
-
-                        if (typeof newLat !== "number" || typeof newLng !== "number") {
-                            return;
-                        }
-
-                        const changed =
-                              typeof startLat !== "number" ||
-                              typeof startLng !== "number" ||
-                              Math.abs(newLat - startLat) > epsilon ||
-                              Math.abs(newLng - startLng) > epsilon;
-
-                        if (changed) {
-                            window.clearInterval(timerId);
-
-                            // Update submitData + local variables used for display
-                            submitData.poi = submitData.poi || {};
-                            submitData.poi.lat = newLat;
-                            submitData.poi.lng = newLng;
-
-                            currentLat = newLat;
-                            currentLng = newLng;
-                            locationValue.textContent = wfmapmodsFormatLatLng(newLat, newLng);
-
-                            // Show modal again
-                            backdrop.style.display = "";
-
-                            validate();
-                        }
-                    }, intervalMs);
+                    if (currentMapMode === MAP_MODE.MOBILE) {
+                        // Explicit “Confirm location” flow on mobile
+                        startMobileLocationChange(backdrop, submitData, locationValue, validate);
+                    } else {
+                        // Keep existing automatic behaviour on desktop
+                        startDesktopLocationChange(backdrop, submitData, locationValue, validate, startLat, startLng);
+                    }
                 });
 
                 locationRight.appendChild(locationValue);
@@ -2959,6 +2924,176 @@
                 submitWayspotViaApi(merged);
                 closeModal();
             }
+        });
+    }
+
+    function startDesktopLocationChange(backdrop, submitData, locationValue, validate, startLat, startLng) {
+        const epsilon = 1e-7;
+        const intervalMs = 400;
+
+        const timerId = window.setInterval(() => {
+            const modalStillExists = document.getElementById("wfmapmods-submission-edit");
+            if (!modalStillExists) {
+                // Modal was closed; stop watching.
+                window.clearInterval(timerId);
+                return;
+            }
+
+            const newLat = window.currentLat;
+            const newLng = window.currentLng;
+
+            if (typeof newLat !== "number" || typeof newLng !== "number") {
+                return;
+            }
+
+            const changed =
+                  typeof startLat !== "number" ||
+                  typeof startLng !== "number" ||
+                  Math.abs(newLat - startLat) > epsilon ||
+                  Math.abs(newLng - startLng) > epsilon;
+
+            if (changed) {
+                window.clearInterval(timerId);
+
+                // Update submitData + local variables used for display
+                submitData.poi = submitData.poi || {};
+                submitData.poi.lat = newLat;
+                submitData.poi.lng = newLng;
+
+                window.currentLat = newLat;
+                window.currentLng = newLng;
+                locationValue.textContent = wfmapmodsFormatLatLng(newLat, newLng);
+
+                // Show modal again
+                backdrop.style.display = "";
+
+                validate();
+            }
+        }, intervalMs);
+    }
+
+    function startMobileLocationChange(backdrop, submitData, locationValue, validate) {
+        if (!submitMap || typeof google === "undefined" || !google.maps) {
+            // If something is wrong with the map, just re-show the modal and bail
+            backdrop.style.display = "";
+            return;
+        }
+
+        const mapDiv = submitMap.getDiv();
+        if (!mapDiv) {
+            backdrop.style.display = "";
+            return;
+        }
+
+        // Hide the side panel so we can see the map
+        sidePanelCollapsed = true;
+        applySidePanelCollapseState();
+
+        // Remove any existing bar (defensive)
+        let bar = document.getElementById("wfmapmods-confirm-location-bar");
+        if (bar && bar.parentNode) {
+            bar.parentNode.removeChild(bar);
+        }
+
+        bar = document.createElement("div");
+        bar.id = "wfmapmods-confirm-location-bar";
+
+        Object.assign(bar.style, {
+            position: "absolute",
+            left: "50%",
+            bottom: "16px",
+            transform: "translateX(-50%)",
+            zIndex: "1200",
+            background: "rgba(17, 24, 39, 0.9)",  // dark grey
+            color: "#f9fafb",
+            padding: "6px 10px",
+            borderRadius: "9999px",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
+            maxWidth: "calc(100% - 32px)",
+            fontSize: "12px",
+            boxSizing: "border-box"
+        });
+
+        const label = document.createElement("span");
+        label.textContent = "Move the map, then tap Confirm location.";
+        label.style.flex = "1 1 auto";
+        label.style.whiteSpace = "nowrap";
+        label.style.overflow = "hidden";
+        label.style.textOverflow = "ellipsis";
+
+        const confirmBtn = document.createElement("button");
+        confirmBtn.type = "button";
+        confirmBtn.textContent = "Confirm";
+        Object.assign(confirmBtn.style, {
+            fontSize: "11px",
+            padding: "4px 8px",
+            borderRadius: "9999px",
+            border: "none",
+            background: "#3b82f6",
+            color: "#ffffff",
+            cursor: "pointer",
+            whiteSpace: "nowrap"
+        });
+
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.textContent = "Cancel";
+        Object.assign(cancelBtn.style, {
+            fontSize: "11px",
+            padding: "4px 8px",
+            borderRadius: "9999px",
+            border: "none",
+            background: "#6b7280",
+            color: "#ffffff",
+            cursor: "pointer",
+            whiteSpace: "nowrap"
+        });
+
+        bar.appendChild(label);
+        bar.appendChild(cancelBtn);
+        bar.appendChild(confirmBtn);
+        mapDiv.appendChild(bar);
+
+        const cleanup = () => {
+            const existing = document.getElementById("wfmapmods-confirm-location-bar");
+            if (existing && existing.parentNode) {
+                existing.parentNode.removeChild(existing);
+            }
+        };
+
+        // Cancel = discard changes and reopen modal
+        cancelBtn.addEventListener("click", () => {
+            cleanup();
+            backdrop.style.display = "";
+        });
+
+        // Confirm = use currentLat/currentLng at the time of the click
+        confirmBtn.addEventListener("click", () => {
+            const modalStillExists = document.getElementById("wfmapmods-submission-edit");
+            if (!modalStillExists) {
+                cleanup();
+                return;
+            }
+
+            const newLat = window.currentLat;
+            const newLng = window.currentLng;
+
+            if (typeof newLat === "number" && typeof newLng === "number") {
+                submitData.poi = submitData.poi || {};
+                submitData.poi.lat = newLat;
+                submitData.poi.lng = newLng;
+
+                window.currentLat = newLat;
+                window.currentLng = newLng;
+                locationValue.textContent = wfmapmodsFormatLatLng(newLat, newLng);
+            }
+
+            cleanup();
+            backdrop.style.display = "";
+            validate();
         });
     }
 
@@ -5009,20 +5144,6 @@
     // Get user location
     // ==================================
 
-    // This is used by other plug ins to determine the original location of user
-    // Important for knowing whether we can submit nominations using API (10 km range)
-    // Shared with other plug-ins via hidden div
-
-    function ensureSubmitterLocationBridge() {
-        if (document.getElementById("wfmapmods-submit-location-bridge")) return;
-
-        const div = document.createElement("div");
-        div.id = "wfmapmods-submit-location-bridge";
-        div.className = "wfmapmods-bridge-submit-location";
-        div.style.display = "none";
-        document.body.appendChild(div);
-    }
-
     function getSubmitterLocation() {
         if (!submitterLocation) {
             const initialCenter = submitMap.getCenter();
@@ -5033,17 +5154,8 @@
                 };
 
                 updateSubmitRadiusCircle();
-                updateSubmitLocationBridge();
             }
         }
-    }
-
-    function updateSubmitLocationBridge() {
-        const div = document.getElementById("wfmapmods-submit-location-bridge");
-        if (!div || !submitterLocation) return;
-
-        div.setAttribute("data-lat", String(submitterLocation.lat));
-        div.setAttribute("data-lng", String(submitterLocation.lng));
     }
 
     // ==================================
