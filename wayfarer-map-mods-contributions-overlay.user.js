@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Contributions Overlay
-// @version      1.1.0
+// @version      1.2.0
 // @description  Loads nominations from the Contributions list and shows them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-contributions-overlay.user.js
@@ -2930,6 +2930,9 @@
         const bridge = document.getElementById(POI_BRIDGE_ID);
         if (!bridge) return;
 
+        // Determine border colour from marker to send to main plug-in
+        const statusCfg = getMarkerConfigForStatus(poi.status);
+
         const payload = {
             guid: poi.id || "",
             title: poi.title || "(untitled)",
@@ -2941,6 +2944,7 @@
             source: POI_BRIDGE_SOURCE,
             sourceLogo: "WAYFARER",
             sourceText: "Wayfarer Contribution",
+            borderColor: statusCfg && statusCfg.strokeColor ? statusCfg.strokeColor : null
         };
 
         try {
@@ -2949,6 +2953,7 @@
             console.warn("[ContribOverlay] Failed to serialise POI for bridge", e);
         }
     }
+
 
     /**
      * Watch the POI bridge element for selection changes coming from *other* scripts.
