@@ -3,7 +3,7 @@
 // @version      0.1.1
 // @description  Adds a "Report Wayspot" link to the side panel and pre-fills the Helpshift form using POI bridge data
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-report-wayspot.user.js
+// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
 // @match        https://niantic.helpshift.com/hc/en/5-report-an-issue-with-a-pokestop-gym/contact-us/*
