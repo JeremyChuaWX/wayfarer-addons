@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.1.0
+// @version      2.1.1
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -6104,12 +6104,11 @@
         pointer-events: none !important;
     }
 
-    /* Hide marker overlay canvases (canvas-based markers) */
-.gm-style div[style*="z-index: 103"] div[style*="z-index: -1"] canvas {
-    display: none !important;
-    visibility: hidden !important;
-    opacity: 0 !important;
-}
+     .gm-style div[style*="z-index: 103"]
+            div[style*="z-index: -1"]
+            div:is([style*="z-index: 98"], [style*="z-index: 99"]) canvas {
+        display: none !important;
+    }
 
     /* -------------------------
        Sidebar Icon & Link
