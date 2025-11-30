@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Wayfarer Map - Map Tiles
+// @name         Wayfarer Map Mods - Map Tiles
 // @version      0.0.3
 // @description  Adds extra base map providers (Bing, Esri, OSM, etc.) to the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
@@ -85,7 +85,7 @@
     let lastPanelPresent = false;
 
     function handlePanelChange() {
-        const panelPresent = !!document.querySelector("#wfsmm-side-panel");
+        const panelPresent = !!document.querySelector("#wfmapmods-side-panel");
 
         if (panelPresent && !lastPanelPresent) {
             // We just arrived on the map page
@@ -172,16 +172,16 @@
 
     function insertBaseMapSettingsLink() {
         const panelCheck = setInterval(() => {
-            const settingsBody = document.querySelector(".wfsmm-settings-links");
+            const settingsBody = document.querySelector(".wfmapmods-settings-links");
             if (!settingsBody) return; // retry
 
             clearInterval(panelCheck);
 
             // Prevent duplicate link insertion
-            if (document.getElementById("wfsmm-settings-basemaps")) return;
+            if (document.getElementById("wfmapmods-settings-basemaps")) return;
 
             const link = document.createElement("a");
-            link.id = "wfsmm-settings-basemaps";
+            link.id = "wfmapmods-settings-basemaps";
             link.textContent = "Map Tiles";
 
             settingsBody.appendChild(link);
@@ -194,14 +194,14 @@
 
     function openBaseMapSettingsWindow() {
         // Please do not change this function yet. Await instructions.
-        if (document.getElementById("wfsmm-basemap-modal-backdrop")) return;
+        if (document.getElementById("wfmapmods-basemap-modal-backdrop")) return;
 
         const mapSettings = userSettings.map || {};
         const providers = mapSettings.providers || {};
 
         // --- Backdrop ---
         const backdrop = document.createElement("div");
-        backdrop.id = "wfsmm-basemap-modal-backdrop";
+        backdrop.id = "wfmapmods-basemap-modal-backdrop";
         Object.assign(backdrop.style, {
             position: "fixed",
             inset: "0",
@@ -392,7 +392,7 @@
 
             // Re-init base maps with new settings
             if (submitMap) {
-                submitMap._wfsmmBasemapsInitialised = false;
+                submitMap._wfmapmodsBasemapsInitialised = false;
                 initCustomBaseMaps();
             }
 
@@ -427,8 +427,8 @@
 
     function initCustomBaseMaps() {
         if (!submitMap) return;
-        if (submitMap._wfsmmBasemapsInitialised) return;
-        submitMap._wfsmmBasemapsInitialised = true;
+        if (submitMap._wfmapmodsBasemapsInitialised) return;
+        submitMap._wfmapmodsBasemapsInitialised = true;
 
         // Make sure the structure exists
         if (!userSettings.map) userSettings.map = {};
@@ -505,8 +505,8 @@
 
     function attachLastUsedListener() {
         if (!submitMap) return;
-        if (submitMap._wfsmmLastUsedListenerAttached) return;
-        submitMap._wfsmmLastUsedListenerAttached = true;
+        if (submitMap._wfmapmodsLastUsedListenerAttached) return;
+        submitMap._wfmapmodsLastUsedListenerAttached = true;
 
         if (google.maps && google.maps.event) {
             google.maps.event.addListener(submitMap, "maptypeid_changed", () => {
