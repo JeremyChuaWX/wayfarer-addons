@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         Wayfarer Map - Report Wayspots
-// @version      0.1.0
+// @name         Wayfarer Map Mods - Report Wayspots
+// @version      0.1.1
 // @description  Adds a "Report Wayspot" link to the side panel and pre-fills the Helpshift form using POI bridge data
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-report-wayspot.user.js
@@ -101,10 +101,10 @@
     }
 
     function insertReportWayspotLinkIfReady() {
-        const reportLinkBody = document.querySelector('.wfsmm-poi-function-links');
+        const reportLinkBody = document.querySelector('.wfmapmods-poi-function-links');
         if (!reportLinkBody) return;
 
-        const linkId = 'wfsmm-settings-report-wayspot';
+        const linkId = 'wfmapmods-settings-report-wayspot';
         let link = document.getElementById(linkId);
 
         // If link already exists, nothing more to do here
@@ -129,7 +129,7 @@
     }
 
     function updateReportWayspotLinkVisibility() {
-        const link = document.getElementById('wfsmm-settings-report-wayspot');
+        const link = document.getElementById('wfmapmods-settings-report-wayspot');
         if (!link) return;
 
         const status = getCurrentWayspotStatus();
@@ -139,7 +139,7 @@
     }
 
     function getCurrentWayspotStatus() {
-        const bridge = document.getElementById('wfsmm-poi-bridge');
+        const bridge = document.getElementById('wfmapmods-poi-bridge');
         if (!bridge) return null;
 
         const payloadAttr = bridge.getAttribute('data-payload');
@@ -160,7 +160,7 @@
     }
 
     function startPoiBridgeWatcherIfReady() {
-        const bridge = document.getElementById('wfsmm-poi-bridge');
+        const bridge = document.getElementById('wfmapmods-poi-bridge');
         if (!bridge) return;
 
         // Avoid multiple observers on the same element
@@ -187,13 +187,13 @@
 
 
     function insertReportingSettingsLinkIfReady() {
-        const settingsBody = document.querySelector(".wfsmm-settings-links");
+        const settingsBody = document.querySelector(".wfmapmods-settings-links");
         if (!settingsBody) return;
 
-        if (document.getElementById("wfsmm-settings-reporting")) return;
+        if (document.getElementById("wfmapmods-settings-reporting")) return;
 
         const link = document.createElement("a");
-        link.id = "wfsmm-settings-reporting";
+        link.id = "wfmapmods-settings-reporting";
         link.textContent = "Reporting";
         link.style.cursor = "pointer";
 
@@ -206,7 +206,7 @@
     }
 
     function openReportingSettingsWindow() {
-        if (document.getElementById("wfsmm-reporting-modal-backdrop")) return;
+        if (document.getElementById("wfmapmods-reporting-modal-backdrop")) return;
 
         // Ensure global settings are loaded into userSettings
         loadSettings();
@@ -218,7 +218,7 @@
 
         // --- Backdrop ---
         const backdrop = document.createElement("div");
-        backdrop.id = "wfsmm-reporting-modal-backdrop";
+        backdrop.id = "wfmapmods-reporting-modal-backdrop";
         Object.assign(backdrop.style, {
             position: "fixed",
             inset: "0",
@@ -742,10 +742,10 @@
         let postcode = null;
         let status = null;
 
-        const bridge = document.getElementById('wfsmm-poi-bridge');
+        const bridge = document.getElementById('wfmapmods-poi-bridge');
 
         if (!bridge) {
-            console.warn('[Report Wayspot] POI bridge element #wfsmm-poi-bridge not found.');
+            console.warn('[Report Wayspot] POI bridge element #wfmapmods-poi-bridge not found.');
         } else {
             // The other plugin stores a JSON payload in data-payload
             let payloadAttr = bridge.getAttribute('data-payload');
@@ -784,7 +784,7 @@
                     console.warn('[Report Wayspot] Failed to parse data-payload JSON:', err);
                 }
             } else {
-                console.warn('[Report Wayspot] #wfsmm-poi-bridge has no data-payload attribute.');
+                console.warn('[Report Wayspot] #wfmapmods-poi-bridge has no data-payload attribute.');
             }
         }
 
