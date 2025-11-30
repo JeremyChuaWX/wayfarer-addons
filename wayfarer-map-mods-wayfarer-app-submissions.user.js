@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Wayfarer App Submissions
-// @version      0.1.0
+// @version      0.1.1
 // @description  Import Wayfarer App submissions from Lightship Geospatial Browser and show them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-wayfarer-app-submissions.user.js
@@ -31,11 +31,6 @@
 
     // postMessage channel
     const POSTMESSAGE_TYPE_IMPORT = "wfmap-wayfarerapp-import";
-
-    // ---- Resubmit distance limit ----
-    const MAX_RESUBMIT_DISTANCE_KM = 10;
-
-    let submitterLocation = null; // { lat, lng } captured once from initial map center
 
     // -----------------------------
     // Branch based on hostname
@@ -240,46 +235,6 @@
 
         let lastPanelPresent = false;
 
-        // -----------------------------
-        // Resubmit function
-        // -----------------------------
-
-        function distanceKmBetween(lat1, lng1, lat2, lng2) {
-            const toRad = (deg) => deg * Math.PI / 180;
-
-            const R = 6371; // km
-            const φ1 = toRad(lat1);
-            const φ2 = toRad(lat2);
-            const Δφ = toRad(lat2 - lat1);
-            const Δλ = toRad(lng2 - lng1);
-
-            const a =
-                  Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-                  Math.cos(φ1) * Math.cos(φ2) *
-                  Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            return R * c; // km
-        }
-
-        function getSubmitterLocation() {
-            // Read from location bridge provided by base plug-in
-            const bridge = document.getElementById("wfmapmods-submit-location-bridge");
-
-            if (!submitterLocation && bridge) {
-                const latAttr = bridge.getAttribute("data-lat");
-                const lngAttr = bridge.getAttribute("data-lng");
-
-                const lat = latAttr ? parseFloat(latAttr) : NaN;
-                const lng = lngAttr ? parseFloat(lngAttr) : NaN;
-
-                if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
-                    submitterLocation = { lat, lng };
-                    return;
-                }
-            }
-        }
-
         function hideSubmissionActionLinks() {
             const container = document.querySelector(".wfmapmods-poi-function-links");
             if (!container) return;
@@ -311,11 +266,6 @@
                     const rid = resubmitLink.dataset.id;
                     if (!rid) return;
 
-                    // Extra safety: if marked disabled by distance, do nothing
-                    if (resubmitLink.dataset.disabled === "distance") {
-                        return;
-                    }
-
                     let poiForResubmit = null;
                     if (Array.isArray(appSubmissions)) {
                         poiForResubmit = appSubmissions.find(p => p.recordId === rid) || null;
@@ -323,7 +273,28 @@
                     if (!poiForResubmit) poiForResubmit = poi;
                     if (!poiForResubmit) return;
 
-                    // Your existing resubmit behaviour (centre map, prefill text, auto-API, etc.)
+                    // Centre the map on this POI and simulate a click
+                    // This is to move the marker location to the resubmitted poi
+                    if (
+                        submitMap &&
+                        typeof poiForResubmit.lat === "number" &&
+                        typeof poiForResubmit.lng === "number"
+                    ) {
+                        const targetLatLng = new google.maps.LatLng(
+                            poiForResubmit.lat,
+                            poiForResubmit.lng
+                        );
+
+                        // centre map
+                        submitMap.setCenter(targetLatLng);
+
+                        // simulate a click on that location
+                        // (this will trigger any map 'click' listeners used by the base plugin)
+                        google.maps.event.trigger(submitMap, "click", {
+                            latLng: targetLatLng
+                        });
+                    }
+
                     sendResubmitToBase(poiForResubmit);
                 });
             }
@@ -335,63 +306,13 @@
             // Show Resubmit only for REJECTED
             if (status === "REJECTED") {
                 resubmitLink.style.display = "inline-block";
-                applyResubmitDistanceRule(poi, resubmitLink);
+                resubmitLink.style.cursor = "pointer";
+                resubmitLink.style.opacity = "1";
+                resubmitLink.style.color = "";
+                resubmitLink.title = "Resubmit this nomination";
             } else {
                 resubmitLink.style.display = "none";
-                resubmitLink.dataset.disabled = "";
                 resubmitLink.title = "";
-            }
-        }
-
-        function applyResubmitDistanceRule(poi, linkEl) {
-            if (!linkEl) return;
-
-            // Default: allowed
-            let isAllowed = true;
-            let distanceKm = null;
-
-            if (typeof poi.lat === "number" && typeof poi.lng === "number") {
-                if (!submitterLocation) {
-                    getSubmitterLocation();
-                }
-                if (submitterLocation) {
-                    distanceKm = distanceKmBetween(
-                        submitterLocation.lat,
-                        submitterLocation.lng,
-                        poi.lat,
-                        poi.lng
-                    );
-
-                    if (distanceKm > MAX_RESUBMIT_DISTANCE_KM) {
-                        isAllowed = false;
-                    }
-                }
-            }
-
-            if (!isAllowed && distanceKm !== null) {
-                linkEl.dataset.disabled = "distance";
-
-                linkEl.onclick = (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    return false;
-                };
-
-                linkEl.style.cursor = "not-allowed";
-                linkEl.style.opacity = "0.5";
-                linkEl.style.color = "#9ca3af";
-
-                linkEl.title =
-                    `Resubmission disabled: This Wayspot is ${distanceKm.toFixed(1)} km ` +
-                    `from your initial location (max ${MAX_RESUBMIT_DISTANCE_KM} km).`;
-            } else {
-                // Enabled
-                linkEl.dataset.disabled = "";
-                linkEl.style.pointerEvents = "auto";
-                linkEl.style.cursor = "pointer";
-                linkEl.style.opacity = "1";
-                linkEl.style.color = ""; // use default CSS
-                linkEl.title = "Resubmit this nomination";
             }
         }
 
@@ -618,7 +539,6 @@
                     });
 
                     if (foundMap) {
-                        getSubmitterLocation();
                         resolve(foundMap);
                         return;
                     }
