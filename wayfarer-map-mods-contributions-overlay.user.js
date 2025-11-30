@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Contributions Overlay
-// @version      1.0.1
+// @version      1.0.2
 // @description  Loads nominations from the Contributions list and shows them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-contributions-overlay.user.js
@@ -16,15 +16,19 @@
     // Constants (config & IDs)
     // -----------------------------
 
+    // Storage / settings
     const SETTINGS_KEY = "wfmap_contributions_settings";
     const OBJECT_STORE_NAME = "contributions";
 
+    // Bridge IDs
     const POI_BRIDGE_ID = "wfmapmods-poi-bridge";
     const POI_BRIDGE_SOURCE = "wf-contrib-overlay";
     const SUBMISSION_BRIDGE_ID = "wfmapmods-submit-bridge";
 
+    // Behaviour / performance
     const PERFORMANCE_MAX_VISIBLE_MARKERS = 400;
 
+    // Status mapping for manage actions
     const MANAGE_ACTION_STATUS = {
         releasehold: "NOMINATED",
         hold: "HELD",
@@ -32,18 +36,28 @@
         appeal: "APPEALED",
     };
 
+
+    // -----------------------------
+    // Global state – data & flags
+    // -----------------------------
+
+    // Nominations data / rules
     let nominations = null;
     let globalCanAppeal = null;
 
+    // Map instance & attachment status
     let submitMap = null;
     let mapAttached = false;
 
+    // Marker objects keyed by nominationId
     let nominationMarkers = {};
 
+    // Selection tracking
     let lastSelectedNominationId = null;
     let lastSelectedNomMarker = null;
     let lastSelectedNomOriginalIcon = null;
 
+    // UI / DOM state flags
     let lastPanelPresent = false;
 
     // -----------------------------
@@ -163,6 +177,10 @@
         }
     };
 
+    // -----------------------------
+    // Saving and Loading User Settings
+    // -----------------------------
+
     function mergeDeep(target, source) {
         for (const key in source) {
             const srcVal = source[key];
@@ -203,7 +221,7 @@
     }
 
     // -----------------------------
-    // Indexed DB
+    // Indexed DB - Nomination Storage
     // -----------------------------
 
     // Opens an IDB database connection for wayfarer-tools-db.
@@ -301,139 +319,6 @@
         }).catch(err => {
             console.warn("[ContribOverlay] IndexedDB not available (save):", err);
         });
-    }
-
-    // -----------------------------
-    // Network / API integration (manage endpoint)
-    // -----------------------------
-
-    /**
-     * Overwrite the open method of the XMLHttpRequest.prototype to intercept the server calls
-     */
-    (function (open, send, setRequestHeader) {
-        XMLHttpRequest.prototype.open = function(method, url) {
-            const cleanUrl = typeof url === "string" ? url.split("?")[0] : url;
-
-            // Existing GET nominations hook
-            if (method === "GET" && cleanUrl === "/api/v1/vault/manage") {
-                this.addEventListener("load", parseNominationsFromResponse, false);
-            }
-
-            // Your explicit actions mapping version (from earlier):
-            const ACTIONS = {
-                "/api/v1/vault/manage/hold":        "HELD",
-                "/api/v1/vault/manage/releasehold": "NOMINATED",
-                "/api/v1/vault/manage/withdraw":    "WITHDRAWN",
-                "/api/v1/vault/manage/appeal":      "APPEALED",
-            };
-
-            if (method === "POST" && ACTIONS[cleanUrl]) {
-                this._wfmapmodsNewStatus = ACTIONS[cleanUrl];
-
-                this.addEventListener("load", function () {
-                    try {
-                        const response = this.responseText || this.response;
-                        const json = response ? JSON.parse(response) : null;
-                        if (!json || json.captcha) return;
-                        if (json.result !== "DONE") return;
-
-                        const id = this._wfmapmodsId;
-                        if (!id) return;
-
-                        updateSingleNominationStatus(id, this._wfmapmodsNewStatus);
-
-                    } catch (err) {
-                        console.warn("[ContribOverlay] Error handling manage action:", err);
-                    }
-                }, false);
-            }
-
-            return open.apply(this, arguments);
-        };
-
-        XMLHttpRequest.prototype.send = function (body) {
-            if (this._wfmapmodsNewStatus && body) {
-                try {
-                    if (typeof body === "string") {
-                        const parsed = JSON.parse(body);
-                        const payload = Array.isArray(parsed) ? parsed[0] : parsed;
-                        if (payload && payload.id) {
-                            this._wfmapmodsId = payload.id;
-                        }
-                    }
-                } catch (err) {
-                    console.warn("[ContribOverlay] Failed to parse manage action payload:", err);
-                }
-            }
-
-            return send.apply(this, arguments);
-        };
-
-    })(XMLHttpRequest.prototype.open,
-       XMLHttpRequest.prototype.send,
-       XMLHttpRequest.prototype.setRequestHeader);
-
-    function fetchLatestNominations() {
-        fetch("/api/v1/vault/manage", {
-            method: "GET",
-            credentials: "include"
-        })
-            .then(res => {
-            if (!res.ok) {
-                throw new Error(`HTTP ${res.status}`);
-            }
-            return res.json();
-        })
-            .then(json => {
-            handleNominationsJson(json);
-        })
-            .catch(err => {
-            console.warn("[ContribOverlay] Failed to fetch latest nominations:", err);
-        });
-    }
-
-    function parseNominationsFromResponse() {
-        try {
-            const response = this.responseText || this.response;
-            const json = JSON.parse(response);
-            handleNominationsJson(json);
-        } catch (e) {
-            console.log('[ContribOverlay] Error parsing nominations:', e);
-        }
-    }
-
-    function handleNominationsJson(json) {
-        if (!json) {
-            console.log('[ContribOverlay] No JSON payload for nominations');
-            return;
-        }
-
-        // ignore if it's related to captchas
-        if (json.captcha) return;
-
-        const result = json.result || {};
-        const submissions = result.submissions;
-        if (!submissions) {
-            console.log('[ContribOverlay] Wayfarer response did not include submissions.');
-            return;
-        }
-
-        // (1) GLOBAL appeals availability
-        globalCanAppeal = typeof result.canAppeal === "boolean"
-            ? result.canAppeal
-        : null;
-
-        nominations = submissions;
-        saveNominationsToIDB(submissions);
-        refreshNominationMarkers();
-
-        // (2) If a nomination is currently selected, refresh its action links
-        if (lastSelectedNominationId && Array.isArray(nominations)) {
-            const selected = nominations.find(n => n.id === lastSelectedNominationId);
-            if (selected) {
-                updateNominationActionLinks(selected);
-            }
-        }
     }
 
     function updateSingleNominationStatus(id, newStatus) {
@@ -544,15 +429,177 @@
         });
     }
 
+    // -----------------------------
+    // Network & Wayfarer API Integration
+    // -----------------------------
+
+    /**
+     * Monkey-patch XMLHttpRequest to:
+     *  - watch GET /api/v1/vault/manage responses and update local nominations
+     *  - watch POST /api/v1/vault/manage/* actions and update local status
+     */
+    (function (open, send, setRequestHeader) {
+        XMLHttpRequest.prototype.open = function (method, url) {
+            const cleanUrl = typeof url === "string" ? url.split("?")[0] : url;
+
+            // Attach handler for responses listing nominations
+            if (method === "GET" && cleanUrl === "/api/v1/vault/manage") {
+                this.addEventListener("load", parseNominationsFromResponse, false);
+            }
+
+            // Map manage endpoints to their resulting nomination status
+            const ACTIONS = {
+                "/api/v1/vault/manage/hold":        "HELD",
+                "/api/v1/vault/manage/releasehold": "NOMINATED",
+                "/api/v1/vault/manage/withdraw":    "WITHDRAWN",
+                "/api/v1/vault/manage/appeal":      "APPEALED",
+            };
+
+            // Track successful POSTs to manage endpoints so we can update local state
+            if (method === "POST" && ACTIONS[cleanUrl]) {
+                this._wfmapmodsNewStatus = ACTIONS[cleanUrl];
+
+                this.addEventListener("load", function () {
+                    try {
+                        const response = this.responseText || this.response;
+                        const json = response ? JSON.parse(response) : null;
+                        if (!json || json.captcha) return;
+                        if (json.result !== "DONE") return;
+
+                        const id = this._wfmapmodsId;
+                        if (!id) return;
+
+                        updateSingleNominationStatus(id, this._wfmapmodsNewStatus);
+
+                    } catch (err) {
+                        console.warn("[ContribOverlay] Error handling manage action:", err);
+                    }
+                }, false);
+            }
+
+            return open.apply(this, arguments);
+        };
+
+        XMLHttpRequest.prototype.send = function (body) {
+            // Extract the nomination id from the POST body so we can match it on success
+            if (this._wfmapmodsNewStatus && body) {
+                try {
+                    if (typeof body === "string") {
+                        const parsed = JSON.parse(body);
+                        const payload = Array.isArray(parsed) ? parsed[0] : parsed;
+                        if (payload && payload.id) {
+                            this._wfmapmodsId = payload.id;
+                        }
+                    }
+                } catch (err) {
+                    console.warn("[ContribOverlay] Failed to parse manage action payload:", err);
+                }
+            }
+
+            return send.apply(this, arguments);
+        };
+
+    })(XMLHttpRequest.prototype.open,
+       XMLHttpRequest.prototype.send,
+       XMLHttpRequest.prototype.setRequestHeader);
+
+    /**
+     * Fetch the latest nominations list directly from the Wayfarer API
+     * and push the result into local state / markers.
+     */
+    function fetchLatestNominations() {
+        fetch("/api/v1/vault/manage", {
+            method: "GET",
+            credentials: "include"
+        })
+            .then(res => {
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+            return res.json();
+        })
+            .then(json => {
+            handleNominationsJson(json);
+        })
+            .catch(err => {
+            console.warn("[ContribOverlay] Failed to fetch latest nominations:", err);
+        });
+    }
+
+    /**
+     * XHR 'load' handler used by the monkey-patch above.
+     * Parses the nominations JSON from the response and delegates to handleNominationsJson.
+     */
+    function parseNominationsFromResponse() {
+        try {
+            const response = this.responseText || this.response;
+            const json = JSON.parse(response);
+            handleNominationsJson(json);
+        } catch (e) {
+            console.log("[ContribOverlay] Error parsing nominations:", e);
+        }
+    }
+
+    /**
+     * Take a nominations payload from the Wayfarer API and:
+     *  - update global appeals availability
+     *  - cache nominations
+     *  - refresh map markers
+     *  - refresh action links if a nomination is currently selected
+     */
+    function handleNominationsJson(json) {
+        if (!json) {
+            console.log("[ContribOverlay] No JSON payload for nominations");
+            return;
+        }
+
+        // Ignore responses that are only for captchas
+        if (json.captcha) return;
+
+        const result = json.result || {};
+        const submissions = result.submissions;
+        if (!submissions) {
+            console.log("[ContribOverlay] Wayfarer response did not include submissions.");
+            return;
+        }
+
+        // Global flag indicating whether appeals are currently allowed
+        globalCanAppeal = typeof result.canAppeal === "boolean"
+            ? result.canAppeal
+        : null;
+
+        nominations = submissions;
+        saveNominationsToIDB(submissions);
+        refreshNominationMarkers();
+
+        // If a nomination is currently selected, refresh its action links
+        if (lastSelectedNominationId && Array.isArray(nominations)) {
+            const selected = nominations.find(n => n.id === lastSelectedNominationId);
+            if (selected) {
+                updateNominationActionLinks(selected);
+            }
+        }
+    }
+
+    /**
+     * Returns the value of a cookie by name, or null if not present.
+     */
     function getCookie(name) {
         const match = document.cookie.match(new RegExp("(^|; )" + name + "=([^;]*)"));
         return match ? decodeURIComponent(match[2]) : null;
     }
 
+    /**
+     * Returns the CSRF token expected by the Wayfarer API, or an empty string.
+     */
     function getCsrfToken() {
         return getCookie("XSRF-TOKEN") || "";
     }
 
+    /**
+     * Trigger a manage action (hold, releasehold, withdraw, appeal) for a nomination.
+     * The XHR monkey-patch will listen to the response and update local state if successful.
+     */
     function sendManageActionForNomination(action, nominationId) {
         if (!action || !nominationId) return;
 
@@ -570,6 +617,10 @@
         xhr.send(JSON.stringify({ id: nominationId }));
     }
 
+    /**
+     * Send an edit for a nomination (title/description/supporting text).
+     * On success, updates the local nomination data and invokes onDone().
+     */
     function sendEditSubmission(nominationId, updates, onDone) {
         if (!nominationId || !updates) return;
 
@@ -625,6 +676,10 @@
         xhr.send(JSON.stringify(payload));
     }
 
+    /**
+     * Send an appeal for a nomination.
+     * On success, refetches the nominations to refresh appeal state and invokes onDone().
+     */
     function sendAppeal(nominationId, statement, onDone) {
         if (!nominationId || !statement) return;
 
@@ -663,7 +718,7 @@
                 return;
             }
 
-            // Check if we still have appeals left...
+            // After a successful appeal, refetch nominations to get updated appeal availability
             globalCanAppeal = null;
             fetchLatestNominations();
 
@@ -683,8 +738,13 @@
     // Map lifecycle + DOM watchers
     // -----------------------------
 
+    /**
+     * Start watching the DOM for the Wayfarer map side panel.
+     * This handles SPA-style navigation where the map panel appears/disappears
+     * without a full page reload.
+     */
     function startMapPanelWatcher() {
-        // Run once at start in case the panel is already there
+        // Handle the current state in case the panel is already present
         handlePanelChange();
 
         const mo = new MutationObserver(handlePanelChange);
@@ -694,31 +754,41 @@
         });
     }
 
+    /**
+     * Detect when the map side panel is added or removed and
+     * attach/teardown the contribution overlay accordingly.
+     */
     function handlePanelChange() {
         const panelPresent = !!document.querySelector("#wfmapmods-side-panel");
 
         if (panelPresent && !lastPanelPresent) {
-            // We just arrived on the map page
+            // Transitioned onto the map page
             attachContribOverlayToMapIfNeeded();
             insertSettingsLink();
             insertLayersToggle();
 
-            // Update contributions list in the background
+            // Refresh the contributions list in the background
             fetchLatestNominations();
         } else if (!panelPresent && lastPanelPresent) {
-            // We just left the map page
+            // Transitioned away from the map page
             teardownContribOverlayForMap();
         }
 
         lastPanelPresent = panelPresent;
     }
 
+    /**
+     * Locate the underlying submit map instance used by the Wayfarer UI.
+     *
+     * Returns a Promise that resolves to the map object or null if not found.
+     * Retries a fixed number of times as the Angular app bootstraps.
+     */
     function getSubmitMap() {
         return new Promise(resolve => {
             let attempts = 40;
 
             function tryFindMap() {
-                const candidates = document.querySelectorAll('app-submit-wayspot-map nia-map');
+                const candidates = document.querySelectorAll("app-submit-wayspot-map nia-map");
                 let foundMap = null;
 
                 candidates.forEach(el => {
@@ -735,7 +805,7 @@
                                 break;
                             }
                         } catch {
-                            /* ignore invalid entries */
+                            // Ignore malformed context entries
                         }
                     }
                 });
@@ -758,24 +828,10 @@
         });
     }
 
-    function teardownContribOverlayForMap() {
-        if (!mapAttached) return;
-
-        clearNominationMarkers();
-        submitMap = null;
-        mapAttached = false;
-    }
-
-    function clearNominationMarkers() {
-        if (!nominationMarkers) return;
-        Object.values(nominationMarkers).forEach(m => {
-            if (m && typeof m.setMap === "function") {
-                m.setMap(null);
-            }
-        });
-        nominationMarkers = {};
-    }
-
+    /**
+     * Ensure the contribution overlay is attached to the submit map.
+     * If already attached, simply refreshes the markers.
+     */
     async function attachContribOverlayToMapIfNeeded() {
         if (mapAttached) {
             refreshNominationMarkers();
@@ -792,20 +848,48 @@
         submitMap = map;
         mapAttached = true;
 
-        // Attach a listener so markers update when user pans/zooms.
+        // Update markers whenever the user pans or zooms the map
         if (!submitMap._contribOverlayBoundsListenerAdded) {
             submitMap.addListener("idle", refreshNominationMarkers);
             submitMap._contribOverlayBoundsListenerAdded = true;
         }
 
-        // Draw whatever nominations we already have (if any)
+        // Draw any nominations we already have cached
         refreshNominationMarkers();
+    }
+
+    /**
+     * Remove the contribution overlay from the current map and clear markers.
+     */
+    function teardownContribOverlayForMap() {
+        if (!mapAttached) return;
+
+        clearNominationMarkers();
+        submitMap = null;
+        mapAttached = false;
+    }
+
+    /**
+     * Remove all nomination markers from the map and reset the marker cache.
+     */
+    function clearNominationMarkers() {
+        if (!nominationMarkers) return;
+        Object.values(nominationMarkers).forEach(m => {
+            if (m && typeof m.setMap === "function") {
+                m.setMap(null);
+            }
+        });
+        nominationMarkers = {};
     }
 
     // -----------------------------
     // Marker creation, selection & visibility
     // -----------------------------
 
+    /**
+     * Return marker configuration for a given nomination status.
+     * Falls back to DEFAULT config or a built-in grey style if not defined.
+     */
     function getMarkerConfigForStatus(statusRaw) {
         const status = String(statusRaw || "").toUpperCase();
         const markersCfg = (userSettings.markers && userSettings.markers.statuses) || {};
@@ -822,6 +906,10 @@
         return markersCfg[status] || fallback;
     }
 
+    /**
+     * Create a Google Maps marker for a nomination POI.
+     * The marker is initially detached from the map; caller decides when to display it.
+     */
     function createNominationMarker(poi) {
         const lat = poi.lat;
         const lng = poi.lng;
@@ -851,9 +939,13 @@
             sendPoiToBridge(poi);
             updateNominationActionLinks(poi);
         });
+
         return marker;
     }
 
+    /**
+     * Clear the current nomination selection and restore the previous marker styling.
+     */
     function clearNominationSelection() {
         hideNominationActionLinks();
 
@@ -865,8 +957,12 @@
         lastSelectedNominationId = null;
     }
 
+    /**
+     * Mark a nomination marker as selected by visually highlighting it
+     * and remembering the original icon so it can be restored later.
+     */
     function selectNominationMarker(marker) {
-        // Remove highlight from previous selected nomination marker
+        // Remove highlight from any previously selected marker
         clearNominationSelection();
 
         if (!marker || !marker.getIcon) return;
@@ -874,7 +970,7 @@
         const icon = marker.getIcon();
         if (!icon) return;
 
-        // Remember original so we can restore later
+        // Remember original icon so we can restore it on deselect
         lastSelectedNomOriginalIcon = { ...icon };
         lastSelectedNomMarker = marker;
 
@@ -890,6 +986,14 @@
         marker.setIcon(selectedIcon);
     }
 
+    /**
+     * Filter candidate nomination ids by excluding specific statuses.
+     *
+     * @param {string[]} candidateIds           All candidate ids to consider.
+     * @param {Object}   candidatePoisById      Map id -> POI object.
+     * @param {Set}      excludedStatuses       Set of UPPERCASE statuses to exclude.
+     * @returns {string[]}                      Filtered list of ids.
+     */
     function filterCandidateIdsByStatus(candidateIds, candidatePoisById, excludedStatuses) {
         const result = [];
         candidateIds.forEach(id => {
@@ -902,19 +1006,26 @@
         return result;
     }
 
-    // Bounds-based, marker-reuse, with enabled-flag support
+    /**
+     * Refresh contribution markers on the map based on:
+     *  - current map bounds
+     *  - per-status "enabled" flags
+     *  - performance mode limit (max visible markers)
+     *
+     * Reuses existing markers where possible, and hides markers that leave bounds
+     * or become ineligible.
+     */
     function refreshNominationMarkers() {
         if (!submitMap || !nominations || !Array.isArray(nominations)) {
             return;
         }
 
-        // Load settings
+        // Load map-related settings
         const mapCfg = userSettings.map;
         const contributionsEnabled = mapCfg.contributionsEnabled;
         const performanceModeEnabled = mapCfg.performanceModeEnabled;
 
-
-        // If master is OFF, remove all of the Contribution markers.
+        // If master toggle is OFF, remove all contribution markers.
         if (contributionsEnabled === false) {
             clearNominationMarkers();
             return;
@@ -930,7 +1041,7 @@
         ? mapCfg.performanceMaxVisibleMarkers
         : PERFORMANCE_MAX_VISIBLE_MARKERS;
 
-        // First pass: find all nominations that *would* be visible
+        // First pass: collect nominations that *could* be visible,
         // respecting status "enabled" flags and map bounds.
         const candidateIds = [];
         const candidatePoisById = {};
@@ -944,7 +1055,7 @@
 
             const statusCfg = getMarkerConfigForStatus(poi.status);
             if (statusCfg.enabled === false) {
-                // Don't show markers for this status at all
+                // This status is disabled in settings
                 return;
             }
 
@@ -961,28 +1072,28 @@
         let finalCandidateIds = candidateIds;
 
         if (performanceModeEnabled && candidateIds.length > maxVisibleMarkers) {
-            // 1) Try removing ACCEPTED only
+            // Step 1: Prefer hiding ACCEPTED only
             const excludeAccepted = new Set(["ACCEPTED"]);
             const withoutAccepted = filterCandidateIdsByStatus(candidateIds, candidatePoisById, excludeAccepted);
 
             if (withoutAccepted.length <= maxVisibleMarkers) {
                 finalCandidateIds = withoutAccepted;
             } else {
-                // 2) Try removing ACCEPTED + REJECTED + DUPLICATE + WITHDRAWN
+                // Step 2: Hide ACCEPTED + REJECTED + DUPLICATE + WITHDRAWN
                 const excludeAcceptedRejectedDup = new Set(["ACCEPTED", "REJECTED", "DUPLICATE", "WITHDRAWN"]);
                 const withoutAcceptedRejectedDup = filterCandidateIdsByStatus(candidateIds, candidatePoisById, excludeAcceptedRejectedDup);
 
                 if (withoutAcceptedRejectedDup.length <= maxVisibleMarkers) {
                     finalCandidateIds = withoutAcceptedRejectedDup;
                 } else {
-                    // 3) Still too many → hide everything
+                    // Step 3: Still too many → hide all contribution markers
                     clearNominationMarkers();
                     return;
                 }
             }
         }
 
-        // Second pass: actually create/show markers for the chosen candidate set
+        // Second pass: create/update markers for the final candidate set
         const inBoundsIds = new Set(finalCandidateIds);
 
         finalCandidateIds.forEach(id => {
@@ -992,7 +1103,7 @@
             let marker = nominationMarkers[id];
             const cfg = getMarkerConfigForStatus(poi.status);
 
-            // Base icon from current status
+            // Base icon based on current status
             const baseIcon = {
                 path: google.maps.SymbolPath.CIRCLE,
                 fillColor: cfg.fillColor,
@@ -1004,7 +1115,7 @@
             };
 
             if (!marker) {
-                // New marker
+                // Create new marker
                 marker = new google.maps.Marker({
                     map: null, // attach later when in-bounds
                     position: { lat: poi.lat, lng: poi.lng },
@@ -1020,11 +1131,10 @@
                 });
 
                 nominationMarkers[id] = marker;
-            }
-            else {
-                // Existing marker: update its icon to match new status
+            } else {
+                // Existing marker: update its icon to match the new status
                 if (marker === lastSelectedNomMarker) {
-                    // Update selected marker styling based on new base icon
+                    // Keep the selected styling but base it on the updated icon
                     lastSelectedNomOriginalIcon = { ...baseIcon };
                     const selectedIcon = {
                         ...baseIcon,
@@ -1044,7 +1154,7 @@
             }
         });
 
-        // Hide markers that are no longer in bounds or no longer eligible
+        // Hide markers that are no longer in bounds or no longer part of the candidate set
         Object.entries(nominationMarkers).forEach(([id, marker]) => {
             if (!marker) return;
             if (!inBoundsIds.has(id) && marker.getMap()) {
@@ -1057,6 +1167,10 @@
     // Sidebar actions & contribution editing
     // -----------------------------
 
+    /**
+     * Hide all nomination action links in the sidebar.
+     * Safe to call even if the container hasn't been rendered yet.
+     */
     function hideNominationActionLinks() {
         const container = document.querySelector(".wfmapmods-poi-function-links");
         if (!container) return;
@@ -1075,6 +1189,13 @@
         });
     }
 
+    /**
+     * Update the sidebar action links (Hold / Release / Withdraw / Edit / Appeal / Resubmit)
+     * based on the currently selected POI and its status.
+     *
+     * Creates the links once if they do not exist yet, then toggles their visibility
+     * and wiring according to the nomination state.
+     */
     function updateNominationActionLinks(poi) {
         if (!poi || poi.type !== "NOMINATION") {
             hideNominationActionLinks();
@@ -1088,6 +1209,7 @@
         const id = poi.id;
         if (!id) return;
 
+        // ---- Edit link ----
         let editLink = container.querySelector("#wfmapmods-function-edit-submission");
         if (!editLink) {
             editLink = document.createElement("a");
@@ -1116,7 +1238,7 @@
             container.appendChild(editLink);
         }
 
-        // Ensure links exist (create once, reuse)
+        // ---- Hold link ----
         let holdLink = container.querySelector("#wfmapmods-function-hold");
         if (!holdLink) {
             holdLink = document.createElement("a");
@@ -1132,6 +1254,7 @@
             container.appendChild(holdLink);
         }
 
+        // ---- Release Hold link ----
         let releaseHoldLink = container.querySelector("#wfmapmods-function-release-hold");
         if (!releaseHoldLink) {
             releaseHoldLink = document.createElement("a");
@@ -1147,6 +1270,7 @@
             container.appendChild(releaseHoldLink);
         }
 
+        // ---- Withdraw link ----
         let withdrawLink = container.querySelector("#wfmapmods-function-withdraw");
         if (!withdrawLink) {
             withdrawLink = document.createElement("a");
@@ -1168,6 +1292,7 @@
             container.appendChild(withdrawLink);
         }
 
+        // ---- Appeal link ----
         let appealLink = container.querySelector("#wfmapmods-function-appeal");
         if (!appealLink) {
             appealLink = document.createElement("a");
@@ -1178,14 +1303,14 @@
             appealLink.addEventListener("click", ev => {
                 ev.preventDefault();
                 if (!globalCanAppeal) {
-                    // Shouldn’t fire because pointerEvents will be none, but double-check
+                    // Shouldn't fire because pointerEvents will be none, but double-check
                     return;
                 }
 
                 const targetId = appealLink.dataset.id;
                 if (!targetId) return;
 
-                // Find full POI object so we have all fields
+                // Find full POI object so we have all fields for the modal
                 let poiForAppeal = null;
                 if (Array.isArray(nominations)) {
                     poiForAppeal = nominations.find(n => n.id === targetId) || null;
@@ -1198,6 +1323,7 @@
             container.appendChild(appealLink);
         }
 
+        // ---- Resubmit link ----
         let resubmitLink = container.querySelector("#wfmapmods-function-resubmit-contrib");
         if (!resubmitLink) {
             resubmitLink = document.createElement("a");
@@ -1214,11 +1340,10 @@
                 if (Array.isArray(nominations)) {
                     poiForResubmit = nominations.find(n => n.id === nid) || null;
                 }
-                if (!poiForResubmit) poiForResubmit = poi; // fallback to current
+                if (!poiForResubmit) poiForResubmit = poi; // fallback to the current POI
                 if (!poiForResubmit) return;
 
-                // Centre the map on this POI and simulate a click
-                // This is to move the marker location to the resubmitted poi
+                // Centre the map on this POI and simulate a click to copy its location
                 if (
                     submitMap &&
                     typeof poiForResubmit.lat === "number" &&
@@ -1229,26 +1354,25 @@
                         poiForResubmit.lng
                     );
 
-                    // centre the map
+                    // Centre the map
                     submitMap.setCenter(targetLatLng);
-                    // optional: tweak zoom if you want
+                    // Optional: tweak zoom if desired
                     // submitMap.setZoom(18);
 
-                    // simulate a map click at that point
+                    // Simulate a map click at that point
                     google.maps.event.trigger(submitMap, "click", {
                         latLng: targetLatLng
                     });
                 }
 
-                // Existing behaviour: send resubmit payload to base script
+                // Notify the base script to prefill the resubmit form
                 sendResubmitToBase(poiForResubmit);
             });
-
 
             container.appendChild(resubmitLink);
         }
 
-        // Show/hide based on current status for hold / withdraw / edit
+        // ---- Show/hide links based on current status (hold / release / withdraw / edit) ----
         if (status === "NOMINATED") {
             // NOMINATED → can Hold, Withdraw, Edit
             holdLink.style.display = "inline-block";
@@ -1269,30 +1393,31 @@
             if (editLink) editLink.style.display = "none";
         }
 
-        if (editLink)       editLink.dataset.id       = id;
-        if (holdLink)       holdLink.dataset.id       = id;
-        if (releaseHoldLink) releaseHoldLink.dataset.id = id;
-        if (withdrawLink)   withdrawLink.dataset.id   = id;
-        if (appealLink)     appealLink.dataset.id     = id;
-        if (resubmitLink)     resubmitLink.dataset.id   = id;
+        // Update data-id on all links to match the current POI
+        if (editLink)         editLink.dataset.id         = id;
+        if (holdLink)         holdLink.dataset.id         = id;
+        if (releaseHoldLink)  releaseHoldLink.dataset.id  = id;
+        if (withdrawLink)     withdrawLink.dataset.id     = id;
+        if (appealLink)       appealLink.dataset.id       = id;
+        if (resubmitLink)     resubmitLink.dataset.id     = id;
 
-        // ---- Appeal logic ----
+        // ---- Appeal logic: link availability and visual state ----
         if (appealLink) {
             const itemCanAppeal = !!poi.canAppeal; // per-submission flag from API
 
             if (!itemCanAppeal) {
-                // (4) This particular POI cannot be appealed at all → hide the link
+                // This particular nomination cannot be appealed at all
                 appealLink.style.display = "none";
                 appealLink.title = "";
                 appealLink.style.pointerEvents = "none";
                 appealLink.style.cursor = "default";
                 appealLink.style.opacity = "0.6";
             } else {
-                // POI is appealable in principle
+                // POI is appealable in principle; enable/disable based on global availability
                 appealLink.style.display = "inline-block";
 
                 if (globalCanAppeal === true) {
-                    // POI can be appealed AND we have appeals available → enabled
+                    // POI can be appealed AND we have appeals available
                     appealLink.style.pointerEvents = "auto";
                     appealLink.style.cursor = "pointer";
                     appealLink.style.opacity = "1";
@@ -1306,7 +1431,7 @@
                     appealLink.style.color = "#9ca3af"; // greyed out
                     appealLink.title = "No appeals available";
                 } else {
-                    // globalCanAppeal === null → we don't know yet, loading state
+                    // globalCanAppeal === null → we don't know yet, still checking
                     appealLink.style.pointerEvents = "none";
                     appealLink.style.cursor = "default";
                     appealLink.style.opacity = "0.6";
@@ -1316,12 +1441,13 @@
             }
         }
 
-        // ---- Resubmit logic: REJECTED / WITHDRAWN / DUPLICATE ----
+        // ---- Resubmit logic: only for REJECTED / WITHDRAWN / DUPLICATE ----
         if (resubmitLink) {
             const canResubmitStatuses = new Set(["REJECTED", "WITHDRAWN", "DUPLICATE"]);
             if (canResubmitStatuses.has(status)) {
                 resubmitLink.style.display = "inline-block";
             } else {
+                // Hide the link and reset styling to a neutral baseline
                 resubmitLink.style.display = "none";
                 resubmitLink.dataset.disabled = "";
                 resubmitLink.title = "";
@@ -1332,6 +1458,10 @@
         }
     }
 
+    /**
+     * Open the "Edit submission" modal for a nomination.
+     * Allows editing title, description, and supporting statement with character counters.
+     */
     function openEditSubmissionModal(poi) {
         if (!poi || !poi.id) return;
 
@@ -1500,7 +1630,7 @@
                 const updates = {
                     title: ctx.titleInput.value.trim(),
                     description: ctx.descInput.value.trim(),
-                    // logical "supporting" key – stored as "statement" in data
+                    // Logical "supporting" key – stored as "statement" in data
                     supporting: ctx.suppInput.value.trim()
                 };
 
@@ -1514,10 +1644,14 @@
         });
     }
 
+    /**
+     * Open the "Appeal rejection" modal for a nomination.
+     * Collects an appeal statement and submits it via the Wayfarer API.
+     */
     function openAppealModal(poi) {
         if (!poi || !poi.id) return;
 
-        const currentStatement = ""; // appeals are fresh text, not the original rejection reason
+        const currentStatement = ""; // Appeals always start as fresh text
 
         openSettingsModal({
             id: "wf-contrib-appeal-submission",
@@ -1579,7 +1713,7 @@
                 }
 
                 textarea.addEventListener("input", updateValidity);
-                updateValidity(); // initial
+                updateValidity(); // Initial state
 
                 return {
                     nominationId: poi.id,
@@ -1595,7 +1729,8 @@
 
                 const statement = ctx.textarea.value.trim();
                 if (!statement) {
-                    return; // should be prevented by disabled OK, but double-check
+                    // Should be prevented by disabled OK, but double-check
+                    return;
                 }
 
                 sendAppeal(id, statement, closeModal);
@@ -1604,9 +1739,14 @@
     }
 
     // -----------------------------
-    // Layers option
+    // Layers Toggle & Marker Visibility Settings
     // -----------------------------
 
+    /**
+     * Insert the "Contributions" layer toggle into the layers menu.
+     * Polls until the layers menu exists, then adds a checkbox that
+     * controls the global contributionsEnabled setting.
+     */
     function insertLayersToggle() {
         const menuCheck = setInterval(() => {
             const menu = document.querySelector(".wfmapmods-layers-menu");
@@ -1614,7 +1754,7 @@
 
             clearInterval(menuCheck);
 
-            // Avoid duplicates
+            // Avoid inserting the toggle more than once
             if (menu.querySelector("#wfmapmods-layer-contributions")) return;
 
             const mapCfg = userSettings.map || (userSettings.map = {});
@@ -1644,21 +1784,25 @@
                 saveSettings();
 
                 if (!enabled) {
-                    // Master off: hide everything & clear selection UI
+                    // Master toggle off: hide markers and clear related UI
                     clearNominationMarkers();
                     clearNominationSelection();
                     hideNominationActionLinks();
                 } else {
-                    // Master on: if all sub-statuses are disabled, re-enable them
+                    // Master toggle on: ensure at least one status is visible…
                     ensureAnyStatusEnabledWhenMasterOn();
-                    // Then re-draw markers based on current zoom/bounds and status settings
+                    // …then re-draw markers based on current zoom/bounds and status settings
                     refreshNominationMarkers();
                 }
             });
         }, 300);
     }
 
-
+    /**
+     * When the master "Contributions" layer is enabled, ensure that at least
+     * one individual status is also enabled. If all statuses are disabled,
+     * this re-enables them so the layer isn't "on but empty".
+     */
     function ensureAnyStatusEnabledWhenMasterOn() {
         const markersCfgRoot = userSettings.markers || {};
         const markersCfg = markersCfgRoot.statuses || {};
@@ -1686,13 +1830,17 @@
     }
 
     // -----------------------------
-    // Settings UI (link + modals)
+    // Marker Style & Contribution Settings UI
     // -----------------------------
 
+    /**
+     * Insert a "Contributions" link into the settings panel.
+     * Clicking it opens the contribution marker settings window.
+     */
     function insertSettingsLink() {
         const panelCheck = setInterval(() => {
             const settingsBody = document.querySelector(".wfmapmods-settings-links");
-            if (!settingsBody) return; // retry
+            if (!settingsBody) return; // retry until the panel exists
 
             clearInterval(panelCheck);
 
@@ -1711,6 +1859,10 @@
         }, 300);
     }
 
+    /**
+     * Open a modal that lets the user customise the visual style
+     * of markers for a specific status (colour, opacity, size, etc.).
+     */
     function openMarkerStyleModal(statusKey, label, cfg, onUpdated) {
         openSettingsModal({
             id: `wf-contrib-marker-style-${statusKey}`,
@@ -1847,6 +1999,7 @@
                     scaleInput
                 } = ctx;
 
+                // Persist new style values back into the cfg object
                 cfg.strokeColor = strokeColorInput.value || cfg.strokeColor || "#6b7280";
                 cfg.strokeOpacity = clamp(strokeOpacityInput.value, 0, 1, cfg.strokeOpacity ?? 1.0);
                 cfg.strokeWeight = clamp(strokeWidthInput.value, 0, 10, cfg.strokeWeight ?? 2);
@@ -1863,11 +2016,18 @@
         });
     }
 
+    /**
+     * Open the main "Contribution marker options" window.
+     * Lets the user:
+     *  - toggle per-status visibility
+     *  - adjust per-status marker style (via sub-modal)
+     *  - configure performance mode for many markers
+     */
     function openContributionMarkerSettingsWindow() {
         const markersCfgRoot = userSettings.markers || (userSettings.markers = {});
         const markersCfg = markersCfgRoot.statuses || (markersCfgRoot.statuses = {});
 
-        // Ensure DEFAULT exists as a fallback
+        // Ensure DEFAULT exists as a fallback for any status
         if (!markersCfg.DEFAULT) {
             markersCfg.DEFAULT = {
                 strokeColor: "#6b7280",
@@ -1880,7 +2040,7 @@
             };
         }
 
-        // Order with ACCEPTED at the bottom
+        // Order with ACCEPTED at the bottom for visibility / UX
         const STATUS_ROWS = [
             { key: "NOMINATED",       label: "Nominated" },
             { key: "VOTING",          label: "Voting" },
@@ -1916,7 +2076,7 @@
                 const container = document.createElement("div");
                 container.className = "wfmapmods-modal-section";
 
-                // ---- PERFORMANCE / LOTS OF MARKERS SECTION ----
+                // ---- PERFORMANCE / MANY-MARKERS SECTION ----
                 const mapCfg = userSettings.map || (userSettings.map = {});
                 if (typeof mapCfg.performanceModeEnabled !== "boolean") {
                     mapCfg.performanceModeEnabled = true;
@@ -1939,14 +2099,14 @@
                 const perfLabel = document.createElement("label");
                 perfLabel.htmlFor = perfCheckbox.id;
                 perfLabel.style.fontSize = "11px";
-                perfLabel.textContent = 'Improve performance when lots of markers';
+                perfLabel.textContent = "Improve performance when lots of markers";
 
                 const perfHelp = document.createElement("div");
                 perfHelp.style.fontSize = "10px";
                 perfHelp.style.color = "#6b7280";
                 perfHelp.style.marginLeft = "20px";
                 perfHelp.style.marginTop = "2px";
-                perfHelp.textContent = 'Hides markers at low zoom levels to prevent lag.';
+                perfHelp.textContent = "Hides markers at low zoom levels to prevent lag.";
 
                 perfRow.appendChild(perfCheckbox);
                 perfRow.appendChild(perfLabel);
@@ -1954,7 +2114,7 @@
                 container.appendChild(perfHelp);
                 // ---- END PERFORMANCE SECTION ----
 
-                // ACCEPTED warning banner
+                // Warning banner for ACCEPTED markers
                 const warning = document.createElement("div");
                 warning.style.display = "none";
                 warning.style.marginTop = "8px";
@@ -2107,7 +2267,7 @@
                     };
                 });
 
-                // Initialise warning visibility based on current ACCEPTED setting
+                // Initialise "Accepted" warning visibility
                 if (acceptedRowCheckbox && acceptedRowCheckbox.checked) {
                     warning.style.display = "block";
                 }
@@ -2125,8 +2285,7 @@
                     mapCfg.performanceMaxVisibleMarkers = PERFORMANCE_MAX_VISIBLE_MARKERS;
                 }
 
-                // Styles + enabled flags are already kept in cfg objects by change handlers,
-                // so we just need to save & refresh.
+                // Styles + enabled flags are already reflected in cfg objects via change handlers.
                 saveSettings();
 
                 // Rebuild markers with new styles/visibility
@@ -2137,7 +2296,21 @@
             }
         });
     }
+    // -----------------------------
+    // Generic modal framework
+    // -----------------------------
 
+    /**
+     * Open a simple settings-style modal dialog.
+     *
+     * @param {Object} options
+     * @param {string}   options.id          DOM id for the backdrop. Existing with same id is removed first.
+     * @param {string}   options.title       Title shown in the modal header.
+     * @param {Function} options.buildContent(bodyEl, okButton)
+     *        Called once to populate the body. May return a context object.
+     * @param {Function} options.onOk(ctx, closeModal)
+     *        Called when OK is clicked. Receives ctx from buildContent and a closeModal function.
+     */
     function openSettingsModal(options) {
         const {
             id,
@@ -2146,7 +2319,7 @@
             onOk
         } = options || {};
 
-        // If there's already a modal with this ID, remove it to avoid duplicates
+        // Remove any existing modal with the same ID to avoid duplicates
         const existing = document.getElementById(id);
         if (existing && existing.parentNode) {
             existing.parentNode.removeChild(existing);
@@ -2258,10 +2431,10 @@
         backdrop.appendChild(dialog);
         document.body.appendChild(backdrop);
 
-        // Build content and get ctx
+        // Build content and capture optional context
         let ctx = null;
         if (typeof buildContent === "function") {
-            // Pass okBtn so modals can control its disabled state
+            // Pass okBtn so specific modals can enable/disable it for validation
             ctx = buildContent(body, okBtn) || {};
         }
 
@@ -2291,7 +2464,7 @@
             }
         });
 
-        // Optional: close when clicking outside dialog
+        // Close when clicking on the backdrop (but not when clicking inside the dialog)
         backdrop.addEventListener("click", (evt) => {
             if (evt.target === backdrop) {
                 closeModal();
@@ -2302,9 +2475,13 @@
     }
 
     // -----------------------------
-    // POI bridge (cross-userscript data bus)
+    // Cross-Userscript Bridges
     // -----------------------------
 
+    /**
+     * Send a POI's data to the shared POI bridge element so other userscripts
+     * (e.g. main map overlay) can react to the current selection.
+     */
     function sendPoiToBridge(poi) {
         if (!poi) return;
 
@@ -2331,11 +2508,15 @@
         }
     }
 
+    /**
+     * Watch the POI bridge element for selection changes coming from *other* scripts.
+     * If another script changes the bridge payload, this clears our current selection.
+     */
     function setupBridgeSelectionWatcher() {
         const bridge = document.getElementById(POI_BRIDGE_ID);
         if (!bridge) return;
 
-        if (bridge._wfContribObserverAttached) return; // avoid double observers
+        if (bridge._wfContribObserverAttached) return; // avoid attaching multiple observers
         bridge._wfContribObserverAttached = true;
 
         const observer = new MutationObserver((mutations) => {
@@ -2353,17 +2534,17 @@
                 try {
                     payload = JSON.parse(raw);
                 } catch {
-                    // If it’s malformed, safest is to clear our selection
+                    // Malformed payload: safest is to clear our selection
                     clearNominationSelection();
                     continue;
                 }
 
-                // If *we* triggered this change, don't clear ourselves
+                // If this change was triggered by this overlay, ignore it
                 if (payload.source === POI_BRIDGE_SOURCE) {
                     return;
                 }
 
-                // Another plugin (e.g. main map plugin) selected something:
+                // Another plugin (e.g. main map) selected something:
                 // unhighlight our nomination marker.
                 clearNominationSelection();
             }
@@ -2375,10 +2556,10 @@
         });
     }
 
-    // -----------------------------
-    // Submission bridge (for resubmit)
-    // -----------------------------
-
+    /**
+     * Send a "resubmit" payload to the base submission script via a dedicated bridge
+     * element so it can prefill the submission form using the existing POI details.
+     */
     function sendResubmitToBase(poi) {
         if (!poi) return;
 
@@ -2417,6 +2598,10 @@
     // Utility helpers
     // -----------------------------
 
+    /**
+     * Parse a numeric value, clamp it to [min, max], and return a default
+     * value if the input cannot be parsed.
+     */
     function clamp(value, min, max, defaultVal) {
         const n = parseFloat(value);
         if (Number.isNaN(n)) return defaultVal;
@@ -2425,6 +2610,9 @@
         return n;
     }
 
+    /**
+     * Convert a hex colour (e.g. "#ff00ff" or "#f0f") and alpha to an rgba() string.
+     */
     function hexToRgba(hex, alpha) {
         hex = String(hex || "").trim();
         if (!hex) return `rgba(0,0,0,${alpha})`;
