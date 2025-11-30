@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         Wayfarer Map - s2 Cells
-// @version      0.1.0
+// @name         Wayfarer Map Mods - s2 Cells
+// @version      0.1.1
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-s2-cells.user.js
@@ -41,6 +41,9 @@
     // -----------------------------
 
     const userSettings = {
+        master: {
+            enabled: true
+        },
         primary: {
             enabled: true,
             level: 17,
@@ -125,7 +128,7 @@
     let lastPanelPresent = false;
 
     function handlePanelChange() {
-        const panelPresent = !!document.querySelector("#wfsmm-side-panel");
+        const panelPresent = !!document.querySelector("#wfmapmods-side-panel");
 
         if (panelPresent && !lastPanelPresent) {
             // We just arrived on the map page
@@ -320,23 +323,123 @@
     }
 
     // -----------------------------
-    // Add settings controls
+    // Add layers settings control
+    // -----------------------------
+
+    function insertS2LayersOption() {
+        // Poll for the layers menu, similar to settings link logic
+        const menuCheck = setInterval(() => {
+            const menu = document.querySelector(".wfmapmods-layers-menu");
+            if (!menu) return; // keep waiting
+
+            clearInterval(menuCheck);
+
+            // Avoid duplicates
+            if (menu.querySelector("#wfmapmods-layers-s2cells")) return;
+
+            const label = document.createElement("label");
+            label.className = "wfmapmods-layers-option";
+            label.id = "wfmapmods-layers-s2cells";
+
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.checked = !userSettings.master || userSettings.master.enabled !== false;
+
+            const span = document.createElement("span");
+            span.textContent = "S2 cells";
+
+            label.appendChild(checkbox);
+            label.appendChild(span);
+            menu.appendChild(label);
+
+            // Change handler
+            checkbox.addEventListener("change", () => {
+                const enabled = checkbox.checked;
+
+                if (!userSettings.master) {
+                    userSettings.master = {};
+                }
+                userSettings.master.enabled = enabled;
+
+                if (!enabled) {
+                    // Master OFF -> clear visuals only
+                    if (s2Overlay) {
+                        s2Overlay.clear();
+                    }
+                    clearPoiCellPolygons();
+
+                    if (submitCellHighlight) {
+                        submitCellHighlight.setMap(null);
+                        submitCellHighlight = null;
+                    }
+
+                    saveSettings();
+                    return;
+                }
+
+                // Master turned ON
+                // If *everything* is off, enable all features so the user sees something happen
+                if (!hasAnyFeatureEnabled()) {
+                    enableAllFeatures();
+                }
+
+                saveSettings();
+
+                // Redraw based on current feature settings
+                if (submitMap) {
+                    if (!s2Overlay) {
+                        initS2Overlay(); // draws grid + shading
+                    } else {
+                        updateS2Grid();
+                        shadePoiCells();
+                    }
+                    refreshHighlightCell();
+                }
+            });
+        }, 300);
+    }
+
+    function hasAnyFeatureEnabled() {
+        const { primary, secondary, poiCells, highlightCell } = userSettings;
+
+        return !!(
+            (primary && primary.enabled) ||
+            (secondary && secondary.enabled) ||
+            (poiCells && poiCells.enabled) ||
+            (highlightCell && highlightCell.enabled)
+        );
+    }
+
+    function enableAllFeatures() {
+        if (!userSettings.primary) userSettings.primary = {};
+        if (!userSettings.secondary) userSettings.secondary = {};
+        if (!userSettings.poiCells) userSettings.poiCells = {};
+        if (!userSettings.highlightCell) userSettings.highlightCell = {};
+
+        userSettings.primary.enabled = true;
+        userSettings.secondary.enabled = true;
+        userSettings.poiCells.enabled = true;
+        userSettings.highlightCell.enabled = true;
+    }
+
+    // -----------------------------
+    // Add sidebar settings controls
     // -----------------------------
 
     function insertS2SettingsLink() {
         // Wait for main sidebar to exist
         const panelCheck = setInterval(() => {
-            const settingsBody = document.querySelector(".wfsmm-settings-links");
+            const settingsBody = document.querySelector(".wfmapmods-settings-links");
             if (!settingsBody) return; // retry
 
             clearInterval(panelCheck);
 
             // Prevent duplicate link insertion
-            if (document.getElementById("wfsmm-settings-s2cells")) return;
+            if (document.getElementById("wfmapmods-settings-s2cells")) return;
 
             // Create <a> link
             const link = document.createElement("a");
-            link.id = "wfsmm-settings-s2cells";
+            link.id = "wfmapmods-settings-s2cells";
             link.textContent = "S2 Cells";
 
             // Append to the settings section
@@ -351,7 +454,7 @@
 
     function openS2SettingsWindow() {
         // Don’t open two modals at once
-        if (document.getElementById("wfsmm-s2-modal-backdrop")) return;
+        if (document.getElementById("wfmapmods-s2-modal-backdrop")) return;
 
         // --- Backdrop ---
         const backdrop = document.createElement("div");
@@ -877,10 +980,12 @@
     // Compute which S2 grid layers should be drawn
     function getEnabledS2Layers() {
         const layers = [];
-        const {
-            primary,
-            secondary
-        } = userSettings;
+        const { master, primary, secondary } = userSettings;
+
+        // Disable if turned off via layers option
+        if (!master || master.enabled === false) {
+            return layers;
+        }
 
         if (primary.enabled) {
             layers.push({
@@ -970,6 +1075,11 @@
             return;
         }
 
+        if (!userSettings.master || userSettings.master.enabled === false) {
+            clearPoiCellPolygons();
+            return;
+        }
+
         const pois = s2Pois;
         if (!pois.length) {
             clearPoiCellPolygons();
@@ -1042,32 +1152,33 @@
 
         if (!submitMap || typeof google === "undefined" || !google.maps) return;
 
+        const masterEnabled = !userSettings.master || userSettings.master.enabled !== false;
         const cfg = userSettings.highlightCell || {};
-        const enabled = cfg.enabled !== false; // default to true if missing
+        const highlightEnabled = cfg.enabled !== false;
 
-        // Clear existing highlight polygon if any
+        // Always clear any existing polygon first
         if (submitCellHighlight) {
             submitCellHighlight.setMap(null);
             submitCellHighlight = null;
         }
 
-        if (!enabled) {
-            return; // user has disabled the highlight
+        // If master or highlight are disabled, stop here
+        if (!masterEnabled || !highlightEnabled) {
+            return;
         }
 
         const strokeColor = cfg.color || "#FF0000";
         const strokeWeight = typeof cfg.lineWidth === "number" ? cfg.lineWidth : 4;
         const strokeOpacity = typeof cfg.lineOpacity === "number" ? cfg.lineOpacity : 1.0;
 
-        // Build the L17 S2 cell around the marker
-        const cell = S2.S2Cell.FromLatLng({ lat, lng }, POI_CELL_LEVEL); // POI_CELL_LEVEL = 17
+        const cell = S2.S2Cell.FromLatLng({ lat, lng }, POI_CELL_LEVEL);
 
         const corners = cell.getCornerLatLngs();
         const path = corners.map(c => ({
             lat: typeof c.lat === "function" ? c.lat() : c.lat,
             lng: typeof c.lng === "function" ? c.lng() : c.lng
         }));
-        path.push(path[0]); // close polygon
+        path.push(path[0]);
 
         submitCellHighlight = new google.maps.Polygon({
             map: submitMap,
@@ -1663,13 +1774,13 @@
     // -----------------------------
 
     function injectS2SettingsCSS() {
-        if (document.getElementById("wfsmm-s2settings-css")) return;
+        if (document.getElementById("wfmapmods-s2settings-css")) return;
 
         const css = document.createElement("style");
-        css.id = "wfsmm-s2settings-css";
+        css.id = "wfmapmods-s2settings-css";
         css.textContent = `
         /* Backdrop */
-        .wfsmm-s2-overlay-bg {
+        .wfmapmods-s2-overlay-bg {
             position: fixed;
             inset: 0;
             background: rgba(0,0,0,0.5);
@@ -1680,7 +1791,7 @@
         }
 
         /* Popup container */
-        .wfsmm-s2-overlay {
+        .wfmapmods-s2-overlay {
             background: #fff;
             border-radius: 8px;
             padding: 16px 20px;
@@ -1689,7 +1800,7 @@
             font-family: system-ui, sans-serif;
         }
 
-        .wfsmm-s2-overlay h2 {
+        .wfmapmods-s2-overlay h2 {
             font-size: 16px;
             font-weight: 600;
             margin: 0 0 12px 0;
@@ -1697,7 +1808,7 @@
         }
 
         /* Form grid layout */
-        .wfsmm-s2-grid {
+        .wfmapmods-s2-grid {
             display: grid;
             grid-template-columns: 1fr auto;
             row-gap: 10px;
@@ -1705,12 +1816,12 @@
             align-items: center;
         }
 
-        .wfsmm-s2-grid label {
+        .wfmapmods-s2-grid label {
             font-size: 13px;
         }
 
         /* Small numeric input */
-        .wfsmm-s2-input-small {
+        .wfmapmods-s2-input-small {
             width: 48px;
             padding: 2px 4px;
             font-size: 12px;
@@ -1718,13 +1829,13 @@
         }
 
         /* Switches / checkboxes */
-        .wfsmm-s2-checkbox {
+        .wfmapmods-s2-checkbox {
             width: 16px;
             height: 16px;
         }
 
         /* Color pickers */
-        .wfsmm-s2-color {
+        .wfmapmods-s2-color {
             width: 36px;
             height: 22px;
             padding: 0;
@@ -1733,13 +1844,13 @@
         }
 
         /* Footer buttons */
-        .wfsmm-s2-footer {
+        .wfmapmods-s2-footer {
             margin-top: 16px;
             display: flex;
             justify-content: space-between;
         }
 
-        .wfsmm-s2-btn {
+        .wfmapmods-s2-btn {
             padding: 6px 16px;
             font-size: 13px;
             border-radius: 6px;
@@ -1747,12 +1858,12 @@
             cursor: pointer;
         }
 
-        .wfsmm-s2-btn-save {
+        .wfmapmods-s2-btn-save {
             background: #2563eb;
             color: white;
         }
 
-        .wfsmm-s2-btn-cancel {
+        .wfmapmods-s2-btn-cancel {
             background: #e5e7eb;
         }
     `;
@@ -1769,6 +1880,7 @@
         startMapPanelWatcher();
         injectS2SettingsCSS();
         watchForLatLngElement();
+        insertS2LayersOption();
     }
 
     bootstrap();
