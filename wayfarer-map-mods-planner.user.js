@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Planner
-// @version      0.1.2
+// @version      0.1.3
 // @description  Load and edit planner POIs from a Google Sheet and show them as pins on the Wayfarer submission map.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-planner.user.js
@@ -22,7 +22,7 @@
     const POI_BRIDGE_SOURCE = "wfmapmods-planner";
     const SUBMISSION_BRIDGE_ID = "wfmapmods-submit-bridge";
 
-    const PERFORMANCE_MAX_VISIBLE_MARKERS = 500;
+    const PERFORMANCE_MAX_VISIBLE_MARKERS = 400;
 
     let plannerInfoWindow = null;
 
@@ -52,7 +52,6 @@
             enableDragging: false,
             enableImagePreview: true,
             performanceModeEnabled: true,
-            performanceMaxVisibleMarkers: PERFORMANCE_MAX_VISIBLE_MARKERS,
             layerEnabled: true
         },
         markers: {
@@ -443,55 +442,6 @@
             }
         });
         plannerMarkers = {};
-    }
-
-
-    async function attachPlannerToMapIfNeeded() {
-        if (mapAttached) {
-            refreshPlannerMarkers();
-            return;
-        }
-
-        const map = await getSubmitMap();
-        if (!map) {
-            console.warn("[Planner] Map not found – cannot attach");
-            return;
-        }
-
-        submitMap = map;
-        mapAttached = true;
-
-        // Close the planner info window when clicking the map
-        submitMap.addListener("click", () => {
-            if (plannerInfoWindow) {
-                // If we were editing a marker and didn't save, revert its position
-                if (activeEditContext && !activeEditContext.committed) {
-                    const { marker, originalLat, originalLng } = activeEditContext;
-                    if (
-                        marker &&
-                        typeof marker.setPosition === "function" &&
-                        originalLat != null &&
-                        originalLng != null &&
-                        !Number.isNaN(originalLat) &&
-                        !Number.isNaN(originalLng)
-                    ) {
-                        marker.setPosition({ lat: originalLat, lng: originalLng });
-                    }
-                }
-
-                activeEditContext = null;
-                plannerInfoWindow.close();
-            }
-        });
-
-        if (!submitMap._plannerOverlayBoundsListenerAdded) {
-            submitMap.addListener("idle", refreshPlannerMarkers);
-            submitMap._plannerOverlayBoundsListenerAdded = true;
-        }
-
-        // Optional: you could add a click listener for "add new POI" mode later.
-
-        refreshPlannerMarkers();
     }
 
     // -----------------------------
@@ -899,10 +849,7 @@
         }
 
         const performanceModeEnabled = !!plannerCfg.performanceModeEnabled;
-        const maxVisibleMarkers =
-              typeof plannerCfg.performanceMaxVisibleMarkers === "number"
-        ? plannerCfg.performanceMaxVisibleMarkers
-        : PERFORMANCE_MAX_VISIBLE_MARKERS;
+        const maxVisibleMarkers = PERFORMANCE_MAX_VISIBLE_MARKERS;
 
         // First: find all POIs that should be shown in current bounds.
         const candidateIds = [];
