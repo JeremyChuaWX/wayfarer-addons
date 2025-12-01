@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.1.3
+// @version      2.1.4
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -1900,7 +1900,8 @@
     // Called whenever the bridge gets new POI data (from any userscript)
     function handleBridgePoiPayload(payload) {
         const poi = {
-            guid: payload.guid || payload.id || null,
+            guid: payload.guid || null,
+            id: payload.id || null,
             title: payload.title || "(untitled)",
             description: payload.description || payload.desc || "",
             lat: typeof payload.lat === "number" ? payload.lat : Number(payload.lat),
@@ -1928,7 +1929,7 @@
             lng: poi.lng,
             imageUrl: poi.imageUrl,
             status: "LIVE",
-            source: "wfmapmods-main",
+            source: "wfmapmods-base",
         },
                                       extra || {}
                                      );
@@ -5866,7 +5867,7 @@
             // - open InfoWindow
             publishPoiToBridge(poi, {
                 status: "LIVE",
-                source: "wfmapmods-main-marker"
+                source: "wfmapmods-base"
             });
         });
     }
