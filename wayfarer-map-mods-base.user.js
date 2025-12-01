@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.1.1
+// @version      2.1.2
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -456,6 +456,8 @@
     // Format page for map view
     // ==================================
 
+    let wfMapResizeListenerAttached = false;
+
     function formatPageForMapMode() {
         // Only run when arriving via Map button
         if (sessionStorage.getItem('wf_map_nav') !== '1') return;
@@ -474,36 +476,27 @@
             if (!mapComp) return;
 
             const container = root.querySelector(':scope > div');
-
-            clearInterval(interval);
-
-            // --- Remove Niantic width limiter ----
-            if (container) {
-                const limiter = container.closest('.max-w-7xl');
-                if (limiter) limiter.classList.remove('max-w-7xl');
-            }
-
-            // --- Hide everything other than the map ----
             if (!container) {
                 console.warn("Wayfarer Map: container div not found under app-submit-wayspot");
                 return;
             }
 
-            // 1) Hide all children of the inner container
-            //    except the one that contains the map.
-            Array.from(container.children).forEach((child) => {
-                if (child.contains(mapComp)) {
-                    // keep the section that has the map
-                    return;
-                }
-                child.style.display = 'none';
-            });
+            clearInterval(interval);
 
-            // 2) Inside the map section, hide everything except the map host itself
+            // --- Hide everything other than the map ----
+
+            // Find the direct child that contains the map component once
             const mapSection = Array.from(container.children).find((child) =>
                                                                    child.contains(mapComp)
                                                                   );
 
+            // 1) Hide all siblings of the map section
+            Array.from(container.children).forEach((child) => {
+                if (child === mapSection) return;
+                child.style.display = 'none';
+            });
+
+            // 2) Inside the map section, hide everything except the map host itself
             if (mapSection) {
                 Array.from(mapSection.children).forEach((child) => {
                     if (child === mapComp || child.contains(mapComp)) {
@@ -515,9 +508,13 @@
             }
 
             // --- Remove padding from mat-sidenav-content (full-screen map) ----
-            const sidenavContent = document.querySelector('mat-sidenav-content');
-            if (sidenavContent) {
-                sidenavContent.classList.remove('p-4');
+            removeSidenavPaddingForMapPage();
+
+            // --- Remove Niantic width limiter ----
+            const limiter = container.closest('.max-w-7xl');
+            if (limiter) {
+                limiter.classList.remove('max-w-7xl');
+                limiter.dataset.wfRemovedMaxWidth = "1";
             }
 
             // --- Disable vertical scrolling ----
@@ -534,7 +531,10 @@
 
             // --- Resize map to fill viewport ----
             resizeSubmitMapToViewport();
-            window.addEventListener('resize', resizeSubmitMapToViewport);
+            if (!wfMapResizeListenerAttached) {
+                window.addEventListener('resize', resizeSubmitMapToViewport);
+                wfMapResizeListenerAttached = true;
+            }
         }, 150);
     }
 
@@ -568,6 +568,26 @@
         }
     }
 
+    function restoreScrolling() {
+        let node = document.querySelector('mat-sidenav-content');
+        while (node && node !== document.body) {
+            if (node instanceof HTMLElement) {
+                if (node.style.overflowY === 'hidden') {
+                    node.style.overflowY = ''; // remove inline override
+                }
+            }
+            node = node.parentElement;
+        }
+    }
+
+    function restoreWidthLimiter() {
+        const limiter = document.querySelector('[data-wf-removed-max-width="1"]');
+        if (limiter) {
+            limiter.classList.add('max-w-7xl');
+            delete limiter.dataset.wfRemovedMaxWidth;
+        }
+    }
+
     function applySidenavPaddingForCurrentRoute() {
         const fromMap = sessionStorage.getItem('wf_map_nav') === '1';
         const onMapPage = location.pathname === '/new/submit/new';
@@ -577,18 +597,13 @@
         } else {
             restoreSidenavPadding();
             restoreScrolling();
-        }
-    }
+            restoreWidthLimiter();
 
-    function restoreScrolling() {
-        let node = document.querySelector('mat-sidenav-content'); // or your root
-        while (node && node !== document.body) {
-            if (node instanceof HTMLElement) {
-                if (node.style.overflowY === 'hidden') {
-                    node.style.overflowY = ''; // remove inline override
-                }
+            // Clean up resize listener when leaving map mode
+            if (wfMapResizeListenerAttached) {
+                window.removeEventListener('resize', resizeSubmitMapToViewport);
+                wfMapResizeListenerAttached = false;
             }
-            node = node.parentElement;
         }
     }
 
