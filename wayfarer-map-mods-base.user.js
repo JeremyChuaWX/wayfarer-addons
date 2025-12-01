@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.1.2
+// @version      2.1.3
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -1175,13 +1175,44 @@
             // SECTION 3: Wayspot Function Links
             // ==============================
 
+            const parser = new DOMParser();
+
+            // ==============================
+            // SECTION 3: Wayspot Function Links
+            // ==============================
+
             const poiFunctionsSection = document.createElement("section");
             poiFunctionsSection.className = "wfmapmods-section wfmapmods-section-poi-functions";
             poiFunctionsSection.style.display = "none"; // hidden until POI is selected
 
+            // Single row containing wayspot icon + links
+            const poiFunctionsRow = document.createElement("div");
+            Object.assign(poiFunctionsRow.style, {
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "4px 4px 0 4px",
+                fontSize: "12px",
+                fontWeight: "600",
+                color: "#374151"
+            });
+
+            // Wayspot icon SVG (recolour fill to #fb4c21)
+            const wayspotSvg = parser.parseFromString(WAYFARER_LOGO_SVG, "image/svg+xml").documentElement;
+            wayspotSvg.setAttribute("width", "16");
+            wayspotSvg.setAttribute("height", "24");
+            wayspotSvg.setAttribute("aria-hidden", "true");
+
+            // ensure the path fill is our desired colour
+            const wayspotPath = wayspotSvg.querySelector("path");
+            if (wayspotPath) {
+                wayspotPath.setAttribute("fill", "#fb4c21");
+            }
+
             // Container for links (shared with settings styling)
             const poiFunctionLinks = document.createElement("div");
             poiFunctionLinks.className = "wfmapmods-link-block wfmapmods-poi-function-links";
+            poiFunctionLinks.style.gap = "8px"; // match location section spacing a bit
 
             // --- Deep link (hidden until a POI is selected) ---
             const deepLinkA = document.createElement("a");
@@ -1203,9 +1234,12 @@
                 }, 1200);
             });
 
-            // assemble section
+            // Assemble: [wayspot icon][links...]
             poiFunctionLinks.appendChild(deepLinkA);
-            poiFunctionsSection.appendChild(poiFunctionLinks);
+            poiFunctionsRow.appendChild(wayspotSvg);
+            poiFunctionsRow.appendChild(poiFunctionLinks);
+            poiFunctionsSection.appendChild(poiFunctionsRow);
+
 
             // ==============================
             // SECTION 4: Location Functions (submission marker)
@@ -1227,7 +1261,6 @@
             });
 
             // Pin icon SVG
-            const parser = new DOMParser();
             const pinIconSvg = parser.parseFromString(SUBMISSION_PIN, "image/svg+xml").documentElement;
             pinIconSvg.setAttribute("width", "14");
             pinIconSvg.setAttribute("height", "21");
@@ -1546,7 +1579,7 @@
                 if (deepLinkA) {
                     deepLinkA.dataset.link = url;
                     deepLinkA.style.display = "inline-block";
-                    deepLinkA.textContent = "Wayspot link";
+                    deepLinkA.textContent = "Deep link";
                 }
             }
         }
