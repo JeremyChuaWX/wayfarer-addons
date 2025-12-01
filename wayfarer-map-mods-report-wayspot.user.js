@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Report Wayspots
-// @version      0.1.1
+// @version      0.1.2
 // @description  Adds a "Report Wayspot" link to the side panel and pre-fills the Helpshift form using POI bridge data
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
@@ -32,6 +32,12 @@
 
     // Cache of last report payload in the Wayfarer tab
     let lastReportPayload = null;
+
+    // Track whether we've already hooked onPoisFetched
+    let poiHookAttached = false;
+
+    // Cache of live POIs loaded via the live-pois-in-radius API
+    let livePois = [];
 
     // ======================================================================
     // WAYFARER SIDE
@@ -79,10 +85,49 @@
     }
 
     function initWayfarer() {
+        hookLivePoisXHR();
         startSidePanelWatcher();
         loadSettings();
         setupWayfarerMessaging();
         startPoiBridgeWatcherIfReady();
+    }
+
+    function hookLivePoisXHR() {
+        const XHR = window.XMLHttpRequest || XMLHttpRequest;
+        if (!XHR || XHR.__wfReportHooked) return; // avoid double-hooking
+
+        XHR.__wfReportHooked = true;
+
+        const origOpen = XHR.prototype.open;
+        const origSend = XHR.prototype.send;
+
+        XHR.prototype.open = function(method, url, ...rest) {
+            this._wf_report_url = url;
+            return origOpen.call(this, method, url, ...rest);
+        };
+
+        XHR.prototype.send = function(...args) {
+            this.addEventListener("load", function() {
+                try {
+                    if (this._wf_report_url &&
+                        this._wf_report_url.includes("/api/v1/vault/live-pois-in-radius")) {
+
+                        const json = JSON.parse(this.responseText);
+                        const pois = (json &&
+                                      json.result &&
+                                      Array.isArray(json.result.pois))
+                        ? json.result.pois
+                        : [];
+
+                        livePois = pois;
+                    }
+                } catch (e) {
+                    console.error("[Report Wayspot] error parsing live-pois-in-radius response:", e);
+                }
+            });
+
+            return origSend.apply(this, args);
+        };
     }
 
     function startSidePanelWatcher() {
@@ -118,27 +163,54 @@
 
             reportLinkBody.appendChild(link);
 
+            updateReportWayspotLinkVisibility();
+
             link.addEventListener('click', (ev) => {
                 ev.preventDefault();
                 handleReportWayspotClick();
             });
         }
-
-        // Make sure visibility matches the current POI status
-        updateReportWayspotLinkVisibility();
     }
 
     function updateReportWayspotLinkVisibility() {
         const link = document.getElementById('wfmapmods-settings-report-wayspot');
         if (!link) return;
 
-        const status = getCurrentWayspotStatus();
-        const isLive = status === 'LIVE';
+        const info = getCurrentWayspotBridgeData();
+        console.log(info);
+        if (!info || !info.status) {
+            link.style.display = 'none';
+            return;
+        }
 
-        link.style.display = isLive ? '' : 'none';
+        const { status, source, lat, lng } = info;
+        let visible = false;
+
+        // Condition 1: LIVE + wfmapmods-main (trust the bridge alone)
+        if (status === 'LIVE' && source === 'wfmapmods-base') {
+            visible = true;
+        } else if (status === 'LIVE' || status === 'ACCEPTED') {
+            // Condition 2: LIVE/ACCEPTED from any source, but must match a loaded POI
+            if (typeof lat === 'number' && typeof lng === 'number') {
+                const pois = Array.isArray(livePois) ? livePois : [];
+                console.log("livePois for visibility check:", pois);
+                const EPS = 1e-7;
+
+                visible = pois.some(p =>
+                    p &&
+                    typeof p.lat === 'number' &&
+                    typeof p.lng === 'number' &&
+                    Math.abs(p.lat - lat) < EPS &&
+                    Math.abs(p.lng - lng) < EPS
+                );
+            }
+        }
+
+        link.style.display = visible ? '' : 'none';
     }
 
-    function getCurrentWayspotStatus() {
+
+    function getCurrentWayspotBridgeData() {
         const bridge = document.getElementById('wfmapmods-poi-bridge');
         if (!bridge) return null;
 
@@ -149,14 +221,45 @@
 
         try {
             const payload = JSON.parse(jsonStr);
-            if (payload && typeof payload.status === 'string') {
-                return payload.status.toUpperCase();
-            }
-        } catch (e) {
-            console.warn('[Report Wayspot] Failed to parse status from POI bridge:', e);
-        }
+            if (!payload || typeof payload !== 'object') return null;
 
-        return null;
+            const status = typeof payload.status === 'string'
+            ? payload.status.toUpperCase()
+            : null;
+
+            const source = typeof payload.source === 'string'
+            ? payload.source
+            : null;
+
+            // Normalise lat/lng to numbers
+            let lat = payload.lat;
+            let lng = payload.lng;
+
+            if (typeof lat !== 'number' && lat != null && lat !== '') {
+                const parsedLat = parseFloat(lat);
+                lat = Number.isNaN(parsedLat) ? null : parsedLat;
+            }
+
+            if (typeof lng !== 'number' && lng != null && lng !== '') {
+                const parsedLng = parseFloat(lng);
+                lng = Number.isNaN(parsedLng) ? null : parsedLng;
+            }
+
+            return {
+                status,
+                source,
+                lat: typeof lat === 'number' ? lat : null,
+                lng: typeof lng === 'number' ? lng : null
+            };
+        } catch (e) {
+            console.warn('[Report Wayspot] Failed to parse bridge payload:', e);
+            return null;
+        }
+    }
+
+    function getCurrentWayspotStatus() {
+        const info = getCurrentWayspotBridgeData();
+        return info ? info.status : null;
     }
 
     function startPoiBridgeWatcherIfReady() {
@@ -180,11 +283,7 @@
         });
 
         bridge._wfPoiBridgeObserver = mo;
-
-        // Ensure correct visibility immediately for current POI
-        updateReportWayspotLinkVisibility();
     }
-
 
     function insertReportingSettingsLinkIfReady() {
         const settingsBody = document.querySelector(".wfmapmods-settings-links");
