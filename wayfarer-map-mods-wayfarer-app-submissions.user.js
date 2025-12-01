@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Wayfarer App Submissions
-// @version      0.1.1
+// @version      0.1.2
 // @description  Import Wayfarer App submissions from Lightship Geospatial Browser and show them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-wayfarer-app-submissions.user.js
@@ -29,6 +29,8 @@
 
     const PERFORMANCE_MAX_VISIBLE_MARKERS = 400;
 
+    const WFAPPSUB_CHILD_NAME = "wf-lightship-geospatial";
+
     // postMessage channel
     const POSTMESSAGE_TYPE_IMPORT = "wfmap-wayfarerapp-import";
 
@@ -38,7 +40,7 @@
 
     if (location.hostname === "lightship.dev") {
         // Child tab: intercept getSubmittedPois and send to parent
-        console.log('on lightship.dev');
+        console.log("on lightship.dev");
         setupLightshipInterceptor();
     } else if (location.hostname === "wayfarer.nianticlabs.com") {
         // Main Wayfarer tab: map overlay + settings + import handler
@@ -54,6 +56,16 @@
         // Use the real page context if available (Tampermonkey/Violentmonkey)
         const global = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
 
+        // ✅ Only run in the child window that was opened by the App Submissions plugin
+        if (global.name !== WFAPPSUB_CHILD_NAME) {
+            console.log(
+                "[WFAppSub] Not App Submissions child window (name =",
+                global.name,
+                ") – skipping interceptors"
+            );
+            return;
+        }
+
         // ---------- XHR INTERCEPTOR ----------
         (function (open) {
             if (!global.XMLHttpRequest) return;
@@ -68,60 +80,83 @@
                     if (isTarget) {
                         console.log("[WFAppSub] XHR getSubmittedPois detected:", cleanUrl);
 
-                        this.addEventListener("load", function () {
-                            try {
-                                const raw = this.responseText || this.response;
-                                if (!raw) return;
-
-                                let json;
+                        this.addEventListener(
+                            "load",
+                            function () {
                                 try {
-                                    json = JSON.parse(raw);
-                                } catch (e) {
-                                    console.warn("[WFAppSub] XHR: failed to parse JSON", e);
-                                    return;
-                                }
+                                    const raw = this.responseText || this.response;
+                                    if (!raw) return;
 
-                                if (!json || !Array.isArray(json.submittedPois)) {
-                                    console.warn("[WFAppSub] XHR: no submittedPois array");
-                                    return;
-                                }
-
-                                const opener = global.opener;
-                                if (opener && !opener.closed) {
+                                    let json;
                                     try {
-                                        opener.postMessage(
-                                            {
-                                                type: POSTMESSAGE_TYPE_IMPORT,
-                                                submittedPois: json.submittedPois
-                                            },
-                                            "https://wayfarer.nianticlabs.com"
-                                        );
+                                        json = JSON.parse(raw);
                                     } catch (e) {
-                                        console.warn("[WFAppSub] XHR: strict postMessage failed, retry with *", e);
-                                        opener.postMessage(
-                                            {
-                                                type: POSTMESSAGE_TYPE_IMPORT,
-                                                submittedPois: json.submittedPois
-                                            },
-                                            "*"
+                                        console.warn(
+                                            "[WFAppSub] XHR: failed to parse JSON",
+                                            e
+                                        );
+                                        return;
+                                    }
+
+                                    if (!json || !Array.isArray(json.submittedPois)) {
+                                        console.warn(
+                                            "[WFAppSub] XHR: no submittedPois array"
+                                        );
+                                        return;
+                                    }
+
+                                    const opener = global.opener;
+                                    if (opener && !opener.closed) {
+                                        try {
+                                            opener.postMessage(
+                                                {
+                                                    type: POSTMESSAGE_TYPE_IMPORT,
+                                                    submittedPois: json.submittedPois,
+                                                },
+                                                "https://wayfarer.nianticlabs.com"
+                                            );
+                                        } catch (e) {
+                                            console.warn(
+                                                "[WFAppSub] XHR: strict postMessage failed, retry with *",
+                                                e
+                                            );
+                                            opener.postMessage(
+                                                {
+                                                    type: POSTMESSAGE_TYPE_IMPORT,
+                                                    submittedPois: json.submittedPois,
+                                                },
+                                                "*"
+                                            );
+                                        }
+                                    } else {
+                                        console.warn(
+                                            "[WFAppSub] XHR: no opener to send data to"
                                         );
                                     }
-                                } else {
-                                    console.warn("[WFAppSub] XHR: no opener to send data to");
-                                }
 
-                                try {
-                                    global.close();
-                                } catch (e) {
-                                    console.warn("[WFAppSub] XHR: failed to close window", e);
+                                    try {
+                                        global.close();
+                                    } catch (e) {
+                                        console.warn(
+                                            "[WFAppSub] XHR: failed to close window",
+                                            e
+                                        );
+                                    }
+                                } catch (err) {
+                                    console.warn(
+                                        "[WFAppSub] XHR handler error",
+                                        err
+                                    );
                                 }
-                            } catch (err) {
-                                console.warn("[WFAppSub] XHR handler error", err);
-                            }
-                        }, false);
+                            },
+                            false
+                        );
                     }
                 } catch (err) {
-                    console.warn("[WFAppSub] Error in XHR open interceptor", err);
+                    console.warn(
+                        "[WFAppSub] Error in XHR open interceptor",
+                        err
+                    );
                 }
 
                 return open.apply(this, arguments);
@@ -152,23 +187,32 @@
 
                 console.log("[WFAppSub] fetch getSubmittedPois detected:", url);
 
-                return origFetch.apply(this, arguments).then(response => {
-                    // Clone so we don't consume the body used by the page
+                return origFetch.apply(this, arguments).then((response) => {
                     const clone = response.clone();
 
-                    clone.text().then(raw => {
+                    clone
+                        .text()
+                        .then((raw) => {
                         try {
                             if (!raw) return;
                             let json;
                             try {
                                 json = JSON.parse(raw);
                             } catch (e) {
-                                console.warn("[WFAppSub] fetch: failed to parse JSON", e);
+                                console.warn(
+                                    "[WFAppSub] fetch: failed to parse JSON",
+                                    e
+                                );
                                 return;
                             }
 
-                            if (!json || !Array.isArray(json.submittedPois)) {
-                                console.warn("[WFAppSub] fetch: no submittedPois array");
+                            if (
+                                !json ||
+                                !Array.isArray(json.submittedPois)
+                            ) {
+                                console.warn(
+                                    "[WFAppSub] fetch: no submittedPois array"
+                                );
                                 return;
                             }
 
@@ -178,34 +222,49 @@
                                     opener.postMessage(
                                         {
                                             type: POSTMESSAGE_TYPE_IMPORT,
-                                            submittedPois: json.submittedPois
+                                            submittedPois: json.submittedPois,
                                         },
                                         "https://wayfarer.nianticlabs.com"
                                     );
                                 } catch (e) {
-                                    console.warn("[WFAppSub] fetch: strict postMessage failed, retry with *", e);
+                                    console.warn(
+                                        "[WFAppSub] fetch: strict postMessage failed, retry with *",
+                                        e
+                                    );
                                     opener.postMessage(
                                         {
                                             type: POSTMESSAGE_TYPE_IMPORT,
-                                            submittedPois: json.submittedPois
+                                            submittedPois: json.submittedPois,
                                         },
                                         "*"
                                     );
                                 }
                             } else {
-                                console.warn("[WFAppSub] fetch: no opener to send data to");
+                                console.warn(
+                                    "[WFAppSub] fetch: no opener to send data to"
+                                );
                             }
 
                             try {
                                 global.close();
                             } catch (e) {
-                                console.warn("[WFAppSub] fetch: failed to close window", e);
+                                console.warn(
+                                    "[WFAppSub] fetch: failed to close window",
+                                    e
+                                );
                             }
                         } catch (err) {
-                            console.warn("[WFAppSub] fetch handler error", err);
+                            console.warn(
+                                "[WFAppSub] fetch handler error",
+                                err
+                            );
                         }
-                    }).catch(e => {
-                        console.warn("[WFAppSub] fetch: error reading body", e);
+                    })
+                        .catch((e) => {
+                        console.warn(
+                            "[WFAppSub] fetch: error reading body",
+                            e
+                        );
                     });
 
                     return response;
