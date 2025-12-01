@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.1.4
+// @version      2.1.5
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -1161,14 +1161,21 @@
             divider1.className = "wfmapmods-section-divider wfmapmods-section-divider-details wfmapmods-divider-1";
             Object.assign(divider1.style, {
                 borderTop: "1px solid #e5e7eb",
-                margin: "6px 0",
+                margin: "4px 0",
             });
 
             const divider2 = document.createElement("div");
             divider2.className = "wfmapmods-section-divider wfmapmods-divider-2";
             Object.assign(divider2.style, {
                 borderTop: "1px solid #e5e7eb",
-                margin: "6px 0",
+                margin: "4px 0",
+            });
+
+            const divider3 = document.createElement("div");
+            divider3.className = "wfmapmods-section-divider wfmapmods-divider-3";
+            Object.assign(divider3.style, {
+                borderTop: "1px solid #e5e7eb",
+                margin: "4px 0",
             });
 
             // ==============================
@@ -1176,10 +1183,6 @@
             // ==============================
 
             const parser = new DOMParser();
-
-            // ==============================
-            // SECTION 3: Wayspot Function Links
-            // ==============================
 
             const poiFunctionsSection = document.createElement("section");
             poiFunctionsSection.className = "wfmapmods-section wfmapmods-section-poi-functions";
@@ -1353,11 +1356,11 @@
             content.appendChild(poiFunctionsSection);
             content.appendChild(divider2);
             content.appendChild(locationFunctionsSection);
-            content.appendChild(divider2);
+            content.appendChild(divider3);
             content.appendChild(settingsSection);
 
             detailsSection.style.padding = "8px 4px";
-            locationFunctionsSection.style.padding = "8px 4px";  // NEW
+            locationFunctionsSection.style.padding = "8px 4px";
             poiFunctionsSection.style.padding = "8px 4px";
             settingsSection.style.padding = "8px 4px";
 
