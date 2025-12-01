@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Contributions Overlay
-// @version      1.2.0
+// @version      1.2.1
 // @description  Loads nominations from the Contributions list and shows them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-contributions-overlay.user.js
@@ -26,7 +26,7 @@
     const SUBMISSION_BRIDGE_ID = "wfmapmods-submit-bridge";
 
     // Behaviour / performance
-    const PERFORMANCE_MAX_VISIBLE_MARKERS = 400;
+    const PERFORMANCE_MAX_VISIBLE_MARKERS = 300;
 
     // Status mapping for manage actions
     const MANAGE_ACTION_STATUS = {
@@ -77,7 +77,6 @@
     const userSettings = {
         map: {
             performanceModeEnabled: true,
-            performanceMaxVisibleMarkers: PERFORMANCE_MAX_VISIBLE_MARKERS,
             contributionsEnabled: true
         },
         markers: {
@@ -861,7 +860,8 @@
                 strokeColor: cfg.strokeColor,
                 strokeOpacity: cfg.strokeOpacity,
                 strokeWeight: cfg.strokeWeight,
-                scale: cfg.scale
+                scale: cfg.scale,
+                optimized: false,
             }
         });
 
@@ -1369,7 +1369,8 @@
                 strokeColor: cfg.strokeColor,
                 strokeOpacity: cfg.strokeOpacity,
                 strokeWeight: cfg.strokeWeight,
-                scale: cfg.scale
+                scale: cfg.scale,
+                optimized: false,
             }
         });
 
@@ -1477,9 +1478,7 @@
             return;
         }
 
-        const maxVisibleMarkers = typeof mapCfg.performanceMaxVisibleMarkers === "number"
-        ? mapCfg.performanceMaxVisibleMarkers
-        : PERFORMANCE_MAX_VISIBLE_MARKERS;
+        const maxVisibleMarkers = PERFORMANCE_MAX_VISIBLE_MARKERS;
 
         // First pass: collect nominations that *could* be visible,
         // respecting status "enabled" flags and map bounds.
@@ -1560,7 +1559,8 @@
                     map: null, // attach later when in-bounds
                     position: { lat: poi.lat, lng: poi.lng },
                     title: `${poi.title || "No title"} (${String(poi.status || "").toUpperCase() || "UNKNOWN"})`,
-                    icon: baseIcon
+                    icon: baseIcon,
+                    optimized: false,
                 });
 
                 marker.addListener("click", () => {
@@ -2523,9 +2523,6 @@
                 if (typeof mapCfg.performanceModeEnabled !== "boolean") {
                     mapCfg.performanceModeEnabled = true;
                 }
-                if (typeof mapCfg.performanceMaxVisibleMarkers !== "number") {
-                    mapCfg.performanceMaxVisibleMarkers = PERFORMANCE_MAX_VISIBLE_MARKERS;
-                }
 
                 const perfRow = document.createElement("div");
                 perfRow.style.display = "flex";
@@ -2723,9 +2720,6 @@
                 // Persist performance option
                 const mapCfg = userSettings.map || (userSettings.map = {});
                 mapCfg.performanceModeEnabled = !!(ctx.perfCheckbox && ctx.perfCheckbox.checked);
-                if (typeof mapCfg.performanceMaxVisibleMarkers !== "number") {
-                    mapCfg.performanceMaxVisibleMarkers = PERFORMANCE_MAX_VISIBLE_MARKERS;
-                }
 
                 // Styles + enabled flags are already reflected in cfg objects via change handlers.
                 saveSettings();
@@ -2934,7 +2928,7 @@
         const statusCfg = getMarkerConfigForStatus(poi.status);
 
         const payload = {
-            guid: poi.id || "",
+            id: poi.id || "",
             title: poi.title || "(untitled)",
             description: poi.description || "",
             lat: (typeof poi.lat === "number") ? poi.lat : null,
