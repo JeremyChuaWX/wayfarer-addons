@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Spatial Overlay
-// @version      0.1.0
+// @version      0.1.1
 // @description  Highlights differences between Niantic Spatial POIs and Wayfarer POIs
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-spatial-overlay.user.js
@@ -1265,7 +1265,7 @@
         introNote.style.marginBottom = "12px";
         introNote.textContent =
             `This plug-in highlights similarities and differences between Wayfarer POI data and Niantic Spatial POI data. ` +
-            `Use requires a developer account for lightship.dev. ` +
+            `Use requires a developer account for lightship.dev. No data from either site is stored.` +
             `If using this plug-in, please consider the Terms of Service of both services.`;
         body.appendChild(introNote);
 
