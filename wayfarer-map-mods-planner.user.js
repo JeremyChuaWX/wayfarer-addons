@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Planner
-// @version      0.1.3
+// @version      0.1.4
 // @description  Load and edit planner POIs from a Google Sheet and show them as pins on the Wayfarer submission map.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-planner.user.js
@@ -231,10 +231,6 @@
         })
             .catch(err => {
             console.warn("[Planner] Failed to fetch planner data:", err);
-            window.alert(
-                "Wayfarer Planner: failed to retrieve data from the script URL.\n" +
-                "Please verify the URL and that no extension blocks access to Google."
-            );
         });
     }
 
