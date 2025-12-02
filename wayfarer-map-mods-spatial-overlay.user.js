@@ -1265,7 +1265,7 @@
         introNote.style.marginBottom = "12px";
         introNote.textContent =
             `This plug-in highlights similarities and differences between Wayfarer POI data and Niantic Spatial POI data. ` +
-            `Use requires a developer account for lightship.dev. No data from either site is stored.` +
+            `Use requires a developer account for lightship.dev. No data from either site is stored. ` +
             `If using this plug-in, please consider the Terms of Service of both services.`;
         body.appendChild(introNote);
 
