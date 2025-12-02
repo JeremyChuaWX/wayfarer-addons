@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Draw Tools
-// @version      0.1.0
+// @version      0.1.1
 // @description  Adds simple drawing tools (markers, polylines, circles) to the Wayfarer submission map, with persistence.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-draw-tools.user.js
@@ -906,7 +906,8 @@
             border: "1px solid #d1d5db",
             background: "#ffffff",
             cursor: "pointer",
-            fontFamily: "Roboto, Arial, sans-serif"
+            fontFamily: "Roboto, Arial, sans-serif",
+            color: "#6b7280"
         });
         btn.title = title;
         return btn;
@@ -934,7 +935,8 @@
             fontSize: "11px",
             fontWeight: "600",
             marginBottom: "2px",
-            textAlign: "center"
+            textAlign: "center",
+            color: "#6b7280",
         });
         controlDiv.appendChild(title);
 
