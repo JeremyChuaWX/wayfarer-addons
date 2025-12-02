@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Wayfarer App Submissions
-// @version      0.1.2
+// @version      0.1.3
 // @description  Import Wayfarer App submissions from Lightship Geospatial Browser and show them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-wayfarer-app-submissions.user.js
@@ -30,6 +30,8 @@
     const PERFORMANCE_MAX_VISIBLE_MARKERS = 400;
 
     const WFAPPSUB_CHILD_NAME = "wf-lightship-geospatial";
+
+    const LIGHTSHIP_LOGO_SVG = '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" fill-rule="evenodd"><path d="M32 8c3.812 0 7.465.874 10.856 2.598a.208.208 0 01.037.348l-.04.026-4.591 2.256a.208.208 0 01-.158.01A19.714 19.714 0 0032 12.273a19.598 19.598 0 00-13.95 5.779A19.598 19.598 0 0012.27 32c0 1.53.518 2.646 1.539 3.316 2.098 1.379 5.996.795 9.625-.252l.656-.195.647-.203.637-.21.313-.106.613-.215.596-.217.852-.322.537-.21.51-.205.923-.385.408-.175a.939.939 0 011.054.199.938.938 0 01.2 1.053l-.362.854-.297.73-.313.796-.214.563-.215.586-.215.605-.213.622-.105.317-.206.643-.199.652-.19.66c-.982 3.535-1.487 7.264-.151 9.296.667 1.016 1.777 1.53 3.299 1.53a19.6 19.6 0 0013.95-5.778A19.599 19.599 0 0051.73 32c0-2.234-.376-4.434-1.115-6.54a.208.208 0 01-.008-.11l.017-.051 2.22-4.517a.209.209 0 01.183-.116c.07-.002.15.041.188.11A24.05 24.05 0 0156 32.002c0 13.233-10.767 24-24 24S8 45.234 8 32C8 18.767 18.767 8 32 8zm19.336 2.399c1.257-.618 2.58.653 2.069 1.913l-.048.108-11.31 23.018c-.57 1.161-2.22 1.104-2.73-.04l-.05-.122-2.574-7.293a1.509 1.509 0 00-.794-.87l-.127-.051-7.292-2.574c-1.22-.43-1.356-2.075-.279-2.717l.116-.062 23.019-11.31z"/></svg>';
 
     // postMessage channel
     const POSTMESSAGE_TYPE_IMPORT = "wfmap-wayfarerapp-import";
@@ -1548,8 +1550,8 @@
                 imageUrl: poi.imageServingUrl || "",
                 status: poi.curationState || "",
                 source: POI_BRIDGE_SOURCE,
-                sourceLogo: "LIGHTSHIP",
-                sourceText: "Wayfarer App submission",
+                dataSourceLogo: LIGHTSHIP_LOGO_SVG,
+                dataSourceText: "Wayfarer App submission",
             };
 
             try {
