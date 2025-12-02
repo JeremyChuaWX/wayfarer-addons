@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Wayfarer App Submissions
-// @version      0.1.3
+// @version      0.1.4
 // @description  Import Wayfarer App submissions from Lightship Geospatial Browser and show them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-wayfarer-app-submissions.user.js
@@ -924,9 +924,11 @@
                 const checkbox = document.createElement("input");
                 checkbox.type = "checkbox";
                 checkbox.checked = mapCfg.wayfarerAppEnabled !== false;
+                checkbox.className = "wfmapmods-layers-checkbox";
 
                 const text = document.createElement("span");
                 text.textContent = "Wayfarer App submissions";
+                text.className = "wfmapmods-layers-label";
 
                 label.appendChild(checkbox);
                 label.appendChild(text);
