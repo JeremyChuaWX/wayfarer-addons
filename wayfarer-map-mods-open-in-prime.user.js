@@ -25,7 +25,7 @@
 
 // You can find a copy of the GNU General Public License in the root
 // directory of this script's GitHub repository:
-// <https://github.com/tehstone/wayfarer-addons/blob/main/LICENSE>
+// <https://gitlab.com/Tntnnbltn/wayfarer-addons/-/blob/main/LICENSE>
 // If not, see <https://www.gnu.org/licenses/>.
 
 (function() {
