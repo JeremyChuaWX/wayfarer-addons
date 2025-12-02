@@ -119,15 +119,15 @@
         ACCEPTED: "Accepted",
     };
 
-    // -----------------------------
+    // ==================================
     // SVG Logos
-    // -----------------------------
+    // ==================================
     const WAYFARER_LOGO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 168.64822 385.63867"><g transform="translate(-1713.3254,-206.92756)"><path fill="#000000" d="m 1796.8177,206.93648 c -1.4336,0.0214 -2.8694,0.0811 -4.3086,0.17968 -46.5329,3.18681 -81.4741,42.22048 -79.0664,88.33008 0.6634,12.70543 1.194,14.21682 45.043,128.26758 12.3703,32.17497 22.7806,59.4 23.1328,60.5 0.9228,2.88168 3.7726,6.02575 7.6817,8.47656 7.3893,4.63273 19.8475,0.73709 23.4296,-7.32617 2.4087,-5.42181 55.0508,-143.34771 61.4317,-160.95508 6.7916,-18.74043 8.5934,-28.23315 7.5273,-39.66015 -2.0038,-21.47603 -10.6317,-39.26432 -26.3027,-54.23633 -16.3041,-15.57678 -37.0635,-23.89663 -58.5684,-23.57617 z m 0.6875,51.41406 a 33.067028,33.067028 0 0 1 33.0664,33.0664 33.067028,33.067028 0 0 1 -33.0664,33.06641 33.067028,33.067028 0 0 1 -33.0683,-33.06641 33.067028,33.067028 0 0 1 33.0683,-33.0664 z m 0.8184,269.64648 c -4.5709,-0.16021 -9.2407,0.67626 -13.7168,2.65625 -5.8988,2.6093 -13.0929,9.51789 -16.1582,15.51953 -3.6613,7.16844 -4.2239,17.96942 -1.3359,25.6211 3.4496,9.13947 10.5363,16.08888 19.9726,19.58789 5.5946,2.0745 18.5971,1.31232 24.1582,-1.41602 14.0914,-6.91328 21.5412,-22.84569 17.5488,-37.52539 -3.945,-14.50608 -16.7561,-23.96272 -30.4687,-24.44336 z" /></g></svg>';
     const SUBMISSION_PIN = '<svg width="30" height="47" viewBox="0 0 30 47" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5146 0C22.5308 1.85546e-05 29.0293 6.49846 29.0293 14.5146C29.0293 22.0646 23.2643 28.2678 15.8965 28.9639V44.2354C15.8963 44.9986 15.278 45.6172 14.5146 45.6172C13.7513 45.6172 13.132 44.9986 13.1318 44.2354V28.9639C5.76427 28.2676 1.65052e-05 22.0644 0 14.5146C0 6.49845 6.49845 0 14.5146 0ZM14.5176 9.67676C11.8457 9.67693 9.67969 11.8427 9.67969 14.5146C9.67978 17.1865 11.8457 19.3524 14.5176 19.3525C17.1896 19.3525 19.3564 17.1866 19.3564 14.5146C19.3564 11.8426 17.1896 9.67676 14.5176 9.67676Z" fill="#FF4713"/><path opacity="0.3" d="M14.5145 46.9998C16.4231 46.9998 17.9703 46.2262 17.9703 45.2719C17.9703 44.3176 16.4231 43.5439 14.5145 43.5439C12.6058 43.5439 11.0586 44.3176 11.0586 45.2719C11.0586 46.2262 12.6058 46.9998 14.5145 46.9998Z" fill="#FF4713"/></svg>';
 
-    // -----------------------------
-    // Settings (defaults + storage)
-    // -----------------------------
+    // ==================================
+    // User settings & configuration
+    // ==================================
 
     let userSettings = {
         poi: {
@@ -238,7 +238,7 @@
     }
 
     // ==================================
-    // Helpers
+    // General helpers
     // ==================================
 
     const awaitElement = get => new Promise((resolve, reject) => {
@@ -1019,7 +1019,7 @@
                 triggerGeolocation(submitMap);
             });
 
-            // Optional: Places autocomplete
+            // Places autocomplete
             if (typeof setupSearchAutocomplete === "function") {
                 setupSearchAutocomplete(searchInput);
             }
@@ -1268,7 +1268,6 @@
             // Links row (same styling as other link blocks)
             const locationLinksRow = document.createElement("div");
             locationLinksRow.className = "wfmapmods-link-block wfmapmods-location-links";
-            // optional: slightly tweak spacing for this block only
             locationLinksRow.style.gap = "8px";
 
             const linkSubmitWayspot = document.createElement("a");
@@ -1490,10 +1489,7 @@
         if (sourceLogoEl) {
             sourceLogoEl.innerHTML = poi.dataSourceLogo;
 
-            console.log('sourceLogoEl.innerHTML ...')
-            console.log(sourceLogoEl.innerHTML);
             if (sourceLogoEl.innerHTML === "") {
-                console.log('hiding');
                 sourceLogoEl.style.display = "none";
             } else {
                 sourceLogoEl.title = poi.sourceText;
@@ -2039,8 +2035,6 @@
         });
     }
 
-    // NOTE: Works only if the target server (lh3.googleusercontent.com, etc.)
-    // sends appropriate CORS headers. No @grant required.
     function fetchImageBlobForSubmit(url) {
         return new Promise(async (resolve, reject) => {
             if (!url) {
@@ -2050,8 +2044,6 @@
 
             try {
                 const res = await fetch(url, {
-                    // Most lh3 URLs used by Niantic are public, so no credentials needed.
-                    // mode: "cors" is default for cross-origin fetch; you can omit it.
                     mode: "cors",
                     credentials: "omit"
                 });
@@ -2544,7 +2536,7 @@
                 renderImages();
 
                 // ==========================
-                // NEW: Location row (lat,lng)
+                // Location row (lat,lng)
                 // ==========================
 
                 const locationRow = document.createElement("div");
@@ -2915,15 +2907,12 @@
                     return;
                 }
 
-                // Optional: distance check (you already wired validate() to enforce it)
-
                 const merged = Object.assign({}, ctx.submitData);
 
                 merged.poi = Object.assign({}, merged.poi, {
                     title,
                     description,
                     supportingStatement
-                    // lat/lng already on merged.poi from submitData (updated via Change/location)
                 });
 
                 merged.images = {
@@ -3611,7 +3600,7 @@
                 }
             }, {
                 once: true
-            }); // optional: ensure no double binding
+            });
         }
 
         // ---- Copy Title ----
@@ -4613,7 +4602,7 @@
     }
 
     function applyMobileMapMode() {
-        // Hide Niantic's overlay and use our own
+        // Hide native center pin overlay and show custom overlay.
         hideNativeCenterPin();
         ensureCenterPinOverlay();
 
@@ -5330,7 +5319,7 @@
             removeMenu();
         });
 
-        // Optional: also copy when clicking the text itself
+        // Allow clicking the label to copy coordinates.
         label.style.cursor = "pointer";
         label.title = "Click to copy coordinates";
         label.addEventListener("click", () => {
@@ -5597,7 +5586,6 @@
 
         submitMap.setCenter(latLng);
 
-        // Optional: zoom in a bit if too far out
         const z = submitMap.getZoom();
         if (typeof z === "number" && z < 17) {
             submitMap.setZoom(17);
