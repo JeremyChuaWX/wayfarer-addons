@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - s2 Cells
-// @version      0.1.1
+// @version      0.1.2
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-s2-cells.user.js
@@ -361,9 +361,11 @@
             const checkbox = document.createElement("input");
             checkbox.type = "checkbox";
             checkbox.checked = !userSettings.master || userSettings.master.enabled !== false;
+            checkbox.className = "wfmapmods-layers-checkbox";
 
             const span = document.createElement("span");
             span.textContent = "S2 cells";
+            span.className = "wfmapmods-layers-label";
 
             label.appendChild(checkbox);
             label.appendChild(span);
