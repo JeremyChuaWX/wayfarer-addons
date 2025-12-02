@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Contributions Overlay
-// @version      1.2.2
+// @version      1.2.3
 // @description  Loads nominations from the Contributions list and shows them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-contributions-overlay.user.js
@@ -2229,9 +2229,11 @@
             const checkbox = document.createElement("input");
             checkbox.type = "checkbox";
             checkbox.checked = mapCfg.contributionsEnabled !== false;
+            checkbox.className = "wfmapmods-layers-checkbox";
 
             const text = document.createElement("span");
             text.textContent = "Contributions";
+            text.className = "wfmapmods-layers-label";
 
             label.appendChild(checkbox);
             label.appendChild(text);
