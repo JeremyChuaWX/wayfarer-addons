@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.2.5
+// @version      2.2.6
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -5177,6 +5177,9 @@
             restoreMapView();
         }
         initMapRightClickCopy();
+
+        desktopSubmitMarker = null;
+        centerPinOverlay = null;
 
         if (currentMapMode === MAP_MODE.MOBILE) {
             hideNativeCenterPin();
