@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Planner
-// @version      0.1.5
+// @version      0.1.6
 // @description  Load and edit planner POIs from a Google Sheet and show them as pins on the Wayfarer submission map.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-planner.user.js
@@ -1047,7 +1047,7 @@
         };
 
         const container = document.createElement("div");
-        container.className = "wfmapmods-planner-popup";
+        container.className = "wfmapmods-planner-popup wf-nearby-iw-content";
         container.style.maxWidth = "260px";
         container.style.fontSize = "12px";
 
