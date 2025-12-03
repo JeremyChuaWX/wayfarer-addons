@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Exif Auto-Center
-// @version      0.0.2
+// @version      0.1.0
 // @description  Read EXIF GPS from the main photo upload and auto-center the submit map.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-exif-auto-center.user.js
@@ -99,15 +99,36 @@
             const latLng = new google.maps.LatLng(latitude, longitude);
             map.setCenter(latLng);
 
-            // Optional: only adjust zoom if it's very zoomed out
             const currentZoom = map.getZoom();
             if (typeof currentZoom === 'number' && currentZoom < 17) {
                 map.setZoom(17);
             }
 
             console.log('[Exif Auto-Center] Map centered on EXIF GPS', latitude, longitude);
+
+            // Give the map a moment to settle, then simulate a click
+            setTimeout(() => {
+                simulateMapClick(map, latLng);
+            }, 300);
         } catch (e) {
             console.error('[Exif Auto-Center] Failed to center map:', e);
+        }
+    }
+
+    /**
+     * Try to simulate a user click on the map at the given LatLng.
+     * First use the Google Maps API event, then fall back to a DOM click.
+     */
+    function simulateMapClick(map, latLng) {
+        try {
+            // Maps API-level click – if Niantic listens on the map, this should work
+            if (google && google.maps && google.maps.event) {
+                google.maps.event.trigger(map, 'click', { latLng });
+                console.log('[Exif Auto-Center] Triggered google.maps click event');
+                return;
+            }
+        } catch (e) {
+            console.warn('[Exif Auto-Center] google.maps.event.trigger failed, trying DOM click', e);
         }
     }
 
@@ -159,19 +180,26 @@
     function scanForMainPhotoInputs(root = document) {
         const inputs = root.querySelectorAll(
             [
-                // Typical main photo upload area in submit flow
-                'app-wayspot-image-entry input[type="file"]',
-                // Fallback for image-only file inputs
-                'input[type="file"][accept*="image"]'
+                'app-submit-wayspot-image-uploader input[type="file"]',
+                '#file-input[type="file"]',
             ].join(', ')
         );
 
         if (inputs.length) {
-            console.log('[Exif Auto-Center] Found image file inputs:', inputs.length);
+            console.log('[Exif Auto-Center] Found file inputs:', inputs.length);
         }
 
-        inputs.forEach(bindExifListenerToInput);
+        // Ignore 'Surrounding Area' photos - exif more likely to be further away
+        inputs.forEach(input => {
+            if (input.hasAttribute('multiple')) {
+                console.log('[Exif Auto-Center] Skipping additional-photos input', input);
+                return;
+            }
+
+            bindExifListenerToInput(input);
+        });
     }
+
 
     // ================================
     // Bootstrapping / SPA handling
