@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.2.4
+// @version      2.2.5
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -2841,11 +2841,29 @@
                             const description = descInput.value.trim();
                             const supportingStatement = suppInput.value.trim();
 
-                            const lat = currentLat;
-                            const lng = currentLng;
+                            let lat = null;
+                            let lng = null;
 
-                            if (typeof lat !== "number" || typeof lng !== "number" ||
-                                !Number.isFinite(lat) || !Number.isFinite(lng)) {
+                            if (
+                                submitData.poi &&
+                                typeof submitData.poi.lat === "number" && Number.isFinite(submitData.poi.lat) &&
+                                typeof submitData.poi.lng === "number" && Number.isFinite(submitData.poi.lng)
+                            ) {
+                                lat = submitData.poi.lat;
+                                lng = submitData.poi.lng;
+                            } else if (
+                                typeof currentLat === "number" && Number.isFinite(currentLat) &&
+                                typeof currentLng === "number" && Number.isFinite(currentLng)
+                            ) {
+                                // Fallback to initial snapshot if poi didn’t get updated for some reason
+                                lat = currentLat;
+                                lng = currentLng;
+                            }
+
+                            if (
+                                typeof lat !== "number" || typeof lng !== "number" ||
+                                !Number.isFinite(lat) || !Number.isFinite(lng)
+                            ) {
                                 alert("Cannot save draft: submission is missing a valid location.");
                                 return;
                             }
@@ -2876,6 +2894,7 @@
                             await saveDraftSubmissionToIDB(draft);
                             closeModal();
                         });
+
                     }
 
                     // Delete draft button (only if opened from a draft)
