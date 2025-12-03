@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - s2 Cells
-// @version      0.1.2
+// @version      0.1.3
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-s2-cells.user.js
@@ -320,7 +320,7 @@
 
         function findAndAttachLatLngElement() {
             // Adjust this selector if Niantic change their DOM
-            const el = document.querySelector('.text-gray-400.text-xs');
+            const el = document.querySelector('.submit-coordinates-text');
             if (!el) return;
             attachToLatLngElement(el);
         }
