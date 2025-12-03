@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.2.3
+// @version      2.2.4
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -2760,7 +2760,27 @@
                     const textValid = !!t && !!d && !!s;
                     const imageValid = hasMain && supportingCount >= 1 && supportingCount <= 5;
 
-                    // --- Distance validity (marker vs submitterLocation) ---
+                    // --- Figure out the marker location ---
+                    let markerLat = null;
+                    let markerLng = null;
+
+                    if (
+                        submitData.poi &&
+                        typeof submitData.poi.lat === "number" && Number.isFinite(submitData.poi.lat) &&
+                        typeof submitData.poi.lng === "number" && Number.isFinite(submitData.poi.lng)
+                    ) {
+                        markerLat = submitData.poi.lat;
+                        markerLng = submitData.poi.lng;
+                    } else if (
+                        typeof currentLat === "number" && Number.isFinite(currentLat) &&
+                        typeof currentLng === "number" && Number.isFinite(currentLng)
+                    ) {
+                        // Fallback to initial snapshot if poi hasn't got coords for some reason
+                        markerLat = currentLat;
+                        markerLng = currentLng;
+                    }
+
+                    // --- Distance validity (submitterLocation vs marker) ---
                     let distanceValid = true;
                     let distanceKm = null;
 
@@ -2768,16 +2788,14 @@
                         submitterLocation &&
                         typeof submitterLocation.lat === "number" &&
                         typeof submitterLocation.lng === "number" &&
-                        typeof currentLat === "number" &&
-                        typeof currentLng === "number" &&
-                        Number.isFinite(currentLat) &&
-                        Number.isFinite(currentLng)
+                        markerLat != null &&
+                        markerLng != null
                     ) {
                         const dMeters = distanceMeters(
                             submitterLocation.lat,
                             submitterLocation.lng,
-                            currentLat,
-                            currentLng
+                            markerLat,
+                            markerLng
                         );
                         distanceKm = dMeters / 1000;
                         if (dMeters > submitRadius) {
@@ -2785,7 +2803,6 @@
                         }
                     }
 
-                    // Update warning message in the UI
                     if (!distanceValid && distanceKm != null) {
                         distanceWarning.style.display = "block";
                         distanceWarning.textContent =
@@ -3381,19 +3398,36 @@
                 return;
             }
 
+            const position = new google.maps.LatLng(lat, lng);
+
             const marker = new google.maps.Marker({
-                position: { lat, lng },
+                position,
                 map: submitMap,
                 title: poi.title || "Draft nomination",
-                optimized: false,
-
-                // You can customise icon here if you like:
+                optimized: false
                 // icon: "data:image/svg+xml;base64,...."
             });
 
             marker.setVisible(isDraftLayerEnabled());
 
             marker.addListener("click", () => {
+                // 1. Centre the map on this draft
+                if (submitMap) {
+                    // You can use setCenter or panTo
+                    submitMap.setCenter(position);
+                    // Optional: also force a zoom level for drafts
+                    // submitMap.setZoom(18);
+                }
+
+                // 2. Simulate a map click at this location so all your
+                //    existing map-click logic runs (pin placement, etc.)
+                if (google && google.maps && submitMap) {
+                    google.maps.event.trigger(submitMap, "click", {
+                        latLng: position
+                    });
+                }
+
+                // 3. Open the edit modal with this draft’s data
                 openSubmissionEditModal({
                     poi: {
                         lat,
@@ -3412,7 +3446,6 @@
             draftMarkers.push(marker);
         });
     }
-
 
     // ==================================
     // Marker selection
