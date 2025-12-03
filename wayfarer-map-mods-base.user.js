@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.2.2
+// @version      2.2.3
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -3164,11 +3164,22 @@
         // 1. HEIC / HEIF → JPEG (heic2any)
         // ================================
         if (isHeic(file)) {
-            if (typeof window.heic2any !== "function") {
+            const heic2anyLib =
+                  (typeof heic2any === "function" && heic2any) ||
+                  (typeof window !== "undefined" &&
+                   typeof window.heic2any === "function" &&
+                   window.heic2any);
+
+            if (!heic2anyLib) {
+                console.error(
+                    "[Base] heic2any missing",
+                    "heic2any =", typeof heic2any,
+                    "window.heic2any =", typeof window !== "undefined" ? typeof window.heic2any : "no-window"
+                );
                 throw new Error("heic2any library is missing.");
             }
 
-            const resultBlob = await window.heic2any({
+            const resultBlob = await heic2anyLib({
                 blob: file,
                 toType: "image/jpeg",
                 quality: 0.9
@@ -3178,6 +3189,7 @@
             const dataUrl = await blobToDataURL(jpegBlob);
             return { blob: jpegBlob, dataUrl };
         }
+
 
         // ==========================================
         // 2. PNG / WebP → JPEG via canvas conversion
