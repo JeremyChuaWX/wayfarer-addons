@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Report Wayspots
-// @version      0.1.3
+// @version      0.1.4
 // @description  Adds a "Report Wayspot" link to the side panel and pre-fills the Helpshift form using POI bridge data
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
@@ -209,7 +209,6 @@
             // Condition 2: LIVE/ACCEPTED from any source, but must match a loaded POI
             if (typeof lat === 'number' && typeof lng === 'number') {
                 const pois = Array.isArray(livePois) ? livePois : [];
-                console.log("livePois for visibility check:", pois);
                 const EPS = 1e-7;
 
                 visible = pois.some(p =>
@@ -512,7 +511,6 @@
     }
 
     function handleReportWayspotClick() {
-        console.log('handleReportWayspotClick');
         // Important: don't read address from DOM here; it may be for a different map click.
         // We only want bridge data at this stage.
         const wayspotData = collectCurrentWayspotData({ includeDomAddress: false });
@@ -817,25 +815,21 @@
     }
 
     function extractAddressFromDom() {
-        // --- NEW LAYOUT: .submit-address-text ---
         try {
             const addrEl = document.querySelector(".submit-address-text");
             if (addrEl) {
                 const addressText = (addrEl.textContent || "").trim();
                 if (addressText && addressText !== "Loading...") {
                     const parsed = parseAddressText(addressText);
-                    console.log("[WF→HS] (new classes) Raw address text:", addressText);
-                    console.log("[WF→HS] (new classes) Parsed address object:", parsed);
                     return parsed;
                 }
             }
         } catch (err) {
-            console.warn("[WF→HS] Error in extractAddressFromDom (new layout):", err);
+            console.warn("[WF→HS] Error in extractAddressFromDom:", err);
         }
     }
 
     function collectCurrentWayspotData(options = {}) {
-        console.log('collectCurrentWayspotData');
         const includeDomAddress = options.includeDomAddress !== false; // default: true
 
         let title = null;
