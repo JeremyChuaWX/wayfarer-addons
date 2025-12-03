@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Report Wayspots
-// @version      0.1.2
+// @version      0.1.3
 // @description  Adds a "Report Wayspot" link to the side panel and pre-fills the Helpshift form using POI bridge data
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
@@ -194,7 +194,6 @@
         if (!link) return;
 
         const info = getCurrentWayspotBridgeData();
-        console.log(info);
         if (!info || !info.status) {
             link.style.display = 'none';
             return;
@@ -214,12 +213,12 @@
                 const EPS = 1e-7;
 
                 visible = pois.some(p =>
-                    p &&
-                    typeof p.lat === 'number' &&
-                    typeof p.lng === 'number' &&
-                    Math.abs(p.lat - lat) < EPS &&
-                    Math.abs(p.lng - lng) < EPS
-                );
+                                    p &&
+                                    typeof p.lat === 'number' &&
+                                    typeof p.lng === 'number' &&
+                                    Math.abs(p.lat - lat) < EPS &&
+                                    Math.abs(p.lng - lng) < EPS
+                                   );
             }
         }
 
@@ -818,30 +817,21 @@
     }
 
     function extractAddressFromDom() {
+        // --- NEW LAYOUT: .submit-address-text ---
         try {
-            const candidates = document.querySelectorAll(".font-medium.text-gray-800");
-            for (const el of candidates) {
-                const sibling = el.nextElementSibling;
-                if (!sibling) continue;
-
-                const sibClass = sibling.classList;
-                if (!sibClass.contains("text-gray-400") || !sibClass.contains("text-xs")) continue;
-
-                const coordText = (sibling.textContent || "").trim();
-                if (!/^-?\d+\.\d+,\s*-?\d+\.\d+/.test(coordText)) continue; // make sure it's the lat/lng line
-
-                const addressText = (el.textContent || "").trim();
-                if (!addressText) continue;
-
-                const parsed = parseAddressText(addressText);
-                console.log("[WF→HS] Raw address text:", addressText);
-                console.log("[WF→HS] Parsed address object:", parsed);
-                return parsed;
+            const addrEl = document.querySelector(".submit-address-text");
+            if (addrEl) {
+                const addressText = (addrEl.textContent || "").trim();
+                if (addressText && addressText !== "Loading...") {
+                    const parsed = parseAddressText(addressText);
+                    console.log("[WF→HS] (new classes) Raw address text:", addressText);
+                    console.log("[WF→HS] (new classes) Parsed address object:", parsed);
+                    return parsed;
+                }
             }
         } catch (err) {
-            console.warn("[WF→HS] Error in extractAddressFromDom:", err);
+            console.warn("[WF→HS] Error in extractAddressFromDom (new layout):", err);
         }
-        return null;
     }
 
     function collectCurrentWayspotData(options = {}) {
