@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.2.1
+// @version      2.2.2
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -5921,39 +5921,6 @@
     }
 
     // ==================================
-    // Wayspot image entry tweaks
-    // ==================================
-
-    function initWayspotImageEntryWatcher() {
-        const observer = new MutationObserver(mutations => {
-            for (const m of mutations) {
-                for (const node of m.addedNodes) {
-                    if (!(node instanceof HTMLElement)) continue;
-
-                    // Must be <div class="image-container">
-                    if (!node.matches("div.image-container")) continue;
-
-                    // Must be inside <app-wayspot-image-entry>
-                    if (!node.closest("app-wayspot-image-entry")) continue;
-
-                    fixMainPhotoAspectRatioForContainer(node);
-                }
-            }
-        });
-
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
-    }
-
-    function fixMainPhotoAspectRatioForContainer(container) {
-        // Remove the width restrictions on the main photo to allow proper aspect ratio to show
-        container.style.setProperty("--width", "auto");
-        container.style.display = "inline-flex";
-    }
-
-    // ==================================
     // css styles
     // ==================================
 
@@ -6562,6 +6529,10 @@
         color: #111827;
         cursor: pointer;
     }
+
+    /* -------------------------
+       Remove map padding
+       ------------------------- */
     .submit-wayspot-container {
         padding: 0 !important;
     }
@@ -6614,7 +6585,6 @@
         loadSettings();
         injectCss();
         watchForLatLngElement();
-        initWayspotImageEntryWatcher();
         initMapModeWatcher();
         initSidenavPaddingRouteWatcher();
         createBridges();
