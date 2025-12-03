@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.2.0
+// @version      2.2.1
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -3538,7 +3538,7 @@
         const fullImgUrl = poi.imageUrl + "=s0";
 
         return `
-<div class="agm-info-window-content wfmapmods-iw-root">
+<div class="agm-info-window-content wfmapmods-iw-root wf-nearby-iw-content">
 
     <div class="wfmapmods-iw-content">
 
@@ -4577,7 +4577,7 @@
 
     function hasMobilePin() {
         return !!document.querySelector(
-            '.center-pin-container .center-pin[src*="map_selection_pin.svg"]'
+            '.nia-map__center-img-overlay'
         );
     }
 
@@ -4765,7 +4765,7 @@
     }
 
     function hideNativeCenterPin() {
-        const pinContainer = document.querySelector(".center-pin-container");
+        const pinContainer = document.querySelector(".nia-map__center-img-overlay");
         if (!pinContainer) return;
 
         pinContainer.style.setProperty("display", "none", "important");
@@ -5143,19 +5143,15 @@
     }
 
     function setGoogleMapControls() {
-        submitMap.setOptions({
-            clickableIcons: false,
-            cameraControl: false,
-            // fullscreenControl: true,
-        });
-
         let mapTypeControlOptions = {
             style: google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
             position: google.maps.ControlPosition.TOP_LEFT,
-            mapTypeIds: ["roadmap", "satellite", "hybrid"]
+            mapTypeIds: ["roadmap", "satellite", "hybrid"],
         };
 
         submitMap.setOptions({
+            clickableIcons: false,
+            cameraControl: false,
             mapTypeControl: true,
             mapTypeControlOptions
         });
@@ -6565,6 +6561,9 @@
         font-size: 11px;
         color: #111827;
         cursor: pointer;
+    }
+    .submit-wayspot-container {
+        padding: 0 !important;
     }
     `;
 
