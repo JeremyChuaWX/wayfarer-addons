@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.2.6
+// @version      2.2.7
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -3686,7 +3686,7 @@
         }
 
         // ---- Close button ----
-        const closeBtn = document.querySelector(".wf-iw-close");
+        const closeBtn = document.querySelector(".wfmapmods-iw-close");
         if (closeBtn) {
             closeBtn.addEventListener("click", (e) => {
                 e.stopPropagation(); // prevent clicking map behind it
