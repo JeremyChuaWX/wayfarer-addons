@@ -6407,6 +6407,10 @@
         position: relative;
     }
 
+    .gm-style-iw-c {
+        background-color: #fff !important;
+    }
+
     .wfmapmods-iw-content {
         display: flex;
         flex-direction: column;
