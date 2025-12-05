@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.3.3
+// @version      2.4.0
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -35,6 +35,8 @@
     // ==================================
     // Global state & constants
     // ==================================
+
+    window.wfmapmodsIsUploading = false;
 
     // ----- Constants -----
     const MAP_MODE = {
@@ -98,10 +100,8 @@
     let mapTypeListenerBound = false;
     let mapClickCloseBound = false;
 
-
     // ----- Sidebar state -----
     let sidePanelCollapsed = false;
-
 
     // ----- LocalStorage key for this plugin -----
     const SETTINGS_KEY = "wfmap_settings";
@@ -2117,10 +2117,23 @@
             return;
         }
 
+        // User confirmed → begin critical operation
+        window.wfmapmodsIsUploading = true;
+
+        // 0–20% = prep work
         wfmapmodsShowSubmitProgress("Starting nomination…", 5);
 
+        // Helper for image-upload range: 20–90%
+        function imageUploadPercent(done, total) {
+            const start = 20;
+            const end = 90;
+            if (total <= 0) return start;
+            const frac = done / total;
+            return start + Math.floor(frac * (end - start));
+        }
+
         try {
-            wfmapmodsUpdateSubmitProgress("Preparing images…", 15);
+            wfmapmodsUpdateSubmitProgress("Preparing images…", 10);
 
             async function resolveBlobFromState(state) {
                 if (!state) return null;
@@ -2134,6 +2147,7 @@
             const mainBlob = await resolveBlobFromState(mainState);
             if (!mainBlob) {
                 wfmapmodsHideSubmitProgress();
+                window.wfmapmodsIsUploading = false;
                 alert("Could not load main image data.");
                 return;
             }
@@ -2144,7 +2158,7 @@
                 if (b) supportingBlobs.push(b);
             }
 
-            wfmapmodsUpdateSubmitProgress("Contacting Wayfarer…", 30);
+            wfmapmodsUpdateSubmitProgress("Contacting Wayfarer…", 20);
 
             const startPayload = {
                 title,
@@ -2163,6 +2177,7 @@
 
             if (!startResp || startResp.captcha) {
                 wfmapmodsHideSubmitProgress();
+                window.wfmapmodsIsUploading = false;
                 alert("Submit/start failed or requires captcha. Please submit manually.");
                 return;
             }
@@ -2176,6 +2191,7 @@
 
             if (!submissionId) {
                 wfmapmodsHideSubmitProgress();
+                window.wfmapmodsIsUploading = false;
                 alert("Submit/start did not return a submissionId.");
                 return;
             }
@@ -2191,14 +2207,10 @@
 
             if (!mainUploadUrl) {
                 wfmapmodsHideSubmitProgress();
+                window.wfmapmodsIsUploading = false;
                 alert("Submit/start did not return main image URL.");
                 return;
             }
-
-            // === Upload main image ===
-            wfmapmodsUpdateSubmitProgress("Uploading main photo…", 50);
-            console.log("[WF Submit] PUT main image to:", mainUploadUrl);
-            await putImageToSignedUrlForSubmit(mainUploadUrl, mainBlob);
 
             // =====================================================
             // Build supporting URLs
@@ -2225,35 +2237,87 @@
             console.log("[WF Submit] supportingUploadUrls:", supportingUploadUrls);
             console.log("[WF Submit] supportingBlobs.length:", supportingBlobs.length);
 
-            if (supportingUploadUrls.length < supportingBlobs.length) {
-                console.warn(
-                    `[WF Submit] MISMATCH: Need ${supportingBlobs.length} supporting URLs but only got ${supportingUploadUrls.length}`
+            const totalSupporting = supportingBlobs.length;
+            const totalImages = 1 + totalSupporting; // main + supporting
+            let uploadedImages = 0;
+
+            // Hard fail if Wayfarer didn't give us a URL for every supporting image.
+            if (totalSupporting > 0 && supportingUploadUrls.length < totalSupporting) {
+                const msg =
+                      "[WF Submit] MISMATCH: Need " + totalSupporting +
+                      " supporting URLs but only got " + supportingUploadUrls.length;
+                console.warn(msg, { supportingUploadUrls, supportingBlobs });
+
+                wfmapmodsHideSubmitProgress();
+                window.wfmapmodsIsUploading = false;
+                alert(
+                    "Error preparing your nomination:\n\n" +
+                    "Wayfarer did not return upload URLs for all supporting photos.\n" +
+                    "The nomination has NOT been submitted.\n\n" +
+                    "Please screenshot console log and share on WDD #tools."
+                );
+                return;
+            }
+
+            // === Upload main image (first of totalImages) ===
+            uploadedImages = 0; // just to be explicit
+            uploadedImages++;
+
+            const mainPct = imageUploadPercent(uploadedImages, totalImages);
+            wfmapmodsUpdateSubmitProgress(
+                `Uploading main photo…`,
+                mainPct
+            );
+            console.log("[WF Submit] PUT main image to:", mainUploadUrl);
+            await putImageToSignedUrlForSubmit(mainUploadUrl, mainBlob);
+
+            // === Upload supporting ===
+            if (totalSupporting > 0) {
+                wfmapmodsUpdateSubmitProgress(
+                    `Uploading supporting photos (0 of ${totalSupporting})…`,
+                    imageUploadPercent(uploadedImages, totalImages)
                 );
             }
 
-            // === Upload supporting ===
-            if (supportingBlobs.length > 0) {
-                wfmapmodsUpdateSubmitProgress("Uploading supporting photos…", 65);
-            }
+            let uploadedSupportingCount = 0;
 
-            for (let i = 0; i < supportingBlobs.length; i++) {
+            for (let i = 0; i < totalSupporting; i++) {
                 const blob = supportingBlobs[i];
                 const url = supportingUploadUrls[i];
 
                 if (!blob || !url) {
-                    console.warn("[WF Submit] Skipping supporting image index", i, "blob:", !!blob, "url:", url);
-                    continue;
+                    console.warn(
+                        "[WF Submit] Missing blob/url for supporting image index",
+                        i,
+                        "blob:", !!blob,
+                        "url:", url
+                    );
+
+                    wfmapmodsHideSubmitProgress();
+                    window.wfmapmodsIsUploading = false;
+                    alert(
+                        "Error uploading supporting photos:\n\n" +
+                        "One of the supporting images could not be prepared for upload.\n" +
+                        "The nomination has NOT been submitted.\n\n" +
+                        "Please screenshot console log and share on WDD #tools."
+                    );
+                    return;
                 }
 
-                const pct = 65 + Math.floor((i / supportingBlobs.length) * 15);
-                wfmapmodsUpdateSubmitProgress("Uploading supporting photos…", pct);
+                uploadedSupportingCount++;
+                uploadedImages++;
 
-                console.log(`[WF Submit] PUT supporting image #${i + 1} to:`, url);
+                const pct = imageUploadPercent(uploadedImages, totalImages);
+                const label = `Uploading supporting photos (${uploadedSupportingCount} of ${totalSupporting})…`;
+
+                wfmapmodsUpdateSubmitProgress(label, pct);
+
+                console.log(`[WF Submit] PUT supporting image #${uploadedSupportingCount} to:`, url);
                 await putImageToSignedUrlForSubmit(url, blob);
             }
 
             // === Complete submission ===
-            wfmapmodsUpdateSubmitProgress("Finalising nomination…", 90);
+            wfmapmodsUpdateSubmitProgress("Finalising nomination…", 95);
 
             const completePayload = submissionId;
             const completeUrl =
@@ -2268,12 +2332,14 @@
 
             if (!completeResp || completeResp.captcha) {
                 wfmapmodsHideSubmitProgress();
+                window.wfmapmodsIsUploading = false;
                 alert("Submit/complete failed or requires captcha.");
                 return;
             }
 
             if (completeResp.result !== "DONE") {
                 wfmapmodsHideSubmitProgress();
+                window.wfmapmodsIsUploading = false;
                 alert("Submit/complete did not succeed: " + (completeResp.code || completeResp.result));
                 return;
             }
@@ -2281,15 +2347,26 @@
             wfmapmodsUpdateSubmitProgress("Nomination submitted!", 100);
             console.log("[WF Submit] DONE for submissionId:", submissionId);
 
+            window.wfmapmodsIsUploading = false;
+
             wfmapmodsHideSubmitProgress(1500);
 
         } catch (err) {
             console.error("Wayfarer Map: submitWayspotViaApi failed:", err);
             wfmapmodsHideSubmitProgress();
+            window.wfmapmodsIsUploading = false;
             alert("Error while submitting nomination — see console for details.");
         }
     }
 
+    window.addEventListener("beforeunload", (e) => {
+        if (window.wfmapmodsIsUploading) {
+            // Required for Chrome
+            e.preventDefault();
+            e.returnValue = "An upload is still in progress. Leaving now will cancel it permanently and you will lose one nomination quota.";
+            return e.returnValue;
+        }
+    });
 
     // ==============================
     // Submit progress bar on the map
@@ -2575,6 +2652,79 @@
                     return block;
                 }
 
+                function createPendingBlock(labelText, onRemove) {
+
+                    const block = document.createElement("div");
+                    block.style.display = "flex";
+                    block.style.flexDirection = "column";
+                    block.style.alignItems = "center";
+                    block.style.fontSize = "11px";
+                    block.style.flex = "0 0 auto";
+                    block.style.position = "relative";
+
+                    const label = document.createElement("div");
+                    label.style.marginBottom = "4px";
+                    label.style.fontWeight = "bold";
+                    label.textContent = labelText;
+                    block.appendChild(label);
+
+                    const boxWrapper = document.createElement("div");
+                    boxWrapper.style.position = "relative";
+
+                    const box = document.createElement("div");
+                    box.style.width = "80px";
+                    box.style.height = "80px";
+                    box.style.borderRadius = "4px";
+                    box.style.border = "1px dashed rgb(209, 213, 219)";
+                    box.style.display = "flex";
+                    box.style.alignItems = "center";
+                    box.style.justifyContent = "center";
+                    box.style.backgroundColor = "#f9fafb";
+                    box.style.cursor = "default";
+
+                    const spinner = document.createElement("div");
+                    spinner.className = "wfmapmods-spinner";
+                    box.appendChild(spinner);
+
+                    // Optional tiny text under spinner
+                    // const t = document.createElement("div");
+                    // t.textContent = "Processing…";
+                    // t.style.fontSize = "9px";
+                    // t.style.color = "#6b7280";
+                    // t.style.marginTop = "4px";
+                    // box.appendChild(t);
+
+                    // Remove "X"
+                    const removeBtn = document.createElement("button");
+                    removeBtn.type = "button";
+                    removeBtn.textContent = "×";
+                    removeBtn.style.position = "absolute";
+                    removeBtn.style.top = "-6px";
+                    removeBtn.style.right = "-6px";
+                    removeBtn.style.width = "18px";
+                    removeBtn.style.height = "18px";
+                    removeBtn.style.borderRadius = "50%";
+                    removeBtn.style.border = "none";
+                    removeBtn.style.background = "rgba(0,0,0,0.7)";
+                    removeBtn.style.color = "#fff";
+                    removeBtn.style.cursor = "pointer";
+                    removeBtn.style.fontSize = "12px";
+                    removeBtn.style.lineHeight = "18px";
+                    removeBtn.style.padding = "0";
+
+                    removeBtn.addEventListener("click", (ev) => {
+                        ev.preventDefault();
+                        onRemove();
+                    });
+
+                    boxWrapper.appendChild(box);
+                    boxWrapper.appendChild(removeBtn);
+                    block.appendChild(boxWrapper);
+
+                    return block;
+                }
+
+
                 function createPlaceholderBlock(labelText, onClick) {
                     const block = document.createElement("div");
                     block.style.display = "flex";
@@ -2614,21 +2764,38 @@
                 function renderImages() {
                     imagesRow.innerHTML = "";
 
-                    // Main photo block
+                    // ===== Main photo block =====
                     if (imageState.main) {
-                        const mainBlock = createImageBlock(
-                            "Main photo",
-                            imageState.main,
-                            () => {
-                                imageState.main = null;
-                                renderImages();
-                                validate();
-                            },
-                            () => {
-                                // Click main image -> choose new image
-                                mainFileInput.click();
-                            }
-                        );
+                        const label = "Main photo";
+                        let mainBlock;
+
+                        if (imageState.main._pending) {
+                            // Show square with spinner while main image is converting
+                            mainBlock = createPendingBlock(
+                                label,
+                                () => {
+                                    imageState.main = null;
+                                    renderImages();
+                                    validate();
+                                }
+                            );
+                        } else {
+                            // Normal thumbnail when ready
+                            mainBlock = createImageBlock(
+                                label,
+                                imageState.main,
+                                () => {
+                                    imageState.main = null;
+                                    renderImages();
+                                    validate();
+                                },
+                                () => {
+                                    // Click main image -> choose new image
+                                    mainFileInput.click();
+                                }
+                            );
+                        }
+
                         imagesRow.appendChild(mainBlock);
                     } else {
                         const mainPlaceholder = createPlaceholderBlock("Main photo", () => {
@@ -2637,22 +2804,35 @@
                         imagesRow.appendChild(mainPlaceholder);
                     }
 
-                    // Supporting photo blocks
+                    // ===== Supporting photo blocks (unchanged from spinner version) =====
                     imageState.supporting.forEach((imgObj, idx) => {
-                        const supBlock = createImageBlock(
-                            "Supporting " + (idx + 1),
-                            imgObj,
-                            () => {
-                                imageState.supporting.splice(idx, 1);
-                                renderImages();
-                                validate();
-                            },
-                            null // for now, click doesn't change; remove + add instead
-                        );
+                        const label = "Supporting " + (idx + 1);
+
+                        let supBlock;
+                        if (imgObj._pending) {
+                            supBlock = createPendingBlock(
+                                label,
+                                () => {
+                                    imageState.supporting.splice(idx, 1);
+                                    renderImages();
+                                    validate();
+                                }
+                            );
+                        } else {
+                            supBlock = createImageBlock(
+                                label,
+                                imgObj,
+                                () => {
+                                    imageState.supporting.splice(idx, 1);
+                                    renderImages();
+                                    validate();
+                                },
+                                null
+                            );
+                        }
                         imagesRow.appendChild(supBlock);
                     });
 
-                    // Placeholder for new supporting if < 5
                     if (imageState.supporting.length < 5) {
                         const supPlaceholder = createPlaceholderBlock("Supporting", () => {
                             supportingFileInput.click();
@@ -2661,54 +2841,94 @@
                     }
                 }
 
+
                 // File input handlers
-                mainFileInput.addEventListener("change", async (ev) => {
+                mainFileInput.addEventListener("change", (ev) => {
                     const file = ev.target.files && ev.target.files[0];
                     if (!file) return;
 
-                    try {
-                        const { blob, dataUrl } = await convertFileToJpeg(file);
+                    // Set pending state immediately → spinner shows
+                    imageState.main = {
+                        sourceType: "file",
+                        url: null,
+                        file: null,
+                        _pending: true
+                    };
 
-                        imageState.main = {
-                            sourceType: "file",
-                            url: dataUrl,  // always JPEG preview
-                            file: blob     // always JPEG blob for upload
-                        };
+                    renderImages();
+                    validate();
 
-                        mainFileInput.value = "";
+                    convertFileToJpeg(file).then(({ blob, dataUrl }) => {
+                        if (!imageState.main) return; // was cleared while converting
+
+                        imageState.main.url = dataUrl;   // JPEG preview
+                        imageState.main.file = blob;     // JPEG blob for upload
+                        imageState.main._pending = false;
+
                         renderImages();
                         validate();
-                    } catch (err) {
+                    }).catch((err) => {
                         console.error("Main image conversion failed:", err);
                         alert("Could not load image: " + err.message);
+                        imageState.main = null;
+                        renderImages();
+                        validate();
+                    }).finally(() => {
                         mainFileInput.value = "";
-                    }
+                    });
                 });
 
-                supportingFileInput.addEventListener("change", async (ev) => {
+                supportingFileInput.addEventListener("change", (ev) => {
                     const files = ev.target.files;
                     if (!files || !files.length) return;
 
                     for (let i = 0; i < files.length; i++) {
                         if (imageState.supporting.length >= 5) break;
                         const file = files[i];
-                        try {
-                            const { blob, dataUrl } = await convertFileToJpeg(file);
 
-                            imageState.supporting.push({
-                                sourceType: "file",
-                                url: dataUrl,  // always JPEG
-                                file: blob     // always JPEG blob
-                            });
-                        } catch (err) {
+                        // Create a pending entry: occupies a slot, shows the spinner box
+                        const imgObj = {
+                            sourceType: "file",
+                            url: null,       // will be set when conversion finishes
+                            file: null,      // final JPEG blob goes here
+                            _pending: true   // flag used by renderImages
+                        };
+
+                        const idx = imageState.supporting.length;
+                        imageState.supporting.push(imgObj);
+
+                        // Immediately update UI so:
+                        // - the spinner appears
+                        // - and the next "+" placeholder appears if <5
+                        renderImages();
+                        validate();
+
+                        // Convert in the background
+                        convertFileToJpeg(file).then(({ blob, dataUrl }) => {
+                            const target = imageState.supporting[idx];
+                            if (!target) return; // entry removed while converting
+
+                            target.url = dataUrl;  // JPEG preview
+                            target.file = blob;    // JPEG blob for upload
+                            target._pending = false;
+
+                            renderImages();
+                            validate();
+                        }).catch((err) => {
                             console.error("Supporting image conversion failed:", err);
                             alert("Could not load one of the images: " + err.message);
-                        }
+
+                            // Remove the pending entry on error
+                            const currentIndex = imageState.supporting.indexOf(imgObj);
+                            if (currentIndex !== -1) {
+                                imageState.supporting.splice(currentIndex, 1);
+                                renderImages();
+                                validate();
+                            }
+                        });
                     }
 
                     supportingFileInput.value = "";
-                    renderImages();
-                    validate();
                 });
 
                 // Initial render of images
@@ -2933,11 +3153,19 @@
                     const d = descInput.value.trim();
                     const s = suppInput.value.trim();
 
-                    const hasMain = !!imageState.main;
-                    const supportingCount = imageState.supporting.length;
-
                     const textValid = !!t && !!d && !!s;
-                    const imageValid = hasMain && supportingCount >= 1 && supportingCount <= 5;
+
+                    // --- Image validity ---
+                    const mainReady = !!imageState.main && !imageState.main._pending;
+                    const supportingCount = imageState.supporting.length;
+                    const hasPendingSupporting = imageState.supporting.some(img => img && img._pending);
+
+                    const imageValid =
+                          mainReady &&
+                          supportingCount >= 1 &&
+                          supportingCount <= 5 &&
+                          !hasPendingSupporting;
+
 
                     // --- Figure out the marker location ---
                     let markerLat = null;
@@ -6786,7 +7014,24 @@
     .submit-wayspot-container {
         padding: 0 !important;
     }
-    `;
+
+    /* -------------------------
+       Loading icon for image upload
+       ------------------------- */
+      @keyframes wfmapmods-spin {
+        to { transform: rotate(360deg); }
+      }
+
+      .wfmapmods-spinner {
+        box-sizing: border-box;
+        width: 24px;
+        height: 24px;
+        border-radius: 9999px;
+        border: 3px solid rgba(156,163,175,0.6);
+        border-top-color: #3b82f6;
+        animation: wfmapmods-spin 0.7s linear infinite;
+      }
+      `
 
         let style = document.getElementById("wfmapmods-all-css");
         if (style) {
