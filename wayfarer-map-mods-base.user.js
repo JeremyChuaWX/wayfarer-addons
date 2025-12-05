@@ -47,7 +47,7 @@
     let poiMovementThreshold = radius * 0.25;
 
     // ----- Radius for submitting POIs -----
-    let submitRadius = 20000;
+    let submitRadius = 10000;
 
     // ----- Map instance & core map state -----
     let submitMap = null;
