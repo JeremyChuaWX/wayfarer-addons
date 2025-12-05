@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.0
+// @version      2.5.1
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -2088,8 +2088,8 @@
         const lat = poi.lat;
         const lng = poi.lng;
 
-        if (!title || !description || !supportingStatement) {
-            alert("Title, description and supporting statement are required.");
+        if (!title || !description) {
+            alert("Title and description are required.");
             return;
         }
         if (typeof lat !== "number" || typeof lng !== "number" || !Number.isFinite(lat) || !Number.isFinite(lng)) {
@@ -3141,9 +3141,8 @@
                 function validate() {
                     const t = titleInput.value.trim();
                     const d = descInput.value.trim();
-                    const s = suppInput.value.trim();
 
-                    const textValid = !!t && !!d && !!s;
+                    const textValid = !!t && !!d;
 
                     // --- Image validity ---
                     const mainReady = !!imageState.main && !imageState.main._pending;
@@ -3330,7 +3329,7 @@
                 const description = ctx.descInput.value.trim();
                 const supportingStatement = ctx.suppInput.value.trim();
 
-                if (!title || !description || !supportingStatement) {
+                if (!title || !description) {
                     return;
                 }
 
