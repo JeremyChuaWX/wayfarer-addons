@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.3.0
+// @version      2.3.1
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -47,7 +47,7 @@
     let poiMovementThreshold = radius * 0.25;
 
     // ----- Radius for submitting POIs -----
-    let submitRadius = 10000;
+    let submitRadius = 20000;
 
     // ----- Map instance & core map state -----
     let submitMap = null;
@@ -2160,7 +2160,11 @@
                 supportingImageCount: supportingBlobs.length
             };
 
+            console.log("[WF Submit] /submit/start payload:", startPayload);
+
             const startResp = await postJsonWithCsrf("/api/v1/vault/submit/start", startPayload);
+
+            console.log("[WF Submit] /submit/start response raw:", startResp);
 
             if (!startResp || startResp.captcha) {
                 console.warn("Wayfarer Map: submit/start response has captcha or no JSON", startResp);
@@ -2172,6 +2176,9 @@
             const result = startResp.result || {};
             const imageUrlMap = result.imageUrlMap || result.uploadUrlMap || {};
             const submissionId = result.submissionId || result.nominationId;
+
+            console.log("[WF Submit] submissionId:", submissionId);
+            console.log("[WF Submit] imageUrlMap:", imageUrlMap);
 
             if (!submissionId) {
                 console.warn("Wayfarer Map: No submissionId/nominationId in submit/start result", startResp);
@@ -2186,6 +2193,8 @@
                   imageUrlMap.image ||
                   null;
 
+            console.log("[WF Submit] mainUploadUrl:", mainUploadUrl);
+
             if (!mainUploadUrl) {
                 console.warn("Wayfarer Map: No main image URL returned from submit/start", startResp);
                 wfmapmodsHideSubmitProgress();
@@ -2195,6 +2204,8 @@
 
             // --- Upload main + supporting via signed URLs ---
             wfmapmodsUpdateSubmitProgress("Uploading main photo…", 50);
+
+            console.log("[WF Submit] PUT main image to:", mainUploadUrl);
             await putImageToSignedUrlForSubmit(mainUploadUrl, mainBlob);
 
             let supportingUploadUrls = [];
@@ -2206,6 +2217,8 @@
                 supportingUploadUrls = [imageUrlMap.supporting];
             }
 
+            console.log("[WF Submit] supportingUploadUrls:", supportingUploadUrls);
+
             if (supportingBlobs.length > 0) {
                 wfmapmodsUpdateSubmitProgress("Uploading supporting photos…", 65);
             }
@@ -2213,11 +2226,15 @@
             for (let i = 0; i < supportingBlobs.length; i++) {
                 const blob = supportingBlobs[i];
                 const url = supportingUploadUrls[i];
-                if (!blob || !url) continue;
+                if (!blob || !url) {
+                    console.warn("[WF Submit] Skipping supporting image index", i, "blob:", !!blob, "url:", url);
+                    continue;
+                }
 
-                // Optional micro-progress within supporting uploads
                 const pct = 65 + Math.floor((i / supportingBlobs.length) * 15);
                 wfmapmodsUpdateSubmitProgress("Uploading supporting photos…", pct);
+
+                console.log(`[WF Submit] PUT supporting image #${i + 1} to:`, url);
                 await putImageToSignedUrlForSubmit(url, blob);
             }
 
@@ -2225,10 +2242,15 @@
             wfmapmodsUpdateSubmitProgress("Finalising nomination…", 90);
 
             const completePayload = submissionId;
-            const completeResp = await postJsonWithCsrf(
-                "/api/v1/vault/submit/complete?submissionId=" + encodeURIComponent(submissionId),
-                completePayload
-            );
+            const completeUrl =
+                  "/api/v1/vault/submit/complete?submissionId=" + encodeURIComponent(submissionId);
+
+            console.log("[WF Submit] /submit/complete URL:", completeUrl);
+            console.log("[WF Submit] /submit/complete payload:", completePayload);
+
+            const completeResp = await postJsonWithCsrf(completeUrl, completePayload);
+
+            console.log("[WF Submit] /submit/complete response raw:", completeResp);
 
             if (!completeResp || completeResp.captcha) {
                 console.warn("Wayfarer Map: submit/complete response has captcha or no JSON", completeResp);
@@ -2245,9 +2267,9 @@
             }
 
             wfmapmodsUpdateSubmitProgress("Nomination submitted!", 100);
+            console.log("[WF Submit] DONE for submissionId:", submissionId);
             alert("Nomination submitted.");
 
-            // Let the user see 100% briefly, then hide
             wfmapmodsHideSubmitProgress(1500);
         } catch (err) {
             console.error("Wayfarer Map: submitWayspotViaApi failed:", err);
