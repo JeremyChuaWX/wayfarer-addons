@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.2.8
+// @version      2.3.0
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -47,7 +47,7 @@
     let poiMovementThreshold = radius * 0.25;
 
     // ----- Radius for submitting POIs -----
-    let submitRadius = 10000;
+    let submitRadius = 20000;
 
     // ----- Map instance & core map state -----
     let submitMap = null;
@@ -2097,7 +2097,6 @@
             return;
         }
 
-        // New image model: { main, supporting[] }
         const mainState = images && images.main;
         const supportingStates = images && Array.isArray(images.supporting) ? images.supporting : [];
 
@@ -2118,8 +2117,12 @@
             return;
         }
 
+        // Show initial progress bar
+        wfmapmodsShowSubmitProgress("Starting nomination…", 5);
+
         try {
             // --- Build image blobs (file or URL-based) ---
+            wfmapmodsUpdateSubmitProgress("Preparing images…", 15);
 
             async function resolveBlobFromState(state) {
                 if (!state) return null;
@@ -2134,6 +2137,7 @@
 
             const mainBlob = await resolveBlobFromState(mainState);
             if (!mainBlob) {
+                wfmapmodsHideSubmitProgress();
                 alert("Could not load main image data.");
                 return;
             }
@@ -2145,6 +2149,8 @@
             }
 
             // --- Start submission ---
+            wfmapmodsUpdateSubmitProgress("Contacting Wayfarer…", 30);
+
             const startPayload = {
                 title,
                 description,
@@ -2158,6 +2164,7 @@
 
             if (!startResp || startResp.captcha) {
                 console.warn("Wayfarer Map: submit/start response has captcha or no JSON", startResp);
+                wfmapmodsHideSubmitProgress();
                 alert("Submit/start failed or requires captcha. Please submit manually.");
                 return;
             }
@@ -2168,6 +2175,7 @@
 
             if (!submissionId) {
                 console.warn("Wayfarer Map: No submissionId/nominationId in submit/start result", startResp);
+                wfmapmodsHideSubmitProgress();
                 alert("Submit/start did not return a submissionId.");
                 return;
             }
@@ -2180,11 +2188,13 @@
 
             if (!mainUploadUrl) {
                 console.warn("Wayfarer Map: No main image URL returned from submit/start", startResp);
+                wfmapmodsHideSubmitProgress();
                 alert("Submit/start did not return main image URL.");
                 return;
             }
 
             // --- Upload main + supporting via signed URLs ---
+            wfmapmodsUpdateSubmitProgress("Uploading main photo…", 50);
             await putImageToSignedUrlForSubmit(mainUploadUrl, mainBlob);
 
             let supportingUploadUrls = [];
@@ -2196,14 +2206,23 @@
                 supportingUploadUrls = [imageUrlMap.supporting];
             }
 
+            if (supportingBlobs.length > 0) {
+                wfmapmodsUpdateSubmitProgress("Uploading supporting photos…", 65);
+            }
+
             for (let i = 0; i < supportingBlobs.length; i++) {
                 const blob = supportingBlobs[i];
                 const url = supportingUploadUrls[i];
                 if (!blob || !url) continue;
+
+                // Optional micro-progress within supporting uploads
+                const pct = 65 + Math.floor((i / supportingBlobs.length) * 15);
+                wfmapmodsUpdateSubmitProgress("Uploading supporting photos…", pct);
                 await putImageToSignedUrlForSubmit(url, blob);
             }
 
             // --- Complete submission ---
+            wfmapmodsUpdateSubmitProgress("Finalising nomination…", 90);
 
             const completePayload = submissionId;
             const completeResp = await postJsonWithCsrf(
@@ -2213,22 +2232,147 @@
 
             if (!completeResp || completeResp.captcha) {
                 console.warn("Wayfarer Map: submit/complete response has captcha or no JSON", completeResp);
+                wfmapmodsHideSubmitProgress();
                 alert("Submit/complete failed or requires captcha. Please check the site manually.");
                 return;
             }
 
             if (completeResp.result !== "DONE") {
                 console.warn("Wayfarer Map: submit/complete returned non-DONE result", completeResp);
+                wfmapmodsHideSubmitProgress();
                 alert("Submit/complete did not succeed: " + (completeResp.code || completeResp.result));
                 return;
             }
+
+            wfmapmodsUpdateSubmitProgress("Nomination submitted!", 100);
             alert("Nomination submitted.");
+
+            // Let the user see 100% briefly, then hide
+            wfmapmodsHideSubmitProgress(1500);
         } catch (err) {
             console.error("Wayfarer Map: submitWayspotViaApi failed:", err);
+            wfmapmodsHideSubmitProgress();
             alert("Error while submitting nomination – see console for details.");
         }
     }
 
+    // ==============================
+    // Submit progress bar on the map
+    // ==============================
+    function wfmapmodsGetOrCreateProgressBar() {
+        if (!submitMap || typeof submitMap.getDiv !== "function") return null;
+
+        const mapDiv = submitMap.getDiv();
+        if (!mapDiv) return null;
+
+        // Ensure the map container can host absolutely-positioned children
+        if (!mapDiv.style.position) {
+            mapDiv.style.position = "relative";
+        }
+
+        let bar = mapDiv.querySelector("#wfmapmods-submit-progress");
+        if (bar) return bar;
+
+        bar = document.createElement("div");
+        bar.id = "wfmapmods-submit-progress";
+        bar.style.position = "absolute";
+        bar.style.top = "8px";
+        bar.style.left = "50%";
+        bar.style.transform = "translateX(-50%)";
+        bar.style.zIndex = "9999";
+        bar.style.maxWidth = "420px";
+        bar.style.width = "70%";
+        bar.style.pointerEvents = "none"; // clicks go through to map
+        bar.style.fontFamily = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+        bar.style.fontSize = "12px";
+
+        const inner = document.createElement("div");
+        inner.style.background = "rgba(17, 24, 39, 0.92)";
+        inner.style.color = "#f9fafb";
+        inner.style.borderRadius = "9999px";
+        inner.style.padding = "6px 10px";
+        inner.style.boxShadow = "0 6px 14px rgba(0,0,0,0.45)";
+        inner.style.display = "flex";
+        inner.style.flexDirection = "column";
+        inner.style.gap = "4px";
+
+        const text = document.createElement("div");
+        text.className = "wfmapmods-progress-text";
+        text.textContent = "Preparing nomination…";
+
+        const track = document.createElement("div");
+        track.style.width = "100%";
+        track.style.height = "6px";
+        track.style.borderRadius = "9999px";
+        track.style.background = "rgba(55, 65, 81, 0.9)";
+        track.style.overflow = "hidden";
+
+        const fill = document.createElement("div");
+        fill.className = "wfmapmods-progress-fill";
+        fill.style.height = "100%";
+        fill.style.width = "10%";
+        fill.style.borderRadius = "9999px";
+        fill.style.background = "#3b82f6"; // blue-ish
+        fill.style.transition = "width 0.25s ease";
+
+        track.appendChild(fill);
+        inner.appendChild(text);
+        inner.appendChild(track);
+        bar.appendChild(inner);
+        mapDiv.appendChild(bar);
+
+        return bar;
+    }
+
+    function wfmapmodsShowSubmitProgress(text, percent) {
+        const bar = wfmapmodsGetOrCreateProgressBar();
+        if (!bar) return;
+
+        bar.style.display = "block";
+
+        const textEl = bar.querySelector(".wfmapmods-progress-text");
+        const fillEl = bar.querySelector(".wfmapmods-progress-fill");
+
+        if (textEl && typeof text === "string") {
+            textEl.textContent = text;
+        }
+        if (fillEl && typeof percent === "number") {
+            const clamped = Math.max(0, Math.min(100, percent));
+            fillEl.style.width = clamped + "%";
+        }
+    }
+
+    function wfmapmodsUpdateSubmitProgress(text, percent) {
+        const bar = wfmapmodsGetOrCreateProgressBar();
+        if (!bar) return;
+
+        if (typeof text === "string") {
+            const textEl = bar.querySelector(".wfmapmods-progress-text");
+            if (textEl) textEl.textContent = text;
+        }
+        if (typeof percent === "number") {
+            const fillEl = bar.querySelector(".wfmapmods-progress-fill");
+            if (fillEl) {
+                const clamped = Math.max(0, Math.min(100, percent));
+                fillEl.style.width = clamped + "%";
+            }
+        }
+    }
+
+    function wfmapmodsHideSubmitProgress(delayMs) {
+        const bar = wfmapmodsGetOrCreateProgressBar();
+        if (!bar) return;
+
+        const hide = () => {
+            bar.style.display = "none";
+        };
+
+        if (typeof delayMs === "number" && delayMs > 0) {
+            setTimeout(hide, delayMs);
+        } else {
+            hide();
+        }
+    }
 
     // ==================================
     // Submission interface
