@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.4.0
+// @version      2.5.0
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -2197,13 +2197,7 @@
             }
 
             // === Main image URL ===
-            const mainUploadUrl =
-                  imageUrlMap.main ||
-                  imageUrlMap.mainImage ||
-                  imageUrlMap.image ||
-                  null;
-
-            console.log("[WF Submit] mainUploadUrl:", mainUploadUrl);
+            const mainUploadUrl = imageUrlMap.main || null;
 
             if (!mainUploadUrl) {
                 wfmapmodsHideSubmitProgress();
@@ -2233,10 +2227,6 @@
                 .map(k => imageUrlMap[k])
                 .filter(Boolean);
 
-            console.log("[WF Submit] supporting keys:", supportingKeys);
-            console.log("[WF Submit] supportingUploadUrls:", supportingUploadUrls);
-            console.log("[WF Submit] supportingBlobs.length:", supportingBlobs.length);
-
             const totalSupporting = supportingBlobs.length;
             const totalImages = 1 + totalSupporting; // main + supporting
             let uploadedImages = 0;
@@ -2260,7 +2250,7 @@
             }
 
             // === Upload main image (first of totalImages) ===
-            uploadedImages = 0; // just to be explicit
+            uploadedImages = 0;
             uploadedImages++;
 
             const mainPct = imageUploadPercent(uploadedImages, totalImages);
@@ -3872,6 +3862,134 @@
             draftMarkers.push(marker);
         });
     }
+
+    // =========================================
+    // Drafts from native "New Submission" form
+    // =========================================
+
+    function wfmapmodsBuildDraftFromNativeSubmitForm() {
+        const container = document.querySelector("app-submit-wayspot .submit-wayspot-container");
+        if (!container) {
+            alert("Cannot save draft: submission form not found.");
+            return null;
+        }
+
+        // --- Text fields ---
+        const titleEl = container.querySelector("textarea#title");
+        const descEl = container.querySelector("textarea#description");
+        const suppEl = container.querySelector("textarea#supportingStatement");
+
+        const title = titleEl ? titleEl.value.trim() : "";
+        const description = descEl ? descEl.value.trim() : "";
+        const supportingStatement = suppEl ? suppEl.value.trim() : "";
+
+        // --- Location: use window.currentLat/Lng as requested ---
+        let lat = (typeof window.currentLat === "number" && Number.isFinite(window.currentLat))
+        ? window.currentLat
+        : null;
+        let lng = (typeof window.currentLng === "number" && Number.isFinite(window.currentLng))
+        ? window.currentLng
+        : null;
+
+        if (
+            typeof lat !== "number" || typeof lng !== "number" ||
+            !Number.isFinite(lat) || !Number.isFinite(lng)
+        ) {
+            alert("Cannot save draft: missing valid map location (currentLat/currentLng).");
+            return null;
+        }
+
+        // --- Main photo (step 1) ---
+        // In the "after upload" state there's .image-container img
+        let mainImgObj = null;
+        const mainImgEl = container.querySelector(
+            ".submit-wayspot-section:nth-of-type(1) app-wayspot-image-entry .image-container img"
+        );
+
+        if (mainImgEl && mainImgEl.src && mainImgEl.src.startsWith("data:image/")) {
+            mainImgObj = {
+                sourceType: "dataUrl",
+                url: mainImgEl.src,
+                file: null
+            };
+        }
+
+        // --- Supporting photos (step 2) ---
+        const supportingImgEls = container.querySelectorAll(
+            ".submit-wayspot-section:nth-of-type(2) .submit-supporting-images-container .supporting-image-container img"
+        );
+
+        const supportingImages = [];
+        supportingImgEls.forEach((img) => {
+            if (!img || !img.src || !img.src.startsWith("data:image/")) return;
+            supportingImages.push({
+                sourceType: "dataUrl",
+                url: img.src,
+                file: null
+            });
+        });
+
+        const now = Date.now();
+        const draftId = "native-draft-" + now + "-" + Math.random().toString(36).slice(2);
+
+        const draft = {
+            id: draftId,
+            createdAt: now,
+            updatedAt: now,
+            poi: {
+                lat,
+                lng,
+                title,
+                description,
+                supportingStatement
+            },
+            images: {
+                main: mainImgObj,                 // can be null if they didn’t pick one yet
+                supporting: supportingImages      // 0–5 items
+            }
+        };
+
+        return draft;
+    }
+
+    function wfmapmodsInjectNativeSubmitSaveDraftButton() {
+        const container = document.querySelector("app-submit-wayspot .submit-wayspot-container");
+        if (!container) return;
+
+        const buttonContainer = container.querySelector(".submit-button-container");
+        if (!buttonContainer) return;
+
+        // Avoid adding multiple times
+        if (buttonContainer.querySelector(".wfmapmods-btn-native-save-draft")) return;
+
+        const saveBtn = document.createElement("button");
+        saveBtn.type = "button";
+        saveBtn.textContent = "Save draft";
+        saveBtn.className = "wf-button wfmapmods-btn-native-save-draft";
+        saveBtn.style.marginLeft = "8px";
+
+        saveBtn.addEventListener("click", async () => {
+            try {
+                const draft = wfmapmodsBuildDraftFromNativeSubmitForm();
+                if (!draft) return;
+
+                await saveDraftSubmissionToIDB(draft);
+                alert("Draft saved. It will appear as a draft pin on the map.");
+            } catch (err) {
+                console.error("[Base] Failed to save native form draft:", err);
+                alert("Could not save draft – see console for details.");
+            }
+        });
+
+        // Insert after the native Submit button
+        const nativeSubmit = buttonContainer.querySelector("button[type='submit']");
+        if (nativeSubmit && nativeSubmit.parentNode === buttonContainer) {
+            nativeSubmit.insertAdjacentElement("afterend", saveBtn);
+        } else {
+            buttonContainer.appendChild(saveBtn);
+        }
+    }
+
 
     // ==================================
     // Marker selection
@@ -5614,6 +5732,7 @@
         ensureLayersControl();
         applyWayspotVisibilityToAllMarkers();
         loadDraftSubmissionsFromIDB();
+        wfmapmodsInjectNativeSubmitSaveDraftButton();
     }
 
     function setGoogleMapControls() {
