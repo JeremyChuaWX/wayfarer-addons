@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.3.1
+// @version      2.3.2
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -2268,7 +2268,6 @@
 
             wfmapmodsUpdateSubmitProgress("Nomination submitted!", 100);
             console.log("[WF Submit] DONE for submissionId:", submissionId);
-            alert("Nomination submitted.");
 
             wfmapmodsHideSubmitProgress(1500);
         } catch (err) {
