@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - s2 Cells
-// @version      0.1.3
+// @version      0.1.4
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-s2-cells.user.js
@@ -151,9 +151,12 @@
             // We just arrived on the map page
             attachS2ToMapIfNeeded();
             insertS2SettingsLink();
+            startLatLngWatcher();
+            insertS2LayersOption();
         } else if (!panelPresent && lastPanelPresent) {
             // We just left the map page
             teardownS2ForMap();
+            stopLatLngWatcher();
         }
 
         lastPanelPresent = panelPresent;
@@ -268,7 +271,7 @@
         highlightSubmitCell(newLat, newLng);
     }
 
-    function watchForLatLngElement() {
+    function startLatLngWatcher() {
         // Only initialise once
         if (latLngBodyObserver) return;
 
@@ -339,83 +342,84 @@
         findAndAttachLatLngElement();
     }
 
+    function stopLatLngWatcher() {
+        if (latLngObserver) {
+            latLngObserver.disconnect();
+            latLngObserver = null;
+        }
+        if (latLngBodyObserver) {
+            latLngBodyObserver.disconnect();
+            latLngBodyObserver = null;
+        }
+        latLngTargetEl = null;
+    }
+
     // -----------------------------
     // Add layers settings control
     // -----------------------------
 
     function insertS2LayersOption() {
-        // Poll for the layers menu, similar to settings link logic
-        const menuCheck = setInterval(() => {
-            const menu = document.querySelector(".wfmapmods-layers-menu");
-            if (!menu) return; // keep waiting
+        const menu = document.querySelector(".wfmapmods-layers-menu");
+        if (!menu) return;
 
-            clearInterval(menuCheck);
+        if (menu.querySelector("#wfmapmods-layers-s2cells")) return;
 
-            // Avoid duplicates
-            if (menu.querySelector("#wfmapmods-layers-s2cells")) return;
+        const label = document.createElement("label");
+        label.className = "wfmapmods-layers-option";
+        label.id = "wfmapmods-layers-s2cells";
 
-            const label = document.createElement("label");
-            label.className = "wfmapmods-layers-option";
-            label.id = "wfmapmods-layers-s2cells";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = !userSettings.master || userSettings.master.enabled !== false;
+        checkbox.className = "wfmapmods-layers-checkbox";
 
-            const checkbox = document.createElement("input");
-            checkbox.type = "checkbox";
-            checkbox.checked = !userSettings.master || userSettings.master.enabled !== false;
-            checkbox.className = "wfmapmods-layers-checkbox";
+        const span = document.createElement("span");
+        span.textContent = "S2 cells";
+        span.className = "wfmapmods-layers-label";
 
-            const span = document.createElement("span");
-            span.textContent = "S2 cells";
-            span.className = "wfmapmods-layers-label";
+        label.appendChild(checkbox);
+        label.appendChild(span);
+        menu.appendChild(label);
 
-            label.appendChild(checkbox);
-            label.appendChild(span);
-            menu.appendChild(label);
+        checkbox.addEventListener("change", () => {
+            const enabled = checkbox.checked;
 
-            // Change handler
-            checkbox.addEventListener("change", () => {
-                const enabled = checkbox.checked;
+            if (!userSettings.master) {
+                userSettings.master = {};
+            }
+            userSettings.master.enabled = enabled;
 
-                if (!userSettings.master) {
-                    userSettings.master = {};
+            if (!enabled) {
+                if (s2Overlay) {
+                    s2Overlay.clear();
                 }
-                userSettings.master.enabled = enabled;
+                clearPoiCellPolygons();
 
-                if (!enabled) {
-                    // Master OFF -> clear visuals only
-                    if (s2Overlay) {
-                        s2Overlay.clear();
-                    }
-                    clearPoiCellPolygons();
-
-                    if (submitCellHighlight) {
-                        submitCellHighlight.setMap(null);
-                        submitCellHighlight = null;
-                    }
-
-                    saveSettings();
-                    return;
-                }
-
-                // Master turned ON
-                // If *everything* is off, enable all features so the user sees something happen
-                if (!hasAnyFeatureEnabled()) {
-                    enableAllFeatures();
+                if (submitCellHighlight) {
+                    submitCellHighlight.setMap(null);
+                    submitCellHighlight = null;
                 }
 
                 saveSettings();
+                return;
+            }
 
-                // Redraw based on current feature settings
-                if (submitMap) {
-                    if (!s2Overlay) {
-                        initS2Overlay(); // draws grid + shading
-                    } else {
-                        updateS2Grid();
-                        shadePoiCells();
-                    }
-                    refreshHighlightCell();
+            if (!hasAnyFeatureEnabled()) {
+                enableAllFeatures();
+            }
+
+            saveSettings();
+
+            if (submitMap) {
+                if (!s2Overlay) {
+                    initS2Overlay();
+                } else {
+                    updateS2Grid();
+                    shadePoiCells();
                 }
-            });
-        }, 300);
+                refreshHighlightCell();
+            }
+        });
     }
 
     function hasAnyFeatureEnabled() {
@@ -446,29 +450,20 @@
     // -----------------------------
 
     function insertS2SettingsLink() {
-        // Wait for main sidebar to exist
-        const panelCheck = setInterval(() => {
-            const settingsBody = document.querySelector(".wfmapmods-settings-links");
-            if (!settingsBody) return; // retry
+        const settingsBody = document.querySelector(".wfmapmods-settings-links");
+        if (!settingsBody) return;
 
-            clearInterval(panelCheck);
+        if (document.getElementById("wfmapmods-settings-s2cells")) return;
 
-            // Prevent duplicate link insertion
-            if (document.getElementById("wfmapmods-settings-s2cells")) return;
+        const link = document.createElement("a");
+        link.id = "wfmapmods-settings-s2cells";
+        link.textContent = "S2 Cells";
 
-            // Create <a> link
-            const link = document.createElement("a");
-            link.id = "wfmapmods-settings-s2cells";
-            link.textContent = "S2 Cells";
+        settingsBody.appendChild(link);
 
-            // Append to the settings section
-            settingsBody.appendChild(link);
-
-            // Event listener for the link
-            link.addEventListener("click", () => {
-                openS2SettingsWindow();
-            });
-        }, 300);
+        link.addEventListener("click", () => {
+            openS2SettingsWindow();
+        });
     }
 
     function openS2SettingsWindow() {
@@ -477,18 +472,8 @@
 
         // --- Backdrop ---
         const backdrop = document.createElement("div");
-        Object.assign(backdrop.style, {
-            position: "fixed",
-            inset: "0",
-            background: "rgba(0,0,0,0.35)",
-            zIndex: "2000",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            overflowY: "auto",
-            paddingTop: "12px",
-            paddingBottom: "12px"
-        });
+        backdrop.id = "wfmapmods-s2-modal-backdrop";
+        backdrop.className = "wfmapmods-s2-backdrop";
 
         // Close helper
         function closeModal() {
@@ -497,51 +482,22 @@
 
         // --- Dialog container ---
         const dialog = document.createElement("div");
-        Object.assign(dialog.style, {
-            background: "#ffffff",
-            borderRadius: "8px",
-            boxShadow: "0 10px 25px rgba(0,0,0,0.35)",
-            width: "250px",
-            maxWidth: "calc(100% - 32px)",
-            padding: "10px 12px 8px",
-            boxSizing: "border-box",
-            fontFamily: "Roboto, Arial, sans-serif",
-            fontSize: "12px",
-            color: "#111827",
-            maxHeight: "90vh",
-            overflowY: "auto"
-        });
-
+        dialog.className = "wfmapmods-s2-dialog";
 
         // --- Title ---
         const title = document.createElement("div");
         title.textContent = "S2 Cell Options";
-        Object.assign(title.style, {
-            fontSize: "15px",
-            fontWeight: "600",
-            marginBottom: "10px"
-        });
+        title.className = "wfmapmods-s2-title";
         dialog.appendChild(title);
 
         // --- Helper to build a labeled row ---
         function makeRow(labelText, inputEl) {
             const row = document.createElement("div");
-            Object.assign(row.style, {
-                display: "flex",
-                alignItems: "center",
-                marginBottom: "2px",
-                gap: "4px"
-            });
+            row.className = "wfmapmods-s2-row";
 
             const label = document.createElement("label");
             label.textContent = labelText;
-            Object.assign(label.style, {
-                flex: "0 0 110px",
-                fontSize: "11px",
-                color: "#374151"
-            });
-
-            inputEl.style.flex = inputEl.type === "checkbox" ? "0 0 auto" : "0 0 auto";
+            label.className = "wfmapmods-s2-label";
 
             row.appendChild(label);
             row.appendChild(inputEl);
@@ -559,18 +515,11 @@
         const primary = userSettings.primary;
 
         const primaryGroup = document.createElement("div");
-        Object.assign(primaryGroup.style, {
-            borderBottom: "1px solid #e5e7eb",
-            paddingBottom: "6px",
-            marginBottom: "6px"
-        });
+        primaryGroup.className = "wfmapmods-s2-section";
 
         const primaryHeader = document.createElement("div");
         primaryHeader.textContent = "Primary grid";
-        Object.assign(primaryHeader.style, {
-            fontWeight: "500",
-            marginBottom: "4px"
-        });
+        primaryHeader.className = "wfmapmods-s2-section-header";
         primaryGroup.appendChild(primaryHeader);
 
         const primaryEnabledInput = document.createElement("input");
@@ -612,18 +561,11 @@
         const secondary = userSettings.secondary;
 
         const secondaryGroup = document.createElement("div");
-        Object.assign(secondaryGroup.style, {
-            borderBottom: "1px solid #e5e7eb",
-            paddingBottom: "8px",
-            marginBottom: "8px"
-        });
+        secondaryGroup.className = "wfmapmods-s2-section";
 
         const secondaryHeader = document.createElement("div");
         secondaryHeader.textContent = "Secondary grid";
-        Object.assign(secondaryHeader.style, {
-            fontWeight: "500",
-            marginBottom: "4px"
-        });
+        secondaryHeader.className = "wfmapmods-s2-section-header";
         secondaryGroup.appendChild(secondaryHeader);
 
         const secondaryEnabledInput = document.createElement("input");
@@ -663,21 +605,14 @@
 
         // --- SHADED CELLS CONTROLS ---
         const poiCells = userSettings.poiCells;
-
         const highlight = userSettings.highlightCell;
 
         const shadeGroup = document.createElement("div");
-        Object.assign(shadeGroup.style, {
-            paddingBottom: "4px",
-            marginBottom: "8px"
-        });
+        shadeGroup.className = "wfmapmods-s2-section wfmapmods-s2-section--no-border";
 
         const shadeHeader = document.createElement("div");
         shadeHeader.textContent = "Shaded cells";
-        Object.assign(shadeHeader.style, {
-            fontWeight: "500",
-            marginBottom: "4px"
-        });
+        shadeHeader.className = "wfmapmods-s2-section-header";
         shadeGroup.appendChild(shadeHeader);
 
         const shadeEnabledInput = document.createElement("input");
@@ -702,20 +637,11 @@
 
         // --- SUBMISSION CELL HIGHLIGHT CONTROLS ---
         const highlightGroup = document.createElement("div");
-        Object.assign(highlightGroup.style, {
-            borderTop: "1px solid #e5e7eb",
-            paddingTop: "6px",
-            marginTop: "6px",
-            paddingBottom: "4px",
-            marginBottom: "4px"
-        });
+        highlightGroup.className = "wfmapmods-s2-section wfmapmods-s2-section-highlight";
 
         const highlightHeader = document.createElement("div");
         highlightHeader.textContent = "Submission cell highlight";
-        Object.assign(highlightHeader.style, {
-            fontWeight: "500",
-            marginBottom: "4px"
-        });
+        highlightHeader.className = "wfmapmods-s2-section-header";
         highlightGroup.appendChild(highlightHeader);
 
         const highlightEnabledInput = document.createElement("input");
@@ -748,37 +674,17 @@
 
         // --- Buttons row ---
         const buttonsRow = document.createElement("div");
-        Object.assign(buttonsRow.style, {
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: "8px",
-            marginTop: "4px"
-        });
+        buttonsRow.className = "wfmapmods-s2-buttons";
 
         const cancelBtn = document.createElement("button");
         cancelBtn.type = "button";
         cancelBtn.textContent = "Cancel";
-        Object.assign(cancelBtn.style, {
-            padding: "4px 10px",
-            borderRadius: "4px",
-            border: "1px solid #d1d5db",
-            background: "#ffffff",
-            cursor: "pointer",
-            fontSize: "12px"
-        });
+        cancelBtn.className = "wfmapmods-s2-btn wfmapmods-s2-btn-cancel";
 
         const okBtn = document.createElement("button");
         okBtn.type = "button";
         okBtn.textContent = "OK";
-        Object.assign(okBtn.style, {
-            padding: "4px 12px",
-            borderRadius: "4px",
-            border: "1px solid #2563eb",
-            background: "#2563eb",
-            color: "#ffffff",
-            cursor: "pointer",
-            fontSize: "12px"
-        });
+        okBtn.className = "wfmapmods-s2-btn wfmapmods-s2-btn-ok";
 
         buttonsRow.appendChild(cancelBtn);
         buttonsRow.appendChild(okBtn);
@@ -787,13 +693,11 @@
         // --- Wire up buttons ---
 
         function redrawS2() {
-            // Adjust this to match your existing overlay functions
             if (submitMap && s2Overlay) {
                 s2Overlay.clear();
                 drawS2Grid();
                 shadePoiCells();
             } else if (submitMap && !s2Overlay) {
-                // If overlay hasn’t been initialised yet
                 initS2Overlay();
             }
 
@@ -801,7 +705,6 @@
         }
 
         cancelBtn.addEventListener("click", () => {
-            // Reload from localStorage (discard any interim changes you might have made elsewhere)
             loadSettings();
             redrawS2();
             closeModal();
@@ -833,7 +736,6 @@
             highlight.lineWidth = clamp(highlightWidthInput.value, 0.5, 10);
             highlight.lineOpacity = clamp(highlightOpacityInput.value, 0, 1);
 
-            // Persist + redraw
             saveSettings();
             redrawS2();
             closeModal();
@@ -841,13 +743,13 @@
 
         document.addEventListener("keydown", function escHandler(ev) {
             if (ev.key === "Escape") {
-                closeModal(backdrop);
+                closeModal();
                 document.removeEventListener("keydown", escHandler);
             }
 
             if (ev.key === "Enter") {
                 ev.preventDefault();
-                okBtn.click(); // triggers the full OK logic
+                okBtn.click();
             }
         });
 
@@ -880,27 +782,27 @@
         };
 
         XHR.prototype.send = function(...args) {
-            this.addEventListener("load", function() {
-                try {
-                    if (this._s2_url && this._s2_url.includes("/api/v1/vault/live-pois-in-radius")) {
+            if (this._s2_url && this._s2_url.includes("/api/v1/vault/live-pois-in-radius")) {
+                this.addEventListener("load", function() {
+                    try {
                         const json = JSON.parse(this.responseText);
                         const pois = (json && json.result && Array.isArray(json.result.pois)) ?
                               json.result.pois : [];
 
                         s2Pois = pois;
 
-                        // If the map is ready, re-shade cells immediately
                         if (submitMap) {
                             shadePoiCells();
                         }
+                    } catch (e) {
+                        console.error("[S2] error parsing live-pois-in-radius response:", e);
                     }
-                } catch (e) {
-                    console.error("[S2] error parsing live-pois-in-radius response:", e);
-                }
-            });
+                });
+            }
 
             return origSend.apply(this, args);
         };
+
     })();
 
     // -----------------------------
@@ -1792,103 +1694,136 @@
     // css styling
     // -----------------------------
 
+    // -----------------------------
+    // css styling
+    // -----------------------------
+
     function injectS2SettingsCSS() {
         if (document.getElementById("wfmapmods-s2settings-css")) return;
 
         const css = document.createElement("style");
         css.id = "wfmapmods-s2settings-css";
         css.textContent = `
-        /* Backdrop */
-        .wfmapmods-s2-overlay-bg {
-            position: fixed;
-            inset: 0;
-            background: rgba(0,0,0,0.5);
-            z-index: 99999;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
+    /* Backdrop */
+    .wfmapmods-s2-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.35);
+        z-index: 2000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow-y: auto;
+        padding-top: 12px;
+        padding-bottom: 12px;
+    }
 
-        /* Popup container */
-        .wfmapmods-s2-overlay {
-            background: #fff;
-            border-radius: 8px;
-            padding: 16px 20px;
-            width: 360px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.25);
-            font-family: system-ui, sans-serif;
-        }
+    /* Dialog container */
+    .wfmapmods-s2-dialog {
+        background: #ffffff;
+        border-radius: 8px;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.35);
+        width: 250px;
+        max-width: calc(100% - 32px);
+        padding: 10px 12px 8px;
+        box-sizing: border-box;
+        font-family: Roboto, Arial, sans-serif;
+        font-size: 12px;
+        color: #111827;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
 
-        .wfmapmods-s2-overlay h2 {
-            font-size: 16px;
-            font-weight: 600;
-            margin: 0 0 12px 0;
-            text-align: center;
-        }
+    .wfmapmods-s2-title {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 10px;
+    }
 
-        /* Form grid layout */
-        .wfmapmods-s2-grid {
-            display: grid;
-            grid-template-columns: 1fr auto;
-            row-gap: 10px;
-            column-gap: 8px;
-            align-items: center;
-        }
+    .wfmapmods-s2-section {
+        padding-bottom: 6px;
+        margin-bottom: 6px;
+        border-bottom: 1px solid #e5e7eb;
+    }
 
-        .wfmapmods-s2-grid label {
-            font-size: 13px;
-        }
+    .wfmapmods-s2-section--no-border {
+        border-bottom: none;
+    }
 
-        /* Small numeric input */
-        .wfmapmods-s2-input-small {
-            width: 48px;
-            padding: 2px 4px;
-            font-size: 12px;
-            box-sizing: border-box;
-        }
+    .wfmapmods-s2-section-header {
+        font-weight: 500;
+        margin-bottom: 4px;
+    }
 
-        /* Switches / checkboxes */
-        .wfmapmods-s2-checkbox {
-            width: 16px;
-            height: 16px;
-        }
+    .wfmapmods-s2-row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 2px;
+        gap: 4px;
+    }
 
-        /* Color pickers */
-        .wfmapmods-s2-color {
-            width: 36px;
-            height: 22px;
-            padding: 0;
-            border: none;
-            background: none;
-        }
+    .wfmapmods-s2-label {
+        flex: 0 0 110px;
+        font-size: 11px;
+        color: #374151;
+    }
 
-        /* Footer buttons */
-        .wfmapmods-s2-footer {
-            margin-top: 16px;
-            display: flex;
-            justify-content: space-between;
-        }
+    .wfmapmods-s2-row input[type="number"] {
+        width: 60px;
+        box-sizing: border-box;
+        font-size: 11px;
+        padding: 2px 4px;
+    }
 
-        .wfmapmods-s2-btn {
-            padding: 6px 16px;
-            font-size: 13px;
-            border-radius: 6px;
-            border: none;
-            cursor: pointer;
-        }
+    .wfmapmods-s2-row input[type="color"] {
+        width: 32px;
+        height: 20px;
+        padding: 0;
+        border: none;
+        background: none;
+    }
 
-        .wfmapmods-s2-btn-save {
-            background: #2563eb;
-            color: white;
-        }
+    .wfmapmods-s2-section-highlight {
+        border-top: 1px solid #e5e7eb;
+        padding-top: 6px;
+        margin-top: 6px;
+        padding-bottom: 4px;
+        margin-bottom: 4px;
+        border-bottom: none;
+    }
 
-        .wfmapmods-s2-btn-cancel {
-            background: #e5e7eb;
-        }
+    .wfmapmods-s2-buttons {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 4px;
+    }
+
+    .wfmapmods-s2-btn {
+        padding: 4px 12px;
+        border-radius: 4px;
+        border: 1px solid transparent;
+        cursor: pointer;
+        font-size: 12px;
+        font-family: inherit;
+    }
+
+    .wfmapmods-s2-btn-cancel {
+        background: #ffffff;
+        border-color: #d1d5db;
+        color: #111827;
+    }
+
+    .wfmapmods-s2-btn-ok {
+        background: #2563eb;
+        border-color: #2563eb;
+        color: #ffffff;
+    }
     `;
 
         document.head.appendChild(css);
     }
+
 
     // -----------------------------
     // Plugin bootstrap
@@ -1898,8 +1833,6 @@
         loadSettings();
         startMapPanelWatcher();
         injectS2SettingsCSS();
-        watchForLatLngElement();
-        insertS2LayersOption();
     }
 
     bootstrap();
