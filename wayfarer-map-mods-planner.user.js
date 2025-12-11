@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Planner
-// @version      0.1.6
+// @version      0.1.7
 // @description  Load and edit planner POIs from a Google Sheet and show them as pins on the Wayfarer submission map.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-planner.user.js
@@ -525,6 +525,12 @@
         const lat = (typeof poi.lat === "number") ? poi.lat : parseFloat(poi.lat);
         const lng = (typeof poi.lng === "number") ? poi.lng : parseFloat(poi.lng);
 
+        function normalizeImageUrl(url = "") {
+            // Send original resolution images to the submit screen
+            if (!url.startsWith("https://lh3.googleusercontent.com/")) return url;
+            return url.replace(/=[a-z]\d+$/i, "") + "=s0";
+        }
+
         const payload = {
             source: POI_BRIDGE_SOURCE,
             poi: {
@@ -536,7 +542,7 @@
                 lng: Number.isFinite(lng) ? lng : null
             },
             images: {
-                mainUrl: poi.candidateimageurl || poi.imageUrl || "",
+                mainUrl: normalizeImageUrl(poi.candidateimageurl),
                 supportingUrls: []
             }
         };
