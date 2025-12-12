@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Wayfarer App Submissions
-// @version      0.1.4
+// @version      0.1.5
 // @description  Import Wayfarer App submissions from Lightship Geospatial Browser and show them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-wayfarer-app-submissions.user.js
@@ -1628,11 +1628,15 @@
 
             const bridge = document.getElementById(SUBMISSION_BRIDGE_ID);
             if (!bridge) {
-                console.warn("[WFAppSub] Submission bridge not found – falling back to legacy behaviour");
-                // Optional: legacy fallback:
-                // openResubmitEditModal(poi);
+                console.warn("[WFAppSub] Submission bridge not found");
                 return;
             }
+
+            const mainUrl = normalizeImageUrl(poi.imageServingUrl || "");
+
+            const supportingUrls = poi.supportingImageServingUrl
+            ? [normalizeImageUrl(poi.supportingImageServingUrl)]
+            : [];
 
             const payload = {
                 source: POI_BRIDGE_SOURCE,
@@ -1645,10 +1649,8 @@
                     lng: (typeof poi.lng === "number") ? poi.lng : null
                 },
                 images: {
-                    mainUrl: poi.imageServingUrl || "",
-                    supportingUrls: poi.supportingImageServingUrl
-                    ? [poi.supportingImageServingUrl]
-                    : []
+                    mainUrl,
+                    supportingUrls
                 }
             };
 
@@ -1657,6 +1659,12 @@
             } catch (e) {
                 console.warn("[WFAppSub] Failed to serialise payload for submission bridge", e, payload);
             }
+        }
+
+        function normalizeImageUrl(url = "") {
+            // Force original-resolution Google image URLs
+            if (!url.startsWith("https://lh3.googleusercontent.com/")) return url;
+            return url.replace(/=[a-z]\d+$/i, "") + "=s0";
         }
 
         // -----------------------------
