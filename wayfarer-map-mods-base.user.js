@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.1
+// @version      2.5.2
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -43,6 +43,8 @@
         MOBILE: "mobile",
         DESKTOP: "desktop"
     };
+
+    const NIANTIC_PLACEHOLDER_IMAGE = 'https://lh3.googleusercontent.com/fs2mYM4r9Qq93ejdOP_2lwefRNLVa9tqmJW7XXwqNhMCMXNKwoJoFuMboBpXwnKUf7fJGImbajM9mHAOMlndt5A-Ts9Qh9f_t6YoaQ6u';
 
     // ----- Radius for retrieving POIs -----
     let radius = 200;
@@ -6361,16 +6363,20 @@
         const markerType = userSettings.poi.markerType || 'thumbnail';
         const mapForMarker = isWayspotsLayerEnabled() ? submitMap : null;
 
-        // Thumbnail marker (image-based)
         if (markerType === 'thumbnail') {
             const size = 36;
-            const iconUrl = poi.imageUrl + `=s${size}-c`;
+
+            let iconUrl = ""
+
+            if (poi.imageUrl) {
+                iconUrl = poi.imageUrl + `=s${size}-c`;
+            } else {
+                const baseImageUrl = NIANTIC_PLACEHOLDER_IMAGE + `=s${size}-c`;
+                iconUrl = addUniqueFragmentToPlaceholderImage(baseImageUrl, poi);
+            }
 
             const marker = new google.maps.Marker({
-                position: {
-                    lat: poi.lat,
-                    lng: poi.lng
-                },
+                position: { lat: poi.lat, lng: poi.lng },
                 map: mapForMarker,
                 title: poi.title,
                 icon: {
@@ -6378,7 +6384,7 @@
                     scaledSize: new google.maps.Size(size, size),
                     anchor: new google.maps.Point(size / 2, size / 2)
                 },
-                optimized: false,
+                optimized: false
             });
 
             addListenersToPoiMarker(marker, poi);
@@ -6408,6 +6414,16 @@
 
         addListenersToPoiMarker(marker, poi);
         return marker;
+    }
+
+    function addUniqueFragmentToPlaceholderImage(url, poi) {
+        if (!url) return url;
+
+        const key = poi?.guid || poi?.id || null;
+
+        if (key) return `${url}#wfmm=${encodeURIComponent(String(key))}`;
+
+        return url;
     }
 
     function addListenersToPoiMarker(marker, poi) {
