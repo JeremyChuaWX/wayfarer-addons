@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.2
+// @version      2.5.3
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -93,6 +93,7 @@
     let layersControlEl = null;
     let wayspotsLayerCheckboxEl = null;
     let draftSubmissionsLayerCheckboxEl = null;
+    let wayspotOverlayState = null;
 
     // ----- User / submitter positional state -----
     let userLocationMarker = null;
@@ -1565,6 +1566,15 @@
             const borderColor = poi.borderColor || "#154AAB";
             imgBox.style.border = `10px solid ${borderColor}`;
 
+            // Make the whole circle clickable (works even with placeholder)
+            imgBox.style.cursor = "pointer";
+
+            // Avoid stacking duplicate listeners if this UI re-renders
+            imgBox.onclick = null;
+            imgBox.addEventListener("click", () => {
+                openWayspotDetailOverlay(poi);
+            });
+
             if (poi.imageUrl) {
                 const img = document.createElement("img");
                 img.className = "wfmapmods-detail-image";
@@ -1574,12 +1584,8 @@
                     width: "100%",
                     height: "100%",
                     objectFit: "cover",
-                    display: "block",
-                    cursor: "pointer",
-                });
-
-                img.addEventListener("click", () => {
-                    openWayspotDetailOverlay(poi);
+                    display: "block"
+                    // cursor handled by imgBox now
                 });
 
                 imgBox.appendChild(img);
@@ -1592,6 +1598,11 @@
                     color: "#9ca3af",
                     fontSize: "12px",
                     textAlign: "center",
+                    width: "100%",
+                    height: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center"
                 });
 
                 imgBox.appendChild(placeholder);
@@ -4228,17 +4239,18 @@
     // ==================================
 
     function openWayspotDetailOverlay(poi) {
-        if (!poi || !poi.imageUrl) return;
+        if (!poi) return;
 
-        // Avoid multiple overlays at once
-        const existing = document.getElementById("wfmapmods-wayspot-overlay");
-        if (existing) {
-            existing.remove();
+        // Close any existing overlay properly (including ESC listener)
+        if (wayspotOverlayState?.backdrop) {
+            try {
+                document.removeEventListener("keydown", wayspotOverlayState.escHandler);
+            } catch (_) {}
+            wayspotOverlayState.backdrop.remove();
+            wayspotOverlayState = null;
         }
 
-        const fullImgUrl = poi.imageUrl;
-        const title = escapeHtml(poi.title || "(untitled)");
-        const desc  = escapeHtml(poi.description || "");
+        const fullImgUrl = poi.imageUrl || NIANTIC_PLACEHOLDER_IMAGE;
 
         // Backdrop
         const backdrop = document.createElement("div");
@@ -4249,7 +4261,7 @@
         const dialog = document.createElement("div");
         dialog.className = "wfmapmods-wayspot-overlay-dialog";
 
-        // Header (title + close)
+        // Header
         const header = document.createElement("div");
         header.className = "wfmapmods-wayspot-overlay-header";
 
@@ -4263,14 +4275,11 @@
         closeBtn.textContent = "×";
         closeBtn.title = "Close";
 
-        // Title + close button both live in the header
         header.appendChild(titleEl);
         header.appendChild(closeBtn);
-
-        // Header goes once at the top of the dialog
         dialog.appendChild(header);
 
-        // Image (wrapped in link to =s0 in new tab)
+        // Image
         const imageWrapper = document.createElement("a");
         imageWrapper.href = fullImgUrl + "=s0";
         imageWrapper.target = "_blank";
@@ -4295,9 +4304,9 @@
         document.body.appendChild(backdrop);
 
         function closeOverlay() {
-            if (wayspotOverlayEscHandler) {
-                document.removeEventListener("keydown", wayspotOverlayEscHandler);
-                wayspotOverlayEscHandler = null;
+            if (wayspotOverlayState?.backdrop === backdrop) {
+                document.removeEventListener("keydown", wayspotOverlayState.escHandler);
+                wayspotOverlayState = null;
             }
             backdrop.remove();
         }
@@ -4308,20 +4317,20 @@
             closeOverlay();
         });
 
-        // Close on click-away (clicking the backdrop but not the dialog)
+        // Click-away
         backdrop.addEventListener("click", (e) => {
-            if (e.target === backdrop) {
-                closeOverlay();
-            }
+            if (e.target === backdrop) closeOverlay();
         });
 
-        // Close on Escape
-        wayspotOverlayEscHandler = (ev) => {
+        // Escape
+        const escHandler = (ev) => {
             if (ev.key === "Escape") {
                 closeOverlay();
             }
         };
-        document.addEventListener("keydown", wayspotOverlayEscHandler);
+
+        wayspotOverlayState = { backdrop, escHandler };
+        document.addEventListener("keydown", escHandler);
     }
 
     // ==================================
