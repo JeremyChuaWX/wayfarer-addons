@@ -3032,6 +3032,14 @@
             return;
         }
 
+        const mainUrl = normalizeImageUrl(poi.imageUrl || "");
+
+        const supportingUrls = Array.isArray(poi.supportingImageUrls)
+        ? poi.supportingImageUrls.map(u => normalizeImageUrl(u || "")).filter(Boolean)
+        : [];
+
+        console.log(mainUrl);
+
         const payload = {
             source: POI_BRIDGE_SOURCE,
             poi: {
@@ -3043,10 +3051,8 @@
                 lng: (typeof poi.lng === "number") ? poi.lng : null
             },
             images: {
-                mainUrl: poi.imageUrl || "",
-                supportingUrls: Array.isArray(poi.supportingImageUrls)
-                ? poi.supportingImageUrls
-                : []
+                mainUrl,
+                supportingUrls
             }
         };
 
@@ -3055,6 +3061,12 @@
         } catch (e) {
             console.warn("[ContribOverlay] Failed to serialise payload for submission bridge", e, payload);
         }
+    }
+
+    function normalizeImageUrl(url = "") {
+        // Send original resolution images to the submit screen
+        if (!url.startsWith("https://lh3.googleusercontent.com/")) return url;
+        return url.replace(/=[a-z]\d+$/i, "") + "=s0";
     }
 
     // -----------------------------
