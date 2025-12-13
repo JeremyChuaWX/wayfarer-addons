@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Report Wayspots
-// @version      0.1.4
+// @version      0.1.5
 // @description  Adds a "Report Wayspot" link to the side panel and pre-fills the Helpshift form using POI bridge data
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
@@ -50,11 +50,14 @@
     // Cache of last report payload in the Wayfarer tab
     let lastReportPayload = null;
 
-    // Track whether we've already hooked onPoisFetched
-    let poiHookAttached = false;
-
     // Cache of live POIs loaded via the live-pois-in-radius API
     let livePois = [];
+
+    // Side panel detection
+    const SUBMIT_PATH = "/new/submit/new";
+
+    let sidePanelObserver = null;
+    let sidePanelMutationScheduled = false;
 
     // ======================================================================
     // WAYFARER SIDE
@@ -103,39 +106,95 @@
 
     function initWayfarer() {
         hookLivePoisXHR();
-        startSidePanelWatcher();
         loadSettings();
         setupWayfarerMessaging();
-        startPoiBridgeWatcherIfReady();
+        setupRouteWatcher();
+    }
+
+    function isOnSubmitPage() {
+        // Adjust if Wayfarer ever changes the path or uses a trailing slash
+        return window.location.pathname.startsWith(SUBMIT_PATH);
+    }
+
+    function onRouteChange() {
+        if (isOnSubmitPage()) {
+            // We’re on /new/submit/new → ensure the side panel watcher is running
+            startSidePanelWatcher();
+        } else {
+            // Any other internal route → stop watching to save work
+            stopSidePanelWatcher();
+        }
+    }
+
+    function setupRouteWatcher() {
+        const origPushState = history.pushState;
+        const origReplaceState = history.replaceState;
+
+        function wrappedRouteChange() {
+            onRouteChange();
+        }
+
+        history.pushState = function (...args) {
+            const ret = origPushState.apply(this, args);
+            wrappedRouteChange();
+            return ret;
+        };
+
+        history.replaceState = function (...args) {
+            const ret = origReplaceState.apply(this, args);
+            wrappedRouteChange();
+            return ret;
+        };
+
+        window.addEventListener("popstate", wrappedRouteChange);
+
+        // Handle the initial URL on page load
+        wrappedRouteChange();
     }
 
     function hookLivePoisXHR() {
         const XHR = window.XMLHttpRequest || XMLHttpRequest;
-        if (!XHR || XHR.__wfReportHooked) return; // avoid double-hooking
+        if (!XHR || XHR.__wfReportHooked) return;
 
         XHR.__wfReportHooked = true;
 
         const origOpen = XHR.prototype.open;
         const origSend = XHR.prototype.send;
 
-        XHR.prototype.open = function(method, url, ...rest) {
+        XHR.prototype.open = function (method, url, ...rest) {
             this._wf_report_url = url;
             return origOpen.call(this, method, url, ...rest);
         };
 
-        XHR.prototype.send = function(...args) {
-            this.addEventListener("load", function() {
+        XHR.prototype.send = function (...args) {
+            this.addEventListener("load", function () {
                 try {
-                    if (this._wf_report_url &&
-                        this._wf_report_url.includes("/api/v1/vault/live-pois-in-radius")) {
+                    if (!this._wf_report_url ||
+                        !this._wf_report_url.includes("/api/v1/vault/live-pois-in-radius")) {
+                        return;
+                    }
 
-                        const json = JSON.parse(this.responseText);
-                        const pois = (json &&
-                                      json.result &&
-                                      Array.isArray(json.result.pois))
-                        ? json.result.pois
-                        : [];
+                    const json = JSON.parse(this.responseText);
+                    const pois = (json &&
+                                  json.result &&
+                                  Array.isArray(json.result.pois))
+                    ? json.result.pois
+                    : [];
 
+                    let radius = 0;
+                    try {
+                        const urlObj = new URL(this._wf_report_url, location.origin);
+                        radius = Number(urlObj.searchParams.get("radius")) || 0;
+                    } catch {
+                        radius = 0; // fall back to merge behaviour
+                    }
+
+                    if (radius < 10) {
+                        if (!Array.isArray(livePois)) livePois = [];
+                        for (const p of pois) {
+                            mergePoiIntoLivePois(p);
+                        }
+                    } else {
                         livePois = pois;
                     }
                 } catch (e) {
@@ -145,21 +204,78 @@
 
             return origSend.apply(this, args);
         };
+
+        function mergePoiIntoLivePois(newPoi) {
+            if (!newPoi) return;
+
+            if (newPoi.guid) {
+                const idx = livePois.findIndex(p => p && p.guid === newPoi.guid);
+                if (idx >= 0) {
+                    livePois[idx] = newPoi;
+                    return;
+                }
+            }
+
+            const idx2 = livePois.findIndex(p =>
+                                            p &&
+                                            typeof p.lat === "number" &&
+                                            typeof p.lng === "number" &&
+                                            p.lat === newPoi.lat &&
+                                            p.lng === newPoi.lng
+                                           );
+
+            if (idx2 >= 0) {
+                livePois[idx2] = newPoi;
+                return;
+            }
+
+            livePois.push(newPoi);
+        }
     }
 
     function startSidePanelWatcher() {
+        console.log('startSidePanelWatcher');
+        // Don't create multiple observers
+        if (sidePanelObserver) return;
+
+        // Run once immediately for the current DOM
         sidePanelMutationHandler();
 
-        const mo = new MutationObserver(sidePanelMutationHandler);
-        mo.observe(document.documentElement || document.body, {
+        sidePanelObserver = new MutationObserver(() => {
+            // Simple debounce: collapse many mutations into one handler call
+            if (sidePanelMutationScheduled) return;
+
+            sidePanelMutationScheduled = true;
+            setTimeout(() => {
+                sidePanelMutationScheduled = false;
+                sidePanelMutationHandler();
+            }, 50); // tweak if you want, 50ms is usually fine
+        });
+
+        sidePanelObserver.observe(document.documentElement || document.body, {
             childList: true,
             subtree: true
         });
     }
 
+    function stopSidePanelWatcher() {
+        if (sidePanelObserver) {
+            sidePanelObserver.disconnect();
+            sidePanelObserver = null;
+        }
+    }
+
     function sidePanelMutationHandler() {
-        insertReportWayspotLinkIfReady();
-        insertReportingSettingsLinkIfReady();
+        const panelPresent = !!document.querySelector("#wfmapmods-side-panel");
+
+        if (panelPresent) {
+            console.log('sidePanelMutationHandler');
+            insertReportWayspotLinkIfReady();
+            insertReportingSettingsLinkIfReady();
+            startPoiBridgeWatcherIfReady();
+            stopSidePanelWatcher();
+        }
+
     }
 
     function insertReportWayspotLinkIfReady() {
@@ -189,37 +305,37 @@
         }
     }
 
+    function shouldShowReportLink(info, livePois) {
+        if (!info) return false;
+
+        const { status, source, lat, lng } = info;
+
+        if (status === 'LIVE' && source === 'wfmapmods-base') {
+            // Condition 1: live marker from the base plug-in
+            return true;
+        }
+
+        if (source === 'wfmm-s2') {
+            // Condition 2: Gym/Pokestop custom marker from s2 plug-in
+            // Code may need to be adjusted for manually placed markers
+            return true;
+        }
+
+        if (status === 'LIVE' || status === 'ACCEPTED') {
+            // Condition 3: LIVE/ACCEPTED from any other plug-in, but must match a loaded POI lat,lng
+            const pois = Array.isArray(livePois) ? livePois : [];
+            return pois.some(p => p?.lat === lat && p?.lng === lng);
+        }
+
+        return false;
+    }
+
     function updateReportWayspotLinkVisibility() {
         const link = document.getElementById('wfmapmods-settings-report-wayspot');
         if (!link) return;
 
         const info = getCurrentWayspotBridgeData();
-        if (!info || !info.status) {
-            link.style.display = 'none';
-            return;
-        }
-
-        const { status, source, lat, lng } = info;
-        let visible = false;
-
-        // Condition 1: LIVE + wfmapmods-main (trust the bridge alone)
-        if (status === 'LIVE' && source === 'wfmapmods-base') {
-            visible = true;
-        } else if (status === 'LIVE' || status === 'ACCEPTED') {
-            // Condition 2: LIVE/ACCEPTED from any source, but must match a loaded POI
-            if (typeof lat === 'number' && typeof lng === 'number') {
-                const pois = Array.isArray(livePois) ? livePois : [];
-                const EPS = 1e-7;
-
-                visible = pois.some(p =>
-                                    p &&
-                                    typeof p.lat === 'number' &&
-                                    typeof p.lng === 'number' &&
-                                    Math.abs(p.lat - lat) < EPS &&
-                                    Math.abs(p.lng - lng) < EPS
-                                   );
-            }
-        }
+        const visible = shouldShowReportLink(info, livePois);
 
         link.style.display = visible ? '' : 'none';
     }
@@ -320,6 +436,7 @@
     }
 
     function openReportingSettingsWindow() {
+        // Don't open a second copy if one is already there
         if (document.getElementById("wfmapmods-reporting-modal-backdrop")) return;
 
         // Ensure global settings are loaded into userSettings
@@ -346,8 +463,15 @@
             paddingBottom: "12px"
         });
 
+        // We'll assign this after we create saveBtn, but we need
+        // a reference here so closeModal can remove it.
+        let escHandler;
+
         function closeModal() {
             backdrop.remove();
+            if (escHandler) {
+                document.removeEventListener("keydown", escHandler);
+            }
         }
 
         // --- Dialog container ---
@@ -422,7 +546,6 @@
         nameInput.type = "text";
         nameInput.placeholder = "Your full name";
         nameInput.value = reporting.name || "";
-
         dialog.appendChild(makeRow("Name:", nameInput));
 
         // --- Email ---
@@ -430,7 +553,6 @@
         emailInput.type = "email";
         emailInput.placeholder = "name@example.com";
         emailInput.value = reporting.email || "";
-
         dialog.appendChild(makeRow("Email:", emailInput));
 
         // --- Buttons row ---
@@ -484,22 +606,24 @@
             userSettings.reporting.name = nameInput.value.trim();
             userSettings.reporting.email = emailInput.value.trim();
 
-            // Uses your existing localStorage-based save
             saveSettings();
             closeModal();
         });
 
         // ESC closes, Enter = Save
-        document.addEventListener("keydown", function escHandler(ev) {
+        escHandler = function (ev) {
             if (ev.key === "Escape") {
+                ev.preventDefault();
                 closeModal();
-                document.removeEventListener("keydown", escHandler);
             } else if (ev.key === "Enter") {
                 ev.preventDefault();
                 saveBtn.click();
             }
-        });
+        };
 
+        document.addEventListener("keydown", escHandler);
+
+        // Click on backdrop (but not dialog) closes
         backdrop.addEventListener("click", (ev) => {
             if (ev.target === backdrop) {
                 closeModal();
