@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Draw Tools
-// @version      0.2.0
+// @version      0.3.0
 // @description  Adds simple drawing tools (markers, polylines, circles) to the Wayfarer submission map, with persistence.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-draw-tools.user.js
@@ -29,21 +29,100 @@
 (function () {
     'use strict';
 
-    let submitMap = null;
-    let mapAttached = false;
 
-    let mapPanelObserver = null;
-    let mapPanelMutationScheduled = false;
+
+    // =============================
+    // Constants and environment
+    // =============================
+
+    const SETTINGS_KEY = "wfmap_drawing_tools_settings";
     const MAP_PATH = "/new/submit/new";
 
+    // getSubmitMap polling
+    const MAP_FIND_ATTEMPTS = 40;
+    const MAP_FIND_INTERVAL_MS = 250;
+
+    // panel polling for settings link injection
+    const SETTINGS_LINK_POLL_MS = 300;
+    const SETTINGS_LINK_MAX_TRIES = 60;
+
+    // polyline finish behaviour
+    const VERTEX_SNAP_PX = 10;
+
+    // tiny-shape discard threshold
+    const MIN_LENGTH_METERS = 1;
+
+    // UI z-indexes
+    const DRAWING_MODAL_ZINDEX = 8000;
+    const LABEL_ZINDEX = 9999;
+
+    // One-time environment detection (computed constant)
     const isTouchDevice = !!(
         "ontouchstart" in window ||
         (navigator && (navigator.maxTouchPoints > 0 || navigator.msMaxTouchPoints > 0))
     );
 
-    const SETTINGS_KEY = "wfmap_drawing_tools_settings";
+    // =============================
+    // Mutable state
+    // =============================
 
+    // -----------------------------
+    // Map attachment state
+    // -----------------------------
+    let submitMap = null;
+    let mapAttached = false;
+
+    let mapPanelObserver = null;
+    let mapPanelMutationScheduled = false;
+
+    // -----------------------------
+    // UI: controls + toggles
+    // -----------------------------
+    let drawingControlsAdded = false;
+    let drawingControlDiv = null;
+    let drawingControlsPosition = null;
+
+    let layersOptionCheckbox = null;
+    const modeButtons = {};          // static container; contents mutate
+    let pinHideStyleInjected = false;
+
+    // -----------------------------
+    // Drawing: mode + listeners
+    // -----------------------------
+    let currentMode = null;          // "marker"|"arrow"|"polyline"|"circle"|"delete"|null
+    let deleteMode = false;
+
+    let modeListeners = [];
+    let domModeListeners = [];
+    let drawingClickHandler = null;
+
+    let cancelCurrentDrawing = null;
+    let escapeHandlerAttached = false;
+
+    // -----------------------------
+    // Drawing: shape registry
+    // -----------------------------
+    let allShapes = [];
+    let currentShapeColor = "#ff0000";
+
+    // -----------------------------
+    // Geometry / overlay helpers
+    // -----------------------------
+    let projectionHelper = null;
+    let mapProjection = null;
+    let overlayOffset = { x: 0, y: 0 };
+
+    let circleLabelDiv = null;
+    let polyLabelDiv = null;
+
+    // -----------------------------
+    // Settings model
+    // -----------------------------
     const userSettings = {};
+
+    // -----------------------------
+    // Settings and persistence
+    // -----------------------------
 
     function ensureDrawingDefaults() {
         if (!userSettings.drawing) {
@@ -182,23 +261,20 @@
         }
     }
 
-    /**
-     * Detect when the map side panel is added or removed and
-     * attach/teardown the contribution overlay accordingly.
-     */
     function handlePanelChange() {
         const panelPresent = !!document.querySelector("#wfmapmods-side-panel");
 
         if (panelPresent) {
             attachDrawingToolsToMapIfNeeded();
             insertDrawingSettingsLink();
+            insertDrawingLayersOption();
             stopMapPanelWatcher();
         }
     }
 
     function getSubmitMap() {
         return new Promise(resolve => {
-            let attempts = 40;
+            let attempts = MAP_FIND_ATTEMPTS;
 
             function tryFindMap() {
                 const candidates = document.querySelectorAll('app-submit-wayspot-map nia-map');
@@ -234,11 +310,26 @@
                     return;
                 }
 
-                setTimeout(tryFindMap, 250);
+                setTimeout(tryFindMap, MAP_FIND_INTERVAL_MS);
             }
 
             tryFindMap();
         });
+    }
+
+    async function attachDrawingToolsToMapIfNeeded() {
+        if (mapAttached) return;
+
+        const map = await getSubmitMap();
+
+        if (!map) {
+            console.warn("[DrawingTools] Map not found – cannot attach");
+            return;
+        }
+
+        submitMap = map;
+        initDrawingTools();
+        mapAttached = true;
     }
 
     function teardownMap() {
@@ -269,27 +360,15 @@
         overlayOffset = { x: 0, y: 0 };
     }
 
-    async function attachDrawingToolsToMapIfNeeded() {
-        if (mapAttached) return;
-
-        const map = await getSubmitMap();
-
-        if (!map) {
-            console.warn("[DrawingTools] Map not found – cannot attach");
-            return;
-        }
-
-        submitMap = map;
-        initDrawingTools();
-        mapAttached = true;
-    }
-
     // -----------------------------
-    // Settings link + modal
+    // UI: Settings link + modal
     // -----------------------------
 
     function insertDrawingSettingsLink() {
+        let tries = 0;
         const panelCheck = setInterval(() => {
+            if (++tries > SETTINGS_LINK_MAX_TRIES) { clearInterval(panelCheck); return; }
+
             const settingsBody = document.querySelector(".wfmapmods-settings-links");
             if (!settingsBody) return;
 
@@ -306,7 +385,7 @@
             link.addEventListener("click", () => {
                 openDrawingSettingsWindow();
             });
-        }, 300);
+        }, SETTINGS_LINK_POLL_MS);
     }
 
     function openDrawingSettingsWindow() {
@@ -331,10 +410,6 @@
             paddingTop: "12px",
             paddingBottom: "12px"
         });
-
-        function closeModal() {
-            backdrop.remove();
-        }
 
         const dialog = document.createElement("div");
         Object.assign(dialog.style, {
@@ -483,16 +558,17 @@
             closeModal();
         });
 
-        document.addEventListener("keydown", function escHandler(ev) {
-            if (ev.key === "Escape") {
-                closeModal();
-                document.removeEventListener("keydown", escHandler);
-            }
-            if (ev.key === "Enter") {
-                ev.preventDefault();
-                okBtn.click();
-            }
-        });
+        function escHandler(ev) {
+            if (ev.key === "Escape") closeModal();
+            if (ev.key === "Enter") { ev.preventDefault(); okBtn.click(); }
+        }
+
+        function closeModal() {
+            document.removeEventListener("keydown", escHandler);
+            backdrop.remove();
+        }
+
+        document.addEventListener("keydown", escHandler);
 
         backdrop.addEventListener("click", (ev) => {
             if (ev.target === backdrop) {
@@ -505,254 +581,7 @@
     }
 
     // -----------------------------
-    // Drawing tools state
-    // -----------------------------
-
-    let drawingControlsAdded = false;
-    let drawingControlDiv = null;
-    let drawingControlsPosition = null;
-
-    let allShapes = [];
-    let currentShapeColor = "#ff0000";
-    let deleteMode = false;
-
-    let modeListeners = [];
-    let domModeListeners = [];
-    let drawingClickHandler = null;
-
-    let layersOptionCheckbox = null;
-
-    function clearModeListeners() {
-        modeListeners.forEach(l => google.maps.event.removeListener(l));
-        modeListeners = [];
-
-        domModeListeners.forEach(info => {
-            try {
-                info.target.removeEventListener(info.type, info.handler, info.options || false);
-            } catch {
-                // ignore
-            }
-        });
-        domModeListeners = [];
-
-        drawingClickHandler = null;
-    }
-
-    function addDomModeListener(target, type, handler, options) {
-        const opts = options || false;
-        target.addEventListener(type, handler, opts);
-        domModeListeners.push({ target, type, handler, options: opts });
-    }
-
-
-    function clearInMemoryShapes(keepSettings) {
-        allShapes.forEach(entry => {
-            try {
-                entry.overlay.setMap(null);
-            } catch {
-                // ignore
-            }
-        });
-        allShapes = [];
-
-        if (!keepSettings) {
-            ensureDrawingDefaults();
-            userSettings.drawing.shapes = [];
-            saveSettings();
-        }
-    }
-
-    function persistShapes() {
-        ensureDrawingDefaults();
-        const shapes = allShapes.map(entry => entry.data);
-        userSettings.drawing.shapes = shapes;
-        saveSettings();
-    }
-
-    // Only clickable in delete mode
-    function refreshOverlayClickability() {
-        const interactive = deleteMode;
-        allShapes.forEach(entry => {
-            if (!entry.overlay || !entry.overlay.setOptions) return;
-            try {
-                entry.overlay.setOptions({ clickable: interactive });
-            } catch {
-                // ignore
-            }
-        });
-    }
-
-    function registerShape(overlay, data, skipPersist) {
-        const entry = { overlay, data };
-        allShapes.push(entry);
-
-        overlay.addListener("click", () => {
-            if (!deleteMode) return;
-
-            overlay.setMap(null);
-            const idx = allShapes.indexOf(entry);
-            if (idx >= 0) {
-                allShapes.splice(idx, 1);
-                persistShapes();
-            }
-        });
-
-        refreshOverlayClickability();
-
-        if (!skipPersist) {
-            persistShapes();
-        }
-    }
-
-    function rebuildShapesFromSettings() {
-        clearInMemoryShapes(true);
-
-        const drawingSettings = userSettings.drawing || {};
-        const savedShapes = drawingSettings.shapes || [];
-        currentShapeColor = drawingSettings.color || "#ff0000";
-
-        savedShapes.forEach(data => {
-            try {
-                if (data.type === "marker") {
-                    recreateMarker(data);
-                } else if (data.type === "polyline") {
-                    recreatePolyline(data);
-                } else if (data.type === "circle") {
-                    recreateCircle(data);
-                } else if (data.type === "arrow") {
-                    recreateArrow(data);
-                }
-            } catch (e) {
-                console.error("[DrawingTools] Failed to recreate shape:", e, data);
-            }
-        });
-
-        persistShapes();
-    }
-
-    function createMarkerIcon(color) {
-        return {
-            path: "M 0 -24 C -6.627 -24 -12 -18.627 -12 -12 C -12 -5 -3 7 0 12 C 3 7 12 -5 12 -12 C 12 -18.627 6.627 -24 0 -24 z",
-            fillColor: color,
-            fillOpacity: 1,
-            strokeColor: "#202124",
-            strokeWeight: 1,
-            scale: 1,
-            anchor: new google.maps.Point(0, 12)
-        };
-    }
-
-    function recreateMarker(data) {
-        const color = data.color || currentShapeColor;
-        const marker = new google.maps.Marker({
-            map: submitMap,
-            position: new google.maps.LatLng(data.position.lat, data.position.lng),
-            icon: createMarkerIcon(color),
-            clickable: false
-        });
-
-        registerShape(marker, {
-            type: "marker",
-            position: data.position,
-            color
-        }, true);
-    }
-
-    function recreatePolyline(data) {
-        const color = data.color || currentShapeColor;
-        const path = (data.path || []).map(p => new google.maps.LatLng(p.lat, p.lng));
-        const polyline = new google.maps.Polyline({
-            map: submitMap,
-            path,
-            strokeColor: color,
-            strokeWeight: 3,
-            clickable: false
-        });
-
-        registerShape(polyline, {
-            type: "polyline",
-            path: data.path || [],
-            color
-        }, true);
-    }
-
-    function recreateCircle(data) {
-        const color = data.color || currentShapeColor;
-        const circle = new google.maps.Circle({
-            map: submitMap,
-            center: new google.maps.LatLng(data.center.lat, data.center.lng),
-            radius: data.radius,
-            strokeColor: color,
-            strokeWeight: 2,
-            fillColor: color,
-            fillOpacity: 0.1,
-            clickable: false
-        });
-
-        registerShape(circle, {
-            type: "circle",
-            center: data.center,
-            radius: data.radius,
-            color
-        }, true);
-    }
-
-    function createArrowPolylineOptions(color) {
-        return {
-            strokeColor: color,
-            strokeWeight: 3,
-            clickable: false,
-            icons: [{
-                icon: {
-                    path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-                    strokeColor: color,
-                    fillColor: color,
-                    fillOpacity: 1,
-                    strokeWeight: 1,
-                    scale: 3
-                },
-                offset: "100%"
-            }]
-        };
-    }
-
-    function recreateArrow(data) {
-        const color = data.color || currentShapeColor;
-
-        const start = new google.maps.LatLng(data.start.lat, data.start.lng);
-        const end   = new google.maps.LatLng(data.end.lat, data.end.lng);
-
-        const arrow = new google.maps.Polyline({
-            map: submitMap,
-            path: [start, end],
-            ...createArrowPolylineOptions(color)
-        });
-
-        registerShape(arrow, {
-            type: "arrow",
-            start: data.start,
-            end: data.end,
-            color
-        }, true);
-    }
-
-    function initDrawingTools() {
-        if (!submitMap) return;
-
-        ensureDrawingDefaults();
-        currentShapeColor = userSettings.drawing.color || "#ff0000";
-
-        ensurePinHideCSS();
-        ensureProjectionHelper();
-        attachMarkerClickCapture();
-
-        applyDrawingEnabledState();
-
-        submitMap._wfDrawingToolsInitialised = true;
-    }
-
-    // -----------------------------
-    // Layers options
+    // UI: Layers menu option
     // -----------------------------
 
     function syncLayersCheckboxFromSettings() {
@@ -807,195 +636,8 @@
     }
 
     // -----------------------------
-    // Map controls + modes
+    // UI: Map controls
     // -----------------------------
-
-    let currentMode = null; // "marker"|"arrow"|"polyline"|"circle"|"delete"|null
-    const modeButtons = {};
-
-    let pinHideStyleInjected = false;
-
-    function ensurePinHideCSS() {
-        if (pinHideStyleInjected) return;
-        const style = document.createElement("style");
-        style.textContent = `
-            body.wf-drawing-active img[src$="map_selection_pin.svg"] {
-                display: none !important;
-            }
-        `;
-        document.head.appendChild(style);
-        pinHideStyleInjected = true;
-    }
-
-    function updateSelectionPinVisibility() {
-        if (currentMode) {
-            document.body.classList.add("wf-drawing-active");
-        } else {
-            document.body.classList.remove("wf-drawing-active");
-        }
-    }
-
-    function getControlPositionForSetting(posStr) {
-        switch (posStr) {
-            case "top": return google.maps.ControlPosition.TOP_CENTER;
-            case "bottom": return google.maps.ControlPosition.BOTTOM_CENTER;
-            case "left":
-            default: return google.maps.ControlPosition.LEFT_TOP;
-        }
-    }
-
-    function updateControlsLayout() {
-        if (!drawingControlDiv) return;
-
-        const drawingSettings = userSettings.drawing || {};
-        const posSetting = drawingSettings.position || "left";
-
-        if (posSetting === "top" || posSetting === "bottom") {
-            drawingControlDiv.style.flexDirection = "row";
-            drawingControlDiv.style.alignItems = "center";
-
-            // Optional: tweak title spacing a bit for horizontal layout
-            const titleEl = drawingControlDiv.firstChild;
-            if (titleEl && titleEl.style) {
-                titleEl.style.marginBottom = "0";
-                titleEl.style.marginRight = "6px";
-            }
-        } else {
-            drawingControlDiv.style.flexDirection = "column";
-            drawingControlDiv.style.alignItems = "stretch";
-
-            const titleEl = drawingControlDiv.firstChild;
-            if (titleEl && titleEl.style) {
-                titleEl.style.marginRight = "0";
-                titleEl.style.marginBottom = "2px";
-            }
-        }
-    }
-
-    function applyControlPosition() {
-        if (!submitMap || !drawingControlDiv) return;
-
-        const drawingSettings = userSettings.drawing || {};
-        const posSetting = drawingSettings.position || "left";
-        const newPos = getControlPositionForSetting(posSetting);
-
-        if (drawingControlsPosition === newPos) {
-            // Still update layout if the position setting changed but the ControlPosition enum didn't
-            updateControlsLayout();
-            return;
-        }
-
-        // Remove from old position if present
-        if (drawingControlsPosition != null) {
-            const arr = submitMap.controls[drawingControlsPosition];
-            const a = arr.getArray();
-            const idx = a.indexOf(drawingControlDiv);
-            if (idx > -1) {
-                arr.removeAt(idx);
-            }
-        }
-
-        drawingControlsPosition = newPos;
-        submitMap.controls[newPos].push(drawingControlDiv);
-
-        // Adjust flex layout for the new position
-        updateControlsLayout();
-    }
-
-    function applyDrawingEnabledState() {
-        ensureDrawingDefaults();
-        const drawingSettings = userSettings.drawing || {};
-        const enabled = drawingSettings.enabled !== false;
-
-        // Always reset modes when changing enabled state
-        currentMode = null;
-        deleteMode = false;
-        clearModeListeners();
-        document.body.classList.remove("wf-drawing-active");
-        refreshOverlayClickability();
-
-        syncLayersCheckboxFromSettings();
-
-        if (!submitMap) return;
-
-        if (!enabled) {
-            // Hide controls
-            if (drawingControlDiv && drawingControlsPosition != null) {
-                const arr = submitMap.controls[drawingControlsPosition];
-                const a = arr.getArray();
-                const idx = a.indexOf(drawingControlDiv);
-                if (idx > -1) {
-                    arr.removeAt(idx);
-                }
-            }
-            drawingControlsAdded = false;
-            drawingControlsPosition = null;
-            drawingControlDiv = null;
-
-            // Remove shapes but keep settings
-            clearInMemoryShapes(true);
-            return;
-        }
-
-        // Enabled
-        if (!drawingControlsAdded) {
-            createDrawingControls(submitMap);
-        } else {
-            applyControlPosition();
-        }
-
-        // Rebuild shapes from saved settings
-        rebuildShapesFromSettings();
-    }
-
-    function setMode(newMode) {
-        if (newMode === currentMode) {
-            newMode = null; // toggle off
-        }
-
-        clearModeListeners();
-
-        currentMode = newMode;
-        deleteMode = (newMode === "delete");
-
-        Object.entries(modeButtons).forEach(([mode, btn]) => {
-            if (mode === newMode) {
-                btn.style.background = "#2563eb";
-                btn.style.color = "#ffffff";
-            } else {
-                btn.style.background = "#ffffff";
-                btn.style.color = "#111827";
-            }
-
-            if (mode === "delete") {
-                btn.style.borderColor = deleteMode ? "#dc2626" : "#d1d5db";
-            } else {
-                btn.style.borderColor = "#d1d5db";
-            }
-        });
-
-        updateSelectionPinVisibility();
-        refreshOverlayClickability();
-
-        if (submitMap) {
-            submitMap.setOptions({
-                draggableCursor: newMode ? "crosshair" : null
-            });
-        }
-
-        if (!submitMap) return;
-
-        if (newMode === "marker") {
-            enableMarkerMode();
-        } else if (newMode === "polyline") {
-            enablePolylineMode();
-        } else if (newMode === "circle") {
-            enableCircleMode();
-        } else if (newMode === "arrow") {
-            enableArrowMode();
-        }
-
-    }
 
     function createButton(text, title) {
         const btn = document.createElement("button");
@@ -1016,7 +658,7 @@
         return btn;
     }
 
-    function createDrawingControls(map) {
+    function createDrawingControls() {
         if (drawingControlsAdded) return;
         drawingControlsAdded = true;
 
@@ -1090,16 +732,480 @@
         applyControlPosition();
     }
 
+    function getControlPositionForSetting(posStr) {
+        switch (posStr) {
+            case "top": return google.maps.ControlPosition.TOP_CENTER;
+            case "bottom": return google.maps.ControlPosition.BOTTOM_CENTER;
+            case "left":
+            default: return google.maps.ControlPosition.LEFT_TOP;
+        }
+    }
+
+    function updateControlsLayout() {
+        if (!drawingControlDiv) return;
+
+        const drawingSettings = userSettings.drawing || {};
+        const posSetting = drawingSettings.position || "left";
+
+        if (posSetting === "top" || posSetting === "bottom") {
+            drawingControlDiv.style.flexDirection = "row";
+            drawingControlDiv.style.alignItems = "center";
+
+            // Optional: tweak title spacing a bit for horizontal layout
+            const titleEl = drawingControlDiv.firstChild;
+            if (titleEl && titleEl.style) {
+                titleEl.style.marginBottom = "0";
+                titleEl.style.marginRight = "6px";
+            }
+        } else {
+            drawingControlDiv.style.flexDirection = "column";
+            drawingControlDiv.style.alignItems = "stretch";
+
+            const titleEl = drawingControlDiv.firstChild;
+            if (titleEl && titleEl.style) {
+                titleEl.style.marginRight = "0";
+                titleEl.style.marginBottom = "2px";
+            }
+        }
+    }
+
+    function applyControlPosition() {
+        if (!submitMap || !drawingControlDiv) return;
+
+        const drawingSettings = userSettings.drawing || {};
+        const posSetting = drawingSettings.position || "left";
+        const newPos = getControlPositionForSetting(posSetting);
+
+        if (drawingControlsPosition === newPos) {
+            // Still update layout if the position setting changed but the ControlPosition enum didn't
+            updateControlsLayout();
+            return;
+        }
+
+        // Remove from old position if present
+        if (drawingControlsPosition != null) {
+            const arr = submitMap.controls[drawingControlsPosition];
+            const a = arr.getArray();
+            const idx = a.indexOf(drawingControlDiv);
+            if (idx > -1) {
+                arr.removeAt(idx);
+            }
+        }
+
+        drawingControlsPosition = newPos;
+        submitMap.controls[newPos].push(drawingControlDiv);
+
+        // Adjust flex layout for the new position
+        updateControlsLayout();
+    }
+
+    // =============================
+    // Core drawing state and management
+    // =============================
+
     // -----------------------------
-    // Projection helper + label DIVs
+    // Mode handling and listeners
     // -----------------------------
 
-    let projectionHelper = null;
-    let mapProjection = null;
-    let overlayOffset = { x: 0, y: 0 };
+    function isTypingTarget(el) {
+        if (!el) return false;
+        const tag = (el.tagName || "").toLowerCase();
+        return tag === "input" || tag === "textarea" || tag === "select" || el.isContentEditable;
+    }
 
-    let circleLabelDiv = null;
-    let polyLabelDiv = null;
+    function attachEscapeToCancelHandler() {
+        if (escapeHandlerAttached) return;
+        escapeHandlerAttached = true;
+
+        document.addEventListener("keydown", (ev) => {
+            if (ev.key !== "Escape") return;
+
+            // Only when a drawing mode is active (don’t interfere with other UI)
+            if (!currentMode) return;
+
+            // Avoid hijacking Escape while typing in inputs
+            if (isTypingTarget(ev.target)) return;
+
+            // Avoid fighting your own settings modal or any other modal/backdrop
+            if (document.getElementById("wfmapmods-drawing-modal-backdrop")) return;
+
+            // If the plugin is disabled, do nothing
+            ensureDrawingDefaults();
+            if (userSettings.drawing.enabled === false) return;
+
+            // Cancel any partially drawn object first
+            if (typeof cancelCurrentDrawing === "function") {
+                try { cancelCurrentDrawing(); } catch { /* ignore */ }
+            }
+
+            // Deselect the tool + clean up listeners/UI
+            setMode(null);
+
+            ev.preventDefault();
+            ev.stopPropagation();
+        }, true); // capture so we get it early
+    }
+
+    function addDomModeListener(target, type, handler, options) {
+        const opts = options || false;
+        target.addEventListener(type, handler, opts);
+        domModeListeners.push({ target, type, handler, options: opts });
+    }
+
+    function clearModeListeners() {
+        modeListeners.forEach(l => google.maps.event.removeListener(l));
+        modeListeners = [];
+
+        domModeListeners.forEach(info => {
+            try {
+                info.target.removeEventListener(info.type, info.handler, info.options || false);
+            } catch { /* ignore */ }
+        });
+        domModeListeners = [];
+
+        drawingClickHandler = null;
+        cancelCurrentDrawing = null;
+    }
+
+    function setMode(newMode) {
+        if (newMode === currentMode) {
+            newMode = null; // toggle off
+        }
+
+        clearModeListeners();
+
+        currentMode = newMode;
+        deleteMode = (newMode === "delete");
+
+        Object.entries(modeButtons).forEach(([mode, btn]) => {
+            if (mode === newMode) {
+                btn.style.background = "#2563eb";
+                btn.style.color = "#ffffff";
+            } else {
+                btn.style.background = "#ffffff";
+                btn.style.color = "#111827";
+            }
+
+            if (mode === "delete") {
+                btn.style.borderColor = deleteMode ? "#dc2626" : "#d1d5db";
+            } else {
+                btn.style.borderColor = "#d1d5db";
+            }
+        });
+
+        updateSelectionPinVisibility();
+        refreshOverlayClickability();
+
+        if (submitMap) {
+            submitMap.setOptions({
+                draggableCursor: newMode ? "crosshair" : null
+            });
+        }
+
+        if (!submitMap) return;
+
+        if (newMode === "marker") {
+            enableMarkerMode();
+        } else if (newMode === "polyline") {
+            enablePolylineMode();
+        } else if (newMode === "circle") {
+            enableCircleMode();
+        } else if (newMode === "arrow") {
+            enableArrowMode();
+        }
+
+    }
+
+    function applyDrawingEnabledState() {
+        ensureDrawingDefaults();
+        const drawingSettings = userSettings.drawing || {};
+        const enabled = drawingSettings.enabled !== false;
+
+        // Always reset modes when changing enabled state
+        currentMode = null;
+        deleteMode = false;
+        clearModeListeners();
+        document.body.classList.remove("wf-drawing-active");
+        refreshOverlayClickability();
+
+        syncLayersCheckboxFromSettings();
+
+        if (!submitMap) return;
+
+        if (!enabled) {
+            // Hide controls
+            if (drawingControlDiv && drawingControlsPosition != null) {
+                const arr = submitMap.controls[drawingControlsPosition];
+                const a = arr.getArray();
+                const idx = a.indexOf(drawingControlDiv);
+                if (idx > -1) {
+                    arr.removeAt(idx);
+                }
+            }
+            drawingControlsAdded = false;
+            drawingControlsPosition = null;
+            drawingControlDiv = null;
+
+            // Remove shapes but keep settings
+            clearInMemoryShapes(true);
+            return;
+        }
+
+        // Enabled
+        if (!drawingControlsAdded) {
+            createDrawingControls();
+        } else {
+            applyControlPosition();
+        }
+
+        // Rebuild shapes from saved settings
+        rebuildShapesFromSettings();
+    }
+
+    function updateSelectionPinVisibility() {
+        if (currentMode) {
+            document.body.classList.add("wf-drawing-active");
+        } else {
+            document.body.classList.remove("wf-drawing-active");
+        }
+    }
+
+    function ensurePinHideCSS() {
+        if (pinHideStyleInjected) return;
+        const style = document.createElement("style");
+        style.textContent = `
+            body.wf-drawing-active img[src$="map_selection_pin.svg"] {
+                display: none !important;
+            }
+        `;
+        document.head.appendChild(style);
+        pinHideStyleInjected = true;
+    }
+
+    // -----------------------------
+    // Shape registry and persistence
+    // -----------------------------
+
+    function clearInMemoryShapes(keepSettings) {
+        allShapes.forEach(entry => {
+            try {
+                entry.overlay.setMap(null);
+            } catch {
+                // ignore
+            }
+        });
+        allShapes = [];
+
+        if (!keepSettings) {
+            ensureDrawingDefaults();
+            userSettings.drawing.shapes = [];
+            saveSettings();
+        }
+    }
+
+    function persistShapes() {
+        ensureDrawingDefaults();
+        const shapes = allShapes.map(entry => entry.data);
+        userSettings.drawing.shapes = shapes;
+        saveSettings();
+    }
+
+    // Only clickable in delete mode
+    function refreshOverlayClickability() {
+        const interactive = deleteMode;
+        allShapes.forEach(entry => {
+            if (!entry.overlay || !entry.overlay.setOptions) return;
+            try {
+                entry.overlay.setOptions({ clickable: interactive });
+            } catch {
+                // ignore
+            }
+        });
+    }
+
+    function registerShape(overlay, data, skipPersist) {
+        const entry = { overlay, data };
+        allShapes.push(entry);
+
+        overlay.addListener("click", () => {
+            if (!deleteMode) return;
+
+            overlay.setMap(null);
+            const idx = allShapes.indexOf(entry);
+            if (idx >= 0) {
+                allShapes.splice(idx, 1);
+                persistShapes();
+            }
+        });
+
+        refreshOverlayClickability();
+
+        if (!skipPersist) {
+            persistShapes();
+        }
+    }
+
+    function rebuildShapesFromSettings() {
+        clearInMemoryShapes(true);
+
+        const drawingSettings = userSettings.drawing || {};
+        const savedShapes = drawingSettings.shapes || [];
+        currentShapeColor = drawingSettings.color || "#ff0000";
+
+        const rebuilders = {
+            marker: recreateMarker,
+            polyline: recreatePolyline,
+            circle: recreateCircle,
+            arrow: recreateArrow
+        };
+
+        savedShapes.forEach(data => {
+            const type = data && data.type;
+            const rebuild = rebuilders[type];
+
+            if (!rebuild) return;
+
+            try {
+                rebuild(data);
+            } catch (e) {
+                console.error("[DrawingTools] Failed to recreate shape:", e, data);
+            }
+        });
+
+        persistShapes();
+    }
+
+    // -----------------------------
+    // Shape reconstruction helpers
+    // -----------------------------
+
+    function createMarkerIcon(color) {
+        return {
+            path: "M 0 -24 C -6.627 -24 -12 -18.627 -12 -12 C -12 -5 -3 7 0 12 C 3 7 12 -5 12 -12 C 12 -18.627 6.627 -24 0 -24 z",
+            fillColor: color,
+            fillOpacity: 1,
+            strokeColor: "#202124",
+            strokeWeight: 1,
+            scale: 1,
+            anchor: new google.maps.Point(0, 12)
+        };
+    }
+
+    function createArrowPolylineOptions(color) {
+        return {
+            strokeColor: color,
+            strokeWeight: 3,
+            clickable: false,
+            icons: [{
+                icon: {
+                    path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+                    strokeColor: color,
+                    fillColor: color,
+                    fillOpacity: 1,
+                    strokeWeight: 1,
+                    scale: 3
+                },
+                offset: "100%"
+            }]
+        };
+    }
+
+    function recreateMarker(data) {
+        const color = data.color || currentShapeColor;
+        const marker = new google.maps.Marker({
+            map: submitMap,
+            position: new google.maps.LatLng(data.position.lat, data.position.lng),
+            icon: createMarkerIcon(color),
+            clickable: false
+        });
+
+        registerShape(marker, {
+            type: "marker",
+            position: data.position,
+            color
+        }, true);
+    }
+
+    function recreatePolyline(data) {
+        const color = data.color || currentShapeColor;
+        const path = (data.path || []).map(p => new google.maps.LatLng(p.lat, p.lng));
+        const polyline = new google.maps.Polyline({
+            map: submitMap,
+            path,
+            strokeColor: color,
+            strokeWeight: 3,
+            clickable: false
+        });
+
+        registerShape(polyline, {
+            type: "polyline",
+            path: data.path || [],
+            color
+        }, true);
+    }
+
+    function recreateCircle(data) {
+        const color = data.color || currentShapeColor;
+        const circle = new google.maps.Circle({
+            map: submitMap,
+            center: new google.maps.LatLng(data.center.lat, data.center.lng),
+            radius: data.radius,
+            strokeColor: color,
+            strokeWeight: 2,
+            fillColor: color,
+            fillOpacity: 0.1,
+            clickable: false
+        });
+
+        registerShape(circle, {
+            type: "circle",
+            center: data.center,
+            radius: data.radius,
+            color
+        }, true);
+    }
+
+    function recreateArrow(data) {
+        const color = data.color || currentShapeColor;
+
+        const start = new google.maps.LatLng(data.start.lat, data.start.lng);
+        const end   = new google.maps.LatLng(data.end.lat, data.end.lng);
+
+        const arrow = new google.maps.Polyline({
+            map: submitMap,
+            path: [start, end],
+            ...createArrowPolylineOptions(color)
+        });
+
+        registerShape(arrow, {
+            type: "arrow",
+            start: data.start,
+            end: data.end,
+            color
+        }, true);
+    }
+
+    // =============================
+    // Geometry and overlay helpers
+    // =============================
+
+    // distance between two LatLngs in meters
+    function distanceMeters(a, b) {
+        const R = 6371000;
+        const lat1 = a.lat() * Math.PI / 180;
+        const lat2 = b.lat() * Math.PI / 180;
+        const dLat = (b.lat() - a.lat()) * Math.PI / 180;
+        const dLng = (b.lng() - a.lng()) * Math.PI / 180;
+
+        const sinDLat = Math.sin(dLat / 2);
+        const sinDLng = Math.sin(dLng / 2);
+
+        const r = sinDLat * sinDLat +
+              Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng;
+
+        const c = 2 * Math.atan2(Math.sqrt(r), Math.sqrt(1 - r));
+        return R * c;
+    }
 
     function ensureProjectionHelper() {
         if (projectionHelper || !submitMap || !google.maps || !google.maps.OverlayView) return;
@@ -1160,7 +1266,7 @@
                     border: "none",
                     pointerEvents: "none",
                     display: "none",
-                    zIndex: "9999"
+                    zIndex: LABEL_ZINDEX
                 });
                 mapDiv.appendChild(div);
                 circleLabelDiv = div;
@@ -1180,7 +1286,7 @@
                     border: "none",
                     pointerEvents: "none",
                     display: "none",
-                    zIndex: "9999"
+                    zIndex: LABEL_ZINDEX
                 });
                 mapDiv.appendChild(div);
                 polyLabelDiv = div;
@@ -1233,13 +1339,14 @@
         return mapProjection.fromDivPixelToLatLng(new google.maps.Point(x, y));
     }
 
-
-    // -----------------------------
-    // Drawing click helpers
-    // -----------------------------
+    // =============================
+    // Drawing mode implementations
+    // =============================
 
     function enableMarkerMode() {
         if (!submitMap) return;
+
+        cancelCurrentDrawing = () => {}; // nothing to cancel, Escape will just deselect
 
         drawingClickHandler = (latLng) => {
             const color = currentShapeColor;
@@ -1266,6 +1373,101 @@
         });
 
         modeListeners.push(listener);
+    }
+
+    function enableArrowMode() {
+        if (!submitMap) return;
+
+        ensureProjectionHelper();
+
+        const color = currentShapeColor;
+        let start = null;
+        let tempArrow = null;
+
+        const labelDiv = ensureLabelDiv("polyline"); // reuse the polyline label div if you like
+
+        function finishArrow(endLatLng) {
+            if (!start || !endLatLng || !tempArrow) {
+                setMode(null);
+                return;
+            }
+
+            const s = { lat: start.lat(), lng: start.lng() };
+            const e = { lat: endLatLng.lat(), lng: endLatLng.lng() };
+
+            // If basically zero-length, discard
+            const radius = distanceMeters(start, endLatLng);
+            if (radius <= MIN_LENGTH_METERS) {
+                tempArrow.setMap(null);
+                if (labelDiv) labelDiv.style.display = "none";
+                setMode(null);
+                return;
+            }
+
+            tempArrow.setPath([start, endLatLng]);
+
+            registerShape(tempArrow, {
+                type: "arrow",
+                start: s,
+                end: e,
+                color
+            });
+
+            if (labelDiv) labelDiv.style.display = "none";
+            setMode(null);
+        }
+
+        cancelCurrentDrawing = () => {
+            try { tempArrow && tempArrow.setMap(null); } catch {}
+            if (labelDiv) labelDiv.style.display = "none";
+            start = null;
+            tempArrow = null;
+        };
+
+        drawingClickHandler = (latLng) => {
+            if (!start) {
+                start = latLng;
+
+                tempArrow = new google.maps.Polyline({
+                    map: submitMap,
+                    path: [start, start],
+                    ...createArrowPolylineOptions(color)
+                });
+
+                if (labelDiv) {
+                    positionLabelDiv(labelDiv, start, start, "0.0 m");
+                }
+                return;
+            }
+
+            finishArrow(latLng);
+        };
+
+        const clickListener = submitMap.addListener("click", (ev) => {
+            if (!drawingClickHandler || !ev || !ev.latLng) return;
+            drawingClickHandler(ev.latLng);
+        });
+
+        const moveListener = submitMap.addListener("mousemove", (ev) => {
+            if (!start || !tempArrow || !ev || !ev.latLng) return;
+
+            const end = ev.latLng;
+            tempArrow.setPath([start, end]);
+
+            if (labelDiv) {
+                const metres = distanceMeters(start, end).toFixed(1);
+                positionLabelDiv(labelDiv, start, end, `${metres} m`);
+            }
+        });
+
+        const rightClickListener = submitMap.addListener("rightclick", () => {
+            // cancel if they haven’t placed an end yet
+            if (tempArrow) tempArrow.setMap(null);
+            if (labelDiv) labelDiv.style.display = "none";
+            setMode(null);
+        });
+
+        modeListeners.push(clickListener, moveListener, rightClickListener);
     }
 
     function enablePolylineMode() {
@@ -1333,7 +1535,7 @@
             const clickPx = mapProjection.fromLatLngToDivPixel(latLng);
             if (!clickPx) return false;
 
-            const threshold = 10; // pixels
+            const threshold = VERTEX_SNAP_PX;
             const thr2 = threshold * threshold;
 
             for (const v of fixedPoints) {
@@ -1353,7 +1555,7 @@
                 map: submitMap,
                 position: latLng,
                 clickable: true,
-                zIndex: 9999,
+                zIndex: DRAWING_MODAL_ZINDEX,
                 cursor: "pointer",
                 icon: {
                     // 8×8px square, centred on the point
@@ -1382,6 +1584,12 @@
 
             vertexMarkers.push(marker);
         }
+
+        cancelCurrentDrawing = () => {
+            try { tempPolyline && tempPolyline.setMap(null); } catch {}
+            try { clearVertexMarkers(); } catch {}
+            if (labelDiv) labelDiv.style.display = "none";
+        };
 
         // Unified handler used for:
         // - map clicks
@@ -1431,124 +1639,6 @@
 
         modeListeners.push(clickListener, moveListener, dblClickListener, rightClickListener);
     }
-
-
-
-
-
-    // distance between two LatLngs in meters
-    function distanceMeters(a, b) {
-        const R = 6371000;
-        const lat1 = a.lat() * Math.PI / 180;
-        const lat2 = b.lat() * Math.PI / 180;
-        const dLat = (b.lat() - a.lat()) * Math.PI / 180;
-        const dLng = (b.lng() - a.lng()) * Math.PI / 180;
-
-        const sinDLat = Math.sin(dLat / 2);
-        const sinDLng = Math.sin(dLng / 2);
-
-        const r = sinDLat * sinDLat +
-              Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng;
-
-        const c = 2 * Math.atan2(Math.sqrt(r), Math.sqrt(1 - r));
-        return R * c;
-    }
-
-    // -----------------------------
-    // Draw arrows
-    // -----------------------------
-
-    function enableArrowMode() {
-        if (!submitMap) return;
-
-        ensureProjectionHelper();
-
-        const color = currentShapeColor;
-        let start = null;
-        let tempArrow = null;
-
-        const labelDiv = ensureLabelDiv("polyline"); // reuse the polyline label div if you like
-
-        function finishArrow(endLatLng) {
-            if (!start || !endLatLng || !tempArrow) {
-                setMode(null);
-                return;
-            }
-
-            const s = { lat: start.lat(), lng: start.lng() };
-            const e = { lat: endLatLng.lat(), lng: endLatLng.lng() };
-
-            // If basically zero-length, discard
-            const radius = distanceMeters(start, endLatLng);
-            if (radius <= 1) {
-                tempArrow.setMap(null);
-                if (labelDiv) labelDiv.style.display = "none";
-                setMode(null);
-                return;
-            }
-
-            tempArrow.setPath([start, endLatLng]);
-
-            registerShape(tempArrow, {
-                type: "arrow",
-                start: s,
-                end: e,
-                color
-            });
-
-            if (labelDiv) labelDiv.style.display = "none";
-            setMode(null);
-        }
-
-        drawingClickHandler = (latLng) => {
-            if (!start) {
-                start = latLng;
-
-                tempArrow = new google.maps.Polyline({
-                    map: submitMap,
-                    path: [start, start],
-                    ...createArrowPolylineOptions(color)
-                });
-
-                if (labelDiv) {
-                    positionLabelDiv(labelDiv, start, start, "0.0 m");
-                }
-                return;
-            }
-
-            finishArrow(latLng);
-        };
-
-        const clickListener = submitMap.addListener("click", (ev) => {
-            if (!drawingClickHandler || !ev || !ev.latLng) return;
-            drawingClickHandler(ev.latLng);
-        });
-
-        const moveListener = submitMap.addListener("mousemove", (ev) => {
-            if (!start || !tempArrow || !ev || !ev.latLng) return;
-
-            const end = ev.latLng;
-            tempArrow.setPath([start, end]);
-
-            if (labelDiv) {
-                const metres = distanceMeters(start, end).toFixed(1);
-                positionLabelDiv(labelDiv, start, end, `${metres} m`);
-            }
-        });
-
-        const rightClickListener = submitMap.addListener("rightclick", () => {
-            // cancel if they haven’t placed an end yet
-            if (tempArrow) tempArrow.setMap(null);
-            if (labelDiv) labelDiv.style.display = "none";
-            setMode(null);
-        });
-
-        modeListeners.push(clickListener, moveListener, rightClickListener);
-    }
-
-    // -----------------------------
-    // Circle mode with dotted radius + DOM label
-    // -----------------------------
 
     function enableCircleMode() {
         if (!submitMap) return;
@@ -1626,6 +1716,15 @@
 
                 setMode(null);
             }
+        };
+
+        cancelCurrentDrawing = () => {
+            try { tempCircle && tempCircle.setMap(null); } catch {}
+            try { tempRadiusLine && tempRadiusLine.setMap(null); } catch {}
+            if (labelDiv) labelDiv.style.display = "none";
+            center = null;
+            tempCircle = null;
+            tempRadiusLine = null;
         };
 
         const clickListener = submitMap.addListener("click", (ev) => {
@@ -1791,6 +1890,16 @@
             setMode(null); // cleans up listeners via clearModeListeners
         }
 
+        cancelCurrentDrawing = () => {
+            try { tempCircle && tempCircle.setMap(null); } catch {}
+            try { tempRadiusLine && tempRadiusLine.setMap(null); } catch {}
+            if (labelDiv) labelDiv.style.display = "none";
+            center = null;
+            tempCircle = null;
+            tempRadiusLine = null;
+            lastEdge = null;
+        };
+
         // Capture touches on the map DIV before Google Maps sees them
         addDomModeListener(mapDiv, "touchstart", onTouchStart, { passive: false, capture: true });
         addDomModeListener(mapDiv, "touchmove", onTouchMove, { passive: false, capture: true });
@@ -1798,10 +1907,9 @@
         addDomModeListener(mapDiv, "touchcancel", onTouchEnd, { passive: false, capture: true });
     }
 
-
-    // -----------------------------
-    // Global DOM capture for clicks on markers (snap)
-    // -----------------------------
+    // =============================
+    // Global capture hooks
+    // =============================
 
     function attachMarkerClickCapture() {
         if (document._wfDrawingToolsCaptureAttached) return;
@@ -1836,9 +1944,25 @@
         }, true);
     }
 
-    // -----------------------------
-    // Plugin bootstrap
-    // -----------------------------
+    // =============================
+    // Initialisation
+    // =============================
+
+    function initDrawingTools() {
+        if (!submitMap) return;
+
+        ensureDrawingDefaults();
+        currentShapeColor = userSettings.drawing.color || "#ff0000";
+
+        ensurePinHideCSS();
+        ensureProjectionHelper();
+        attachMarkerClickCapture();
+        attachEscapeToCancelHandler();
+
+        applyDrawingEnabledState();
+
+        submitMap._wfDrawingToolsInitialised = true;
+    }
 
     function bootstrap() {
         loadSettings();
