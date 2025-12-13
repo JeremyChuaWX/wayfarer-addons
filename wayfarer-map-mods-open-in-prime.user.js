@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Open In Prime
-// @version      0.1.0
+// @version      0.1.1
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-open-in-prime.user.js
@@ -34,7 +34,7 @@
     const POI_BRIDGE_ID = "wfmapmods-poi-bridge";
     const LINK_CONTAINER_SELECTOR = ".wfmapmods-poi-function-links";
     const OPEN_PRIME_LINK_ID = "wfmapmods-open-prime-link";
-
+    const MAP_PATH = "/new/submit/new";
     const ALLOWED_PRIME_STATUSES = new Set(["LIVE", "ACCEPTED"]);
 
     let currentGuid = null;
@@ -42,22 +42,75 @@
     let openInPrimeLink = null;
     let bridgeObserverAttached = false;
     let poiHookAttached = false;
+    let mapPanelPollId = null;
 
     // -------------
     // Bootstrap & DOM wiring
     // -------------
 
     function bootstrap() {
-        const intervalId = setInterval(() => {
+        setupMapRouteWatcher();
+    }
+
+    function isOnMapPage() {
+        return window.location.pathname.startsWith(MAP_PATH);
+    }
+
+    function onMapRouteChange() {
+        if (isOnMapPage()) {
+            startMapPanelWatcher();
+        } else {
+            stopMapPanelWatcher();
+        }
+    }
+
+    function setupMapRouteWatcher() {
+        const origPushState = history.pushState;
+        const origReplaceState = history.replaceState;
+
+        function wrappedRouteChange() {
+            onMapRouteChange();
+        }
+
+        history.pushState = function (...args) {
+            const ret = origPushState.apply(this, args);
+            wrappedRouteChange();
+            return ret;
+        };
+
+        history.replaceState = function (...args) {
+            const ret = origReplaceState.apply(this, args);
+            wrappedRouteChange();
+            return ret;
+        };
+
+        window.addEventListener("popstate", wrappedRouteChange);
+
+        // Initial load
+        wrappedRouteChange();
+    }
+
+    function startMapPanelWatcher() {
+        // Don’t double-start
+        if (mapPanelPollId) return;
+
+        mapPanelPollId = setInterval(() => {
             const containerReady = ensurePoiFunctionsLinkContainer();
             const bridgeReady = !!document.getElementById(POI_BRIDGE_ID);
 
             if (containerReady && bridgeReady) {
-                clearInterval(intervalId);
+                stopMapPanelWatcher();
                 setupBridgeObserver();
                 setupPoiDataHook();
             }
         }, 500);
+    }
+
+    function stopMapPanelWatcher() {
+        if (mapPanelPollId) {
+            clearInterval(mapPanelPollId);
+            mapPanelPollId = null;
+        }
     }
 
     // Ensure the link container exists and add our "Open in Prime" link if needed
@@ -171,65 +224,39 @@
     // -------------
 
     function resolveGuidFromState() {
-        // No selection at all
-        if (!lastPayload) {
-            currentGuid = null;
-            updateLinkVisibility();
-            return;
+        const payload = lastPayload;
+
+        // No selection → hide link
+        if (!payload) return setGuid(null);
+
+        const status = (payload.status || "").toString().trim().toUpperCase();
+        const allow = ALLOWED_PRIME_STATUSES.has(status) || payload.source === "wfmm-s2";
+
+        if (!allow) return setGuid(null);
+
+        // 1) Prefer guid directly from POI bridge
+        if (typeof payload.guid === "string" && payload.guid.trim()) {
+            return setGuid(payload.guid.trim());
         }
 
-        // Only show the Prime link for specific statuses
-        const statusRaw = (lastPayload.status || "").toString().trim().toUpperCase();
-        if (!ALLOWED_PRIME_STATUSES.has(statusRaw)) {
-            currentGuid = null;
-            updateLinkVisibility();
-            return;
-        }
-
-        // Use GUID directly from the POI bridge payload if available
-        const bridgeGuid =
-              typeof lastPayload.guid === "string" ? lastPayload.guid.trim() : "";
-        if (bridgeGuid) {
-            currentGuid = bridgeGuid;
-            updateLinkVisibility();
-            return;
-        }
-
-        // Fallback: if we have coordinates, try to match against window.currentPois
-        const lat = lastPayload.lat;
-        const lng = lastPayload.lng;
-
-        if (typeof lat !== "number" || typeof lng !== "number") {
-            currentGuid = null;
-            updateLinkVisibility();
-            return;
-        }
+        // 2) Fallback: coordinate match against currentPois
+        const { lat, lng } = payload;
+        if (lat == null || lng == null) return setGuid(null);
 
         const pois = Array.isArray(window.currentPois) ? window.currentPois : [];
-        const EPS = 1e-7; // small tolerance for float differences
+        const match = pois.find(p => p?.guid && p.lat === lat && p.lng === lng);
 
-        const match = pois.find((p) =>
-                                p &&
-                                typeof p === "object" &&
-                                typeof p.lat === "number" &&
-                                typeof p.lng === "number" &&
-                                typeof p.guid === "string" &&
-                                p.guid.trim() &&
-                                Math.abs(p.lat - lat) < EPS &&
-                                Math.abs(p.lng - lng) < EPS
-                               );
+        return setGuid(match ? match.guid.trim() : null);
+    }
 
-        currentGuid = match ? match.guid.trim() : null;
+    function setGuid(guid) {
+        currentGuid = guid;
         updateLinkVisibility();
     }
 
     function updateLinkVisibility() {
         if (!openInPrimeLink) return;
-        if (currentGuid) {
-            openInPrimeLink.style.display = "";
-        } else {
-            openInPrimeLink.style.display = "none";
-        }
+        openInPrimeLink.style.display = currentGuid ? "" : "none";
     }
 
     // -------------
