@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Contributions Overlay
-// @version      1.2.4
+// @version      1.2.5
 // @description  Loads nominations from the Contributions list and shows them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-contributions-overlay.user.js
@@ -43,7 +43,7 @@
     const SUBMISSION_BRIDGE_ID = "wfmapmods-submit-bridge";
 
     // Behaviour / performance
-    const PERFORMANCE_MAX_VISIBLE_MARKERS = 300;
+    const PERFORMANCE_MAX_VISIBLE_MARKERS = 200;
 
     // Status mapping for manage actions
     const MANAGE_ACTION_STATUS = {
@@ -81,7 +81,9 @@
     let lastSelectedNomOriginalIcon = null;
 
     // UI / DOM state flags
-    let lastPanelPresent = false;
+    let mapPanelObserver = null;
+    let mapPanelMutationScheduled = false;
+    const MAP_PATH = "/new/submit/new";
 
     // Pending submissions created via /submit/start
     let pendingSubmissions = {};          // id -> { id, title, description, lat, lng, submittedAt }
@@ -1194,20 +1196,79 @@
     // Map lifecycle + DOM watchers
     // -----------------------------
 
+    function isOnMapPage() {
+        return window.location.pathname.startsWith(MAP_PATH);
+    }
+
+    function onMapRouteChange() {
+        if (isOnMapPage()) {
+            startMapPanelWatcher();
+        } else {
+            stopMapPanelWatcher();
+            teardownMap();
+        }
+    }
+
+    function setupMapRouteWatcher() {
+        const origPushState = history.pushState;
+        const origReplaceState = history.replaceState;
+
+        function wrappedRouteChange() {
+            onMapRouteChange();
+        }
+
+        history.pushState = function (...args) {
+            const ret = origPushState.apply(this, args);
+            wrappedRouteChange();
+            return ret;
+        };
+
+        history.replaceState = function (...args) {
+            const ret = origReplaceState.apply(this, args);
+            wrappedRouteChange();
+            return ret;
+        };
+
+        window.addEventListener("popstate", wrappedRouteChange);
+
+        // Initial load
+        wrappedRouteChange();
+    }
+
     /**
      * Start watching the DOM for the Wayfarer map side panel.
      * This handles SPA-style navigation where the map panel appears/disappears
      * without a full page reload.
      */
     function startMapPanelWatcher() {
+        // Don’t double-start
+        if (mapPanelObserver) return;
+
         // Handle the current state in case the panel is already present
         handlePanelChange();
 
-        const mo = new MutationObserver(handlePanelChange);
-        mo.observe(document.body, {
+        mapPanelObserver = new MutationObserver(() => {
+            // Debounce: collapse many mutations into one handler call
+            if (mapPanelMutationScheduled) return;
+
+            mapPanelMutationScheduled = true;
+            requestAnimationFrame(() => {
+                mapPanelMutationScheduled = false;
+                handlePanelChange();
+            });
+        });
+
+        mapPanelObserver.observe(document.body, {
             childList: true,
             subtree: true
         });
+    }
+
+    function stopMapPanelWatcher() {
+        if (mapPanelObserver) {
+            mapPanelObserver.disconnect();
+            mapPanelObserver = null;
+        }
     }
 
     /**
@@ -1217,20 +1278,14 @@
     function handlePanelChange() {
         const panelPresent = !!document.querySelector("#wfmapmods-side-panel");
 
-        if (panelPresent && !lastPanelPresent) {
-            // Transitioned onto the map page
+        if (panelPresent) {
             attachContribOverlayToMapIfNeeded();
             insertSettingsLink();
             insertLayersToggle();
-
-            // Refresh the contributions list in the background
+            setupBridgeSelectionWatcher();
             fetchLatestNominations();
-        } else if (!panelPresent && lastPanelPresent) {
-            // Transitioned away from the map page
-            teardownContribOverlayForMap();
+            stopMapPanelWatcher();
         }
-
-        lastPanelPresent = panelPresent;
     }
 
     /**
@@ -1320,7 +1375,7 @@
     /**
      * Remove the contribution overlay from the current map and clear markers.
      */
-    function teardownContribOverlayForMap() {
+    function teardownMap() {
         if (!mapAttached) return;
 
         clearNominationMarkers();
@@ -3113,8 +3168,7 @@
     function bootstrap() {
         loadSettings();
         loadNominationsFromIDB();
-        startMapPanelWatcher();
-        setupBridgeSelectionWatcher();
+        setupMapRouteWatcher();
     }
 
     bootstrap();
