@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.5
+// @version      2.5.6
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -3742,7 +3742,6 @@
                 if (!cursor) {
                     draftSubmissions = result;
                     db.close();
-                    console.log(draftSubmissions);
                     refreshDraftMarkers();
                     return;
                 }
@@ -5937,6 +5936,7 @@
             left: (clientX - rect.left) + "px",
             transform: "translate(4px, 4px)",
             background: "#ffffff",
+            color: "#111827",
             border: "1px solid rgba(0,0,0,0.15)",
             borderRadius: "4px",
             padding: "6px 8px",
