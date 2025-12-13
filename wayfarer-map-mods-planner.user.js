@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Planner
-// @version      0.1.7
+// @version      0.1.8
 // @description  Load and edit planner POIs from a Google Sheet and show them as pins on the Wayfarer submission map.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-planner.user.js
@@ -35,6 +35,8 @@
     // -----------------------------
 
     const SETTINGS_KEY = "wfmap_planner_settings";
+
+    const MAP_PATH = "/new/submit/new";
 
     const POI_BRIDGE_SOURCE = "wfmapmods-planner";
     const SUBMISSION_BRIDGE_ID = "wfmapmods-submit-bridge";
@@ -93,6 +95,8 @@
 
     let submitMap = null;
     let mapAttached = false;
+    let mapPanelObserver = null;
+    let mapPanelMutationScheduled = false;
 
     /** Planner POIs array (as returned by Apps Script). */
     let plannerPois = [];
@@ -100,7 +104,6 @@
     /** id -> google.maps.Marker */
     let plannerMarkers = {};
 
-    let lastPanelPresent = false;
     let colorListIndex = 0;
 
     // -----------------------------
@@ -366,32 +369,95 @@
     }
 
     // -----------------------------
-    // Map lifecycle
+    // Map lifecycle + route watcher
     // -----------------------------
 
+    function isOnMapPage() {
+        return window.location.pathname.startsWith(MAP_PATH);
+    }
+
+    function onMapRouteChange() {
+        if (isOnMapPage()) {
+            startMapPanelWatcher();
+        } else {
+            stopMapPanelWatcher();
+            teardownPlannerForMap();
+        }
+    }
+
+    function setupMapRouteWatcher() {
+        const origPushState = history.pushState;
+        const origReplaceState = history.replaceState;
+
+        function wrappedRouteChange() {
+            onMapRouteChange();
+        }
+
+        history.pushState = function (...args) {
+            const ret = origPushState.apply(this, args);
+            wrappedRouteChange();
+            return ret;
+        };
+
+        history.replaceState = function (...args) {
+            const ret = origReplaceState.apply(this, args);
+            wrappedRouteChange();
+            return ret;
+        };
+
+        window.addEventListener("popstate", wrappedRouteChange);
+
+        // Initial load
+        wrappedRouteChange();
+    }
+
     function startMapPanelWatcher() {
+        // Don’t double-start
+        if (mapPanelObserver) return;
+
+        // Handle the current state in case the panel is already present
         handlePanelChange();
 
-        const mo = new MutationObserver(handlePanelChange);
-        mo.observe(document.body, {
+        mapPanelObserver = new MutationObserver(() => {
+            // Debounce: collapse many mutations into one handler call
+            if (mapPanelMutationScheduled) return;
+
+            mapPanelMutationScheduled = true;
+            requestAnimationFrame(() => {
+                mapPanelMutationScheduled = false;
+                handlePanelChange();
+            });
+        });
+
+        mapPanelObserver.observe(document.body, {
             childList: true,
             subtree: true
         });
     }
 
+    function stopMapPanelWatcher() {
+        if (mapPanelObserver) {
+            mapPanelObserver.disconnect();
+            mapPanelObserver = null;
+        }
+        mapPanelMutationScheduled = false;
+    }
+
+    /**
+ * Detect when the map side panel appears and attach the planner overlay.
+ * Teardown is handled by onMapRouteChange() when we leave the map route.
+ */
     function handlePanelChange() {
         const panelPresent = !!document.querySelector("#wfmapmods-side-panel");
 
-        if (panelPresent && !lastPanelPresent) {
+        if (panelPresent) {
             attachPlannerToMapIfNeeded();
             insertPlannerSettingsLink();
             insertPlannerLayersToggle();
-        } else if (!panelPresent && lastPanelPresent) {
-            teardownPlannerForMap();
+            stopMapPanelWatcher();
         }
-
-        lastPanelPresent = panelPresent;
     }
+
 
     function getSubmitMap() {
         return new Promise(resolve => {
@@ -1341,7 +1407,7 @@
         centerBox.style.display = "flex";
         centerBox.style.justifyContent = "center";
 
-        const submit = makeLink("Submit");
+        const submit = makeLink("Submit Wayspot");
         submit.addEventListener("click", (ev) => {
             ev.preventDefault();
             const fields = collectFieldsFromForm();
@@ -1922,7 +1988,7 @@
 
     function bootstrap() {
         loadSettings();
-        startMapPanelWatcher();
+        setupMapRouteWatcher();
 
         // If a script URL already exists, load data immediately.
         if (getScriptURL()) {
