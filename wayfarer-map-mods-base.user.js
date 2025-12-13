@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.3
+// @version      2.5.4
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -3711,26 +3711,73 @@
         });
     }
 
-    // Load all draft submissions into memory + markers
+    // Load draft metadata - no images
+    function toDraftMeta(draft) {
+        if (!draft) return null;
+        const poi = draft.poi || {};
+        return {
+            id: draft.id,
+            createdAt: draft.createdAt,
+            poi: {
+                lat: poi.lat,
+                lng: poi.lng,
+                title: poi.title,
+                description: poi.description,
+                supportingStatement: poi.supportingStatement
+            }
+        };
+    }
+
+    // Load all draft submissions into memory (META ONLY) + markers
     function loadDraftSubmissionsFromIDB() {
         getDraftsIDBInstance().then(db => {
             const tx = db.transaction(DRAFT_STORE_NAME, "readonly");
             const store = tx.objectStore(DRAFT_STORE_NAME);
-            const req = store.getAll();
 
-            req.onsuccess = () => {
-                draftSubmissions = req.result || [];
-                db.close();
-                refreshDraftMarkers();
+            const result = [];
+            const req = store.openCursor();
+
+            req.onsuccess = (e) => {
+                const cursor = e.target.result;
+                if (!cursor) {
+                    draftSubmissions = result;
+                    db.close();
+                    console.log(draftSubmissions);
+                    refreshDraftMarkers();
+                    return;
+                }
+
+                // cursor.value includes images, but we do NOT retain them:
+                const meta = toDraftMeta(cursor.value);
+                if (meta) result.push(meta);
+
+                cursor.continue();
             };
 
             req.onerror = () => {
-                console.warn("[Base] Failed to load draft submissions from IndexedDB", req.error);
+                console.warn("[Base] Failed to cursor drafts from IndexedDB", req.error);
                 db.close();
             };
         }).catch(err => {
             console.warn("[Base] IndexedDB not available (load drafts):", err);
         });
+    }
+
+    function loadDraftByIdFromIDB(id) {
+        if (!id) return Promise.resolve(null);
+
+        return getDraftsIDBInstance().then(db => new Promise((resolve) => {
+            const tx = db.transaction(DRAFT_STORE_NAME, "readonly");
+            const store = tx.objectStore(DRAFT_STORE_NAME);
+            const req = store.get(id);
+
+            req.onsuccess = () => { db.close(); resolve(req.result || null); };
+            req.onerror   = () => {
+                console.warn("[Base] Failed to load draft by id", req.error);
+                db.close();
+                resolve(null);
+            };
+        }));
     }
 
     // Upsert a single draft submission
@@ -3839,35 +3886,28 @@
             marker.setVisible(isDraftLayerEnabled());
 
             marker.addListener("click", () => {
-                // 1. Centre the map on this draft
-                if (submitMap) {
-                    // You can use setCenter or panTo
-                    submitMap.setCenter(position);
-                    // Optional: also force a zoom level for drafts
-                    // submitMap.setZoom(18);
+                if (submitMap) submitMap.setCenter(position);
+
+                if (google?.maps && submitMap) {
+                    google.maps.event.trigger(submitMap, "click", { latLng: position });
                 }
 
-                // 2. Simulate a map click at this location so all your
-                //    existing map-click logic runs (pin placement, etc.)
-                if (google && google.maps && submitMap) {
-                    google.maps.event.trigger(submitMap, "click", {
-                        latLng: position
+                loadDraftByIdFromIDB(draft.id).then(fullDraft => {
+                    const images = fullDraft?.images || {};
+
+                    openSubmissionEditModal({
+                        poi: {
+                            lat,
+                            lng,
+                            title: poi.title || "",
+                            description: poi.description || "",
+                            supportingStatement: poi.supportingStatement || ""
+                        },
+                        images,
+                        draftId: draft.id,
+                        createdAt: draft.createdAt,
+                        fromDraft: true
                     });
-                }
-
-                // 3. Open the edit modal with this draft’s data
-                openSubmissionEditModal({
-                    poi: {
-                        lat,
-                        lng,
-                        title: poi.title || "",
-                        description: poi.description || "",
-                        supportingStatement: poi.supportingStatement || ""
-                    },
-                    images: draft.images || {},
-                    draftId: draft.id,
-                    createdAt: draft.createdAt,
-                    fromDraft: true
                 });
             });
 
@@ -5110,6 +5150,19 @@
 
         function closeModal() {
             document.removeEventListener("keydown", escHandler);
+
+            // Break closure chains explicitly
+            ctx = null;
+
+            if (okBtn) {
+                okBtn.replaceWith(okBtn.cloneNode(true));
+                okBtn = null;
+            }
+            if (cancelBtn) {
+                cancelBtn.replaceWith(cancelBtn.cloneNode(true));
+                cancelBtn = null;
+            }
+
             backdrop.remove();
         }
 
@@ -5141,7 +5194,8 @@
             footer.appendChild(okBtn);
         }
 
-        const ctx = buildContent(dialog, okBtn, closeModal);
+        let ctx = null;
+        ctx = buildContent(dialog, okBtn, closeModal);
 
         if (footer) {
             cancelBtn.addEventListener("click", closeModal);
