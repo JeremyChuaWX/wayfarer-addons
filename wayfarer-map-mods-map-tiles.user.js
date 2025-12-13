@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Map Tiles
-// @version      0.0.3
+// @version      0.0.4
 // @description  Adds extra base map providers (Bing, Esri, OSM, etc.) to the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-map-tiles.user.js
@@ -31,6 +31,11 @@
 
     let submitMap = null;
     let mapAttached = false;
+
+    const MAP_PATH = "/new/submit/new";
+
+    let mapPanelObserver = null;
+    let mapPanelMutationScheduled = false;
 
     const SETTINGS_KEY = "wfmap_base_tiles_settings";
 
@@ -88,32 +93,91 @@
     // Map lifecycle + DOM watchers
     // -----------------------------
 
+    function isOnMapPage() {
+        return window.location.pathname.startsWith(MAP_PATH);
+    }
+
+    function onMapRouteChange() {
+        if (isOnMapPage()) {
+            startMapPanelWatcher();
+        } else {
+            stopMapPanelWatcher();
+            teardownBaseMapsForMap();
+        }
+    }
+
+    function setupMapRouteWatcher() {
+        const origPushState = history.pushState;
+        const origReplaceState = history.replaceState;
+
+        function wrappedRouteChange() {
+            onMapRouteChange();
+        }
+
+        history.pushState = function (...args) {
+            const ret = origPushState.apply(this, args);
+            wrappedRouteChange();
+            return ret;
+        };
+
+        history.replaceState = function (...args) {
+            const ret = origReplaceState.apply(this, args);
+            wrappedRouteChange();
+            return ret;
+        };
+
+        window.addEventListener("popstate", wrappedRouteChange);
+
+        // Initial load
+        wrappedRouteChange();
+    }
+
     function startMapPanelWatcher() {
-        // Run once at start in case the panel is already there
+        // Don’t double-start
+        if (mapPanelObserver) return;
+
+        // Handle the current state in case the panel is already present
         handlePanelChange();
 
-        const mo = new MutationObserver(handlePanelChange);
-        mo.observe(document.body, {
+        mapPanelObserver = new MutationObserver(() => {
+            // Debounce: collapse many mutations into one handler call
+            if (mapPanelMutationScheduled) return;
+
+            mapPanelMutationScheduled = true;
+            requestAnimationFrame(() => {
+                mapPanelMutationScheduled = false;
+                handlePanelChange();
+            });
+        });
+
+        mapPanelObserver.observe(document.body, {
             childList: true,
             subtree: true
         });
     }
 
-    let lastPanelPresent = false;
+    function stopMapPanelWatcher() {
+        if (mapPanelObserver) {
+            mapPanelObserver.disconnect();
+            mapPanelObserver = null;
+        }
+        mapPanelMutationScheduled = false;
+    }
 
+    /**
+ * Detect when the map side panel appears and attach base maps.
+ * Teardown is handled by route changes (onMapRouteChange).
+ */
     function handlePanelChange() {
         const panelPresent = !!document.querySelector("#wfmapmods-side-panel");
 
-        if (panelPresent && !lastPanelPresent) {
-            // We just arrived on the map page
+        if (panelPresent) {
+            // We just arrived on (or are already on) the map page
             attachBasemapsToMapIfNeeded();
             insertBaseMapSettingsLink();
-        } else if (!panelPresent && lastPanelPresent) {
-            // We just left the map page
-            teardownBaseMapsForMap();
+            // We’ve done our one-time setup for this visit; no need to keep watching
+            stopMapPanelWatcher();
         }
-
-        lastPanelPresent = panelPresent;
     }
 
     function getSubmitMap() {
@@ -608,7 +672,7 @@
 
     function bootstrap() {
         loadSettings();
-        startMapPanelWatcher();
+        setupMapRouteWatcher();
     }
 
     bootstrap();
