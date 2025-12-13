@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - s2 Cells
-// @version      0.2.0
+// @version      0.2.1
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-s2-cells.user.js
@@ -1427,6 +1427,7 @@
                 }
                 lastGridKey = "";
                 clearPoiCellPolygons();
+                clearL14ShadingOnly();
 
                 if (submitCellHighlight) {
                     submitCellHighlight.setMap(null);
