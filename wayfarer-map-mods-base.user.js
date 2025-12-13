@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.4
+// @version      2.5.5
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -1495,7 +1495,7 @@
             if (sourceLogoEl.innerHTML === "") {
                 sourceLogoEl.style.display = "none";
             } else {
-                sourceLogoEl.title = poi.sourceText;
+                sourceLogoEl.title = poi.dataSourceText;
 
                 Object.assign(sourceLogoEl.style, {
                     display: "flex",
