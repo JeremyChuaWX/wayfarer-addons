@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Draw Tools
-// @version      0.1.1
+// @version      0.2.0
 // @description  Adds simple drawing tools (markers, polylines, circles) to the Wayfarer submission map, with persistence.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-draw-tools.user.js
@@ -31,6 +31,10 @@
 
     let submitMap = null;
     let mapAttached = false;
+
+    let mapPanelObserver = null;
+    let mapPanelMutationScheduled = false;
+    const MAP_PATH = "/new/submit/new";
 
     const isTouchDevice = !!(
         "ontouchstart" in window ||
@@ -108,33 +112,88 @@
     // Map lifecycle + DOM watchers
     // -----------------------------
 
+    function isOnMapPage() {
+        return window.location.pathname.startsWith(MAP_PATH);
+    }
+
+    function onMapRouteChange() {
+        if (isOnMapPage()) {
+            startMapPanelWatcher();
+        } else {
+            stopMapPanelWatcher();
+            teardownMap();
+        }
+    }
+
+    function setupMapRouteWatcher() {
+        const origPushState = history.pushState;
+        const origReplaceState = history.replaceState;
+
+        function wrappedRouteChange() {
+            onMapRouteChange();
+        }
+
+        history.pushState = function (...args) {
+            const ret = origPushState.apply(this, args);
+            wrappedRouteChange();
+            return ret;
+        };
+
+        history.replaceState = function (...args) {
+            const ret = origReplaceState.apply(this, args);
+            wrappedRouteChange();
+            return ret;
+        };
+
+        window.addEventListener("popstate", wrappedRouteChange);
+
+        // Initial load
+        wrappedRouteChange();
+    }
+
     function startMapPanelWatcher() {
+        // Don’t double-start
+        if (mapPanelObserver) return;
+
+        // Handle the current state in case the panel is already present
         handlePanelChange();
 
-        const mo = new MutationObserver(handlePanelChange);
-        mo.observe(document.body, {
+        mapPanelObserver = new MutationObserver(() => {
+            // Debounce: collapse many mutations into one handler call
+            if (mapPanelMutationScheduled) return;
+
+            mapPanelMutationScheduled = true;
+            requestAnimationFrame(() => {
+                mapPanelMutationScheduled = false;
+                handlePanelChange();
+            });
+        });
+
+        mapPanelObserver.observe(document.body, {
             childList: true,
             subtree: true
         });
     }
 
-    let lastPanelPresent = false;
+    function stopMapPanelWatcher() {
+        if (mapPanelObserver) {
+            mapPanelObserver.disconnect();
+            mapPanelObserver = null;
+        }
+    }
 
+    /**
+     * Detect when the map side panel is added or removed and
+     * attach/teardown the contribution overlay accordingly.
+     */
     function handlePanelChange() {
         const panelPresent = !!document.querySelector("#wfmapmods-side-panel");
 
-        if (panelPresent && !lastPanelPresent) {
+        if (panelPresent) {
             attachDrawingToolsToMapIfNeeded();
             insertDrawingSettingsLink();
-        } else if (!panelPresent && lastPanelPresent) {
-            teardownDrawingToolsForMap();
+            stopMapPanelWatcher();
         }
-
-        if (panelPresent) {
-            insertDrawingLayersOption();
-        }
-
-        lastPanelPresent = panelPresent;
     }
 
     function getSubmitMap() {
@@ -182,7 +241,7 @@
         });
     }
 
-    function teardownDrawingToolsForMap() {
+    function teardownMap() {
         if (!mapAttached) return;
 
         // Reset modes and restore submission marker visibility
@@ -560,6 +619,8 @@
                     recreatePolyline(data);
                 } else if (data.type === "circle") {
                     recreateCircle(data);
+                } else if (data.type === "arrow") {
+                    recreateArrow(data);
                 }
             } catch (e) {
                 console.error("[DrawingTools] Failed to recreate shape:", e, data);
@@ -632,6 +693,45 @@
             type: "circle",
             center: data.center,
             radius: data.radius,
+            color
+        }, true);
+    }
+
+    function createArrowPolylineOptions(color) {
+        return {
+            strokeColor: color,
+            strokeWeight: 3,
+            clickable: false,
+            icons: [{
+                icon: {
+                    path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+                    strokeColor: color,
+                    fillColor: color,
+                    fillOpacity: 1,
+                    strokeWeight: 1,
+                    scale: 3
+                },
+                offset: "100%"
+            }]
+        };
+    }
+
+    function recreateArrow(data) {
+        const color = data.color || currentShapeColor;
+
+        const start = new google.maps.LatLng(data.start.lat, data.start.lng);
+        const end   = new google.maps.LatLng(data.end.lat, data.end.lng);
+
+        const arrow = new google.maps.Polyline({
+            map: submitMap,
+            path: [start, end],
+            ...createArrowPolylineOptions(color)
+        });
+
+        registerShape(arrow, {
+            type: "arrow",
+            start: data.start,
+            end: data.end,
             color
         }, true);
     }
@@ -710,7 +810,7 @@
     // Map controls + modes
     // -----------------------------
 
-    let currentMode = null; // "marker"|"polyline"|"circle"|"delete"|null
+    let currentMode = null; // "marker"|"arrow"|"polyline"|"circle"|"delete"|null
     const modeButtons = {};
 
     let pinHideStyleInjected = false;
@@ -891,7 +991,10 @@
             enablePolylineMode();
         } else if (newMode === "circle") {
             enableCircleMode();
+        } else if (newMode === "arrow") {
+            enableArrowMode();
         }
+
     }
 
     function createButton(text, title) {
@@ -941,6 +1044,7 @@
         controlDiv.appendChild(title);
 
         const btnMarker = createButton("Marker", "Click the map to add markers");
+        const btnArrow = createButton("Arrow", "Click start, move, click end to place an arrow");
         const btnLine = createButton("Polyline", "Click to add points; right-click or double-click to finish");
         const btnCircle = createButton("Circle", "Click centre, move, click again to set radius");
         const btnDelete = createButton("Delete", "Delete mode: click shapes to remove");
@@ -950,11 +1054,13 @@
         btnDeleteAll.style.color = "#b91c1c";
 
         modeButtons.marker = btnMarker;
+        modeButtons.arrow = btnArrow;
         modeButtons.polyline = btnLine;
         modeButtons.circle = btnCircle;
         modeButtons.delete = btnDelete;
 
         btnMarker.addEventListener("click", () => setMode("marker"));
+        btnArrow.addEventListener("click", () => setMode("arrow"));
         btnLine.addEventListener("click", () => setMode("polyline"));
         btnCircle.addEventListener("click", () => setMode("circle"));
         btnDelete.addEventListener("click", () => setMode("delete"));
@@ -965,6 +1071,7 @@
         });
 
         controlDiv.appendChild(btnMarker);
+        controlDiv.appendChild(btnArrow);
         controlDiv.appendChild(btnLine);
         controlDiv.appendChild(btnCircle);
 
@@ -1348,6 +1455,98 @@
     }
 
     // -----------------------------
+    // Draw arrows
+    // -----------------------------
+
+    function enableArrowMode() {
+        if (!submitMap) return;
+
+        ensureProjectionHelper();
+
+        const color = currentShapeColor;
+        let start = null;
+        let tempArrow = null;
+
+        const labelDiv = ensureLabelDiv("polyline"); // reuse the polyline label div if you like
+
+        function finishArrow(endLatLng) {
+            if (!start || !endLatLng || !tempArrow) {
+                setMode(null);
+                return;
+            }
+
+            const s = { lat: start.lat(), lng: start.lng() };
+            const e = { lat: endLatLng.lat(), lng: endLatLng.lng() };
+
+            // If basically zero-length, discard
+            const radius = distanceMeters(start, endLatLng);
+            if (radius <= 1) {
+                tempArrow.setMap(null);
+                if (labelDiv) labelDiv.style.display = "none";
+                setMode(null);
+                return;
+            }
+
+            tempArrow.setPath([start, endLatLng]);
+
+            registerShape(tempArrow, {
+                type: "arrow",
+                start: s,
+                end: e,
+                color
+            });
+
+            if (labelDiv) labelDiv.style.display = "none";
+            setMode(null);
+        }
+
+        drawingClickHandler = (latLng) => {
+            if (!start) {
+                start = latLng;
+
+                tempArrow = new google.maps.Polyline({
+                    map: submitMap,
+                    path: [start, start],
+                    ...createArrowPolylineOptions(color)
+                });
+
+                if (labelDiv) {
+                    positionLabelDiv(labelDiv, start, start, "0.0 m");
+                }
+                return;
+            }
+
+            finishArrow(latLng);
+        };
+
+        const clickListener = submitMap.addListener("click", (ev) => {
+            if (!drawingClickHandler || !ev || !ev.latLng) return;
+            drawingClickHandler(ev.latLng);
+        });
+
+        const moveListener = submitMap.addListener("mousemove", (ev) => {
+            if (!start || !tempArrow || !ev || !ev.latLng) return;
+
+            const end = ev.latLng;
+            tempArrow.setPath([start, end]);
+
+            if (labelDiv) {
+                const metres = distanceMeters(start, end).toFixed(1);
+                positionLabelDiv(labelDiv, start, end, `${metres} m`);
+            }
+        });
+
+        const rightClickListener = submitMap.addListener("rightclick", () => {
+            // cancel if they haven’t placed an end yet
+            if (tempArrow) tempArrow.setMap(null);
+            if (labelDiv) labelDiv.style.display = "none";
+            setMode(null);
+        });
+
+        modeListeners.push(clickListener, moveListener, rightClickListener);
+    }
+
+    // -----------------------------
     // Circle mode with dotted radius + DOM label
     // -----------------------------
 
@@ -1643,7 +1842,7 @@
 
     function bootstrap() {
         loadSettings();
-        startMapPanelWatcher();
+        setupMapRouteWatcher();
     }
 
     bootstrap();
