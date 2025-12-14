@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Planner
-// @version      0.1.8
+// @version      0.1.9
 // @description  Load and edit planner POIs from a Google Sheet and show them as pins on the Wayfarer submission map.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-planner.user.js
@@ -41,13 +41,41 @@
     const POI_BRIDGE_SOURCE = "wfmapmods-planner";
     const SUBMISSION_BRIDGE_ID = "wfmapmods-submit-bridge";
 
-    const PERFORMANCE_MAX_VISIBLE_MARKERS = 400;
+    const PERFORMANCE_MAX_VISIBLE_MARKERS = 500;
 
     let plannerInfoWindow = null;
 
     let activeEditContext = null;
 
     let addModeEnabled = false;
+
+    // ----------------------------------
+    // Performance caches / knobs
+    // ----------------------------------
+
+    const PLANNER_LABEL_MIN_ZOOM = 14;
+
+    const pinIconCache = new Map();
+    let refreshScheduled = false;
+    let refreshPending = false;
+
+    function scheduleRefreshPlannerMarkers() {
+        if (refreshScheduled) { refreshPending = true; return; }
+        refreshScheduled = true;
+
+        requestAnimationFrame(() => {
+            refreshScheduled = false;
+            refreshPlannerMarkers();
+            if (refreshPending) {
+                refreshPending = false;
+                scheduleRefreshPlannerMarkers();
+            }
+        });
+    }
+
+    // ----------------------------------
+    // Settings
+    // ----------------------------------
 
     // Default marker statuses and colours (can be extended by data).
     const DEFAULT_STATUS_CONFIG = {
@@ -629,17 +657,23 @@
         return ensureStatusConfigFor(statusKey);
     }
 
-    // Simple pin-style symbol using an SVG-like path.
     function getPlannerPinSymbol(color) {
-        const svg = getGenericMarkerSvg(color || "#a855f7", 'class="wfmapmods-planner-marker"');
+        const key = color || "#a855f7";
+
+        let icon = pinIconCache.get(key);
+        if (icon) return icon;
+
+        const svg = getGenericMarkerSvg(key, 'class="wfmapmods-planner-marker"');
         const url = "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
 
-        // 25 x 41 viewbox; anchor at the bottom center
-        return {
+        icon = {
             url,
             scaledSize: new google.maps.Size(25, 41),
             anchor: new google.maps.Point(12.5, 41)
         };
+
+        pinIconCache.set(key, icon);
+        return icon;
     }
 
     function getGenericMarkerSvg(color, markerClassName) {
@@ -673,6 +707,7 @@
         PlannerLabelOverlay.prototype.onAdd = function () {
             const pane = this.getPanes().overlayImage;
             const div = document.createElement("div");
+
             div.style.position = "absolute";
             div.style.whiteSpace = "nowrap";
             div.style.fontSize = "14px";
@@ -685,6 +720,8 @@
                 "1px 1px 2px #000000"
             ].join(", ");
             div.style.pointerEvents = "none";
+            div.style.transform = "translate(-50%, 0)";
+
             div.textContent = this.text || "";
             pane.appendChild(div);
             this.div = div;
@@ -694,16 +731,12 @@
             if (!this.div) return;
             const projection = this.getProjection();
             if (!projection || !this.marker) return;
+
             const pos = projection.fromLatLngToDivPixel(this.marker.getPosition());
             if (!pos) return;
 
-            const div = this.div;
-            // Center horizontally, place slightly under the pin tip
-            const x = pos.x - div.offsetWidth / 2;
-            const y = pos.y + 4; // tweak if you want a bit lower
-
-            div.style.left = x + "px";
-            div.style.top = y + "px";
+            this.div.style.left = pos.x + "px";
+            this.div.style.top = (pos.y + 4) + "px";
         };
 
         PlannerLabelOverlay.prototype.onRemove = function () {
@@ -721,27 +754,50 @@
         };
     }
 
-    function updatePlannerMarkerLabel(marker, titleText) {
-        const plannerCfg = userSettings.planner || {};
-        const showTitles = !!plannerCfg.showTitles;
+    function applyPlannerMarkerVisuals(marker, icon, titleText, labelText, showLabel) {
+        // Icon
+        if (marker._plannerIcon !== icon) {
+            marker.setIcon(icon);
+            marker._plannerIcon = icon;
+        }
 
-        // If we’re not showing titles, just hide any overlay
-        if (!showTitles) {
-            if (marker._plannerLabelOverlay) {
-                marker._plannerLabelOverlay.setMap(null);
+        // Title
+        if (marker._plannerTitle !== titleText) {
+            marker.setTitle(titleText);
+            marker._plannerTitle = titleText;
+        }
+
+        // Label visibility + text
+        if (!showLabel) {
+            if (marker._plannerLabelVisible) {
+                if (marker._plannerLabelOverlay) marker._plannerLabelOverlay.setMap(null);
+                marker._plannerLabelVisible = false;
             }
             return;
         }
 
         ensurePlannerLabelOverlayClass();
 
-        if (marker._plannerLabelOverlay) {
-            marker._plannerLabelOverlay.setText(titleText || "");
+        const newText = labelText || "";
+
+        if (!marker._plannerLabelOverlay) {
+            marker._plannerLabelOverlay = new PlannerLabelOverlay(marker, newText);
+            marker._plannerLabelVisible = true;
+            marker._plannerLabelText = newText;
+            return;
+        }
+
+        if (marker._plannerLabelText !== newText) {
+            marker._plannerLabelOverlay.setText(newText);
+            marker._plannerLabelText = newText;
+        }
+
+        if (!marker._plannerLabelVisible) {
             marker._plannerLabelOverlay.setMap(submitMap);
-        } else {
-            marker._plannerLabelOverlay = new PlannerLabelOverlay(marker, titleText || "");
+            marker._plannerLabelVisible = true;
         }
     }
+
 
     function revertActiveEditIfNeeded() {
         if (!activeEditContext || activeEditContext.committed) return;
@@ -840,7 +896,7 @@
         mapAttached = true;
 
         if (!submitMap._plannerOverlayBoundsListenerAdded) {
-            submitMap.addListener("idle", refreshPlannerMarkers);
+            submitMap.addListener("idle", scheduleRefreshPlannerMarkers);
             submitMap._plannerOverlayBoundsListenerAdded = true;
         }
 
@@ -947,10 +1003,6 @@
 
             let lat = poi.lat;
             let lng = poi.lng;
-
-            // Normalise stored lat/lng (in case they came back as strings)
-            if (typeof lat === "string") lat = parseFloat(lat);
-            if (typeof lng === "string") lng = parseFloat(lng);
             if (Number.isNaN(lat) || Number.isNaN(lng)) return;
 
             const statusCfg = getPlannerMarkerConfigForStatus(poi.status);
@@ -1001,21 +1053,27 @@
             const cfg = getPlannerMarkerConfigForStatus(poi.status);
             const color = cfg.color || "#a855f7";
 
-            const baseIcon = getPlannerPinSymbol(color);
+            const icon = getPlannerPinSymbol(color);
 
             let marker = plannerMarkers[id];
 
             const titleStatus = String(poi.status || "").toUpperCase() || "UNKNOWN";
             const titleText = `${poi.title || "(untitled)"} (${titleStatus})`;
 
+            // Titles only shown at/above zoom threshold
+            const zoom = submitMap.getZoom ? submitMap.getZoom() : null;
+            const showTitles =
+                  !!(plannerCfg.showTitles) &&
+                  (zoom == null || zoom >= PLANNER_LABEL_MIN_ZOOM);
+
             if (!marker) {
                 marker = new google.maps.Marker({
                     map: null,
                     position: { lat: poi.lat, lng: poi.lng },
                     title: titleText,
-                    icon: baseIcon,
+                    icon,
                     draggable: !!(userSettings.planner && userSettings.planner.enableDragging),
-                    optimized: false,
+                    optimized: false
                 });
 
                 marker.addListener("click", () => {
@@ -1026,42 +1084,35 @@
                     marker.addListener("dragend", (ev) => {
                         const newPos = ev.latLng;
                         if (!newPos) return;
-
-                        // Marker is already visually moved by Maps; this is just explicit
                         marker.setPosition(newPos);
-
-                        // Do NOT change poi.lat/lng yet.
-                        // Do NOT send to Apps Script yet.
-                        // Just open the editor so the user can decide to Save or close.
                         openPlannerInfoWindow(marker, poi);
                     });
                 }
 
                 plannerMarkers[id] = marker;
-            } else {
-                // Update icon & title if needed.
-                marker.setIcon(baseIcon);
-                if (typeof marker.setTitle === "function") {
-                    marker.setTitle(titleText);
-                }
             }
 
+            // Only apply icon/title/label when changed
+            applyPlannerMarkerVisuals(marker, icon, titleText, poi.title || "", showTitles);
+
+            // Put marker on map if needed
             if (!marker.getMap()) {
                 marker.setMap(submitMap);
             }
-
-            // Show / hide on-map title label under the pin
-            updatePlannerMarkerLabel(marker, poi.title || "");
         });
 
         // Hide markers that are no longer in bounds.
         Object.entries(plannerMarkers).forEach(([id, marker]) => {
             if (!marker) return;
+
             if (!inBoundsIds.has(id) && marker.getMap()) {
                 marker.setMap(null);
+
                 if (marker._plannerLabelOverlay) {
                     marker._plannerLabelOverlay.setMap(null);
                 }
+
+                marker._plannerLabelVisible = false;
             }
         });
     }
@@ -1201,7 +1252,7 @@
         container.appendChild(titleInput);
 
         container.appendChild(labelEl("Description"));
-        const descInput = inputText(poi.description || "");
+        const descInput = textarea(poi.description || "");
         descInput.placeholder = "Description";
         container.appendChild(descInput);
 
@@ -1392,7 +1443,7 @@
         const leftBox = document.createElement("div");
         if (poi.id) {
             const del = makeLink("Delete");
-            del.style.color = "#dc2626"; // subtle red for destructive action
+            del.style.color = "#dc2626";
             del.addEventListener("click", (ev) => {
                 ev.preventDefault();
                 openPlannerDeleteConfirm(poi.id);
@@ -1407,7 +1458,7 @@
         centerBox.style.display = "flex";
         centerBox.style.justifyContent = "center";
 
-        const submit = makeLink("Submit Wayspot");
+        const submit = makeLink("Submit");
         submit.addEventListener("click", (ev) => {
             ev.preventDefault();
             const fields = collectFieldsFromForm();
@@ -1479,8 +1530,7 @@
             }
         });
         container.appendChild(closeX);
-
-        // important: container needs to be positioned for absolute child
+        
         container.style.position = "relative";
         container.style.paddingTop = "4px";
 
@@ -1614,7 +1664,7 @@
                 );
 
                 const perfRow = checkboxRow(
-                    "Performance mode (hide overlays when too many markers)",
+                    `Performance mode (Hides markers at low zoom levels. Only kicks in if there would be >${PERFORMANCE_MAX_VISIBLE_MARKERS} markers on the screen.)`,
                     userSettings.planner.performanceModeEnabled
                 );
 
