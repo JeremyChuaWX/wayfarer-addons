@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Report Wayspots
-// @version      0.2.0
+// @version      0.3.0
 // @description  Adds a "Report Wayspot" link to the side panel and pre-fills the Helpshift form
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
@@ -30,47 +30,354 @@
 (function () {
     'use strict';
 
-    // Random UUID, unique to this userscript
-    const uuid = '1ba36113-7f8a-4ff8-9451-d5bfca869633';
+    // ======================================================================
+    // Globals + constants
+    // ======================================================================
 
+    // Script identity / settings
+    const SCRIPT_UUID = "1ba36113-7f8a-4ff8-9451-d5bfca869633";
     const SETTINGS_KEY = "wfmap_report_wayspot_settings";
 
-    const ORIGIN_WAYFARER = 'https://wayfarer.nianticlabs.com';
-    const ORIGIN_HELPSHIFT = 'https://niantic.helpshift.com';
-
-    const REPORT_URL = 'https://niantic.helpshift.com/hc/en/5-report-an-issue-with-a-pokestop-gym/contact-us/?p=web&contact=1&l=en';
-
+    // Origins + URLs
+    const ORIGIN_WAYFARER = "https://wayfarer.nianticlabs.com";
+    const ORIGIN_HELPSHIFT = "https://niantic.helpshift.com";
+    const REPORT_URL = "https://niantic.helpshift.com/hc/en/5-report-an-issue-with-a-pokestop-gym/contact-us/?p=web&contact=1&l=en";
     const CURRENT_ORIGIN = window.location.origin;
 
-    // Message types for postMessage
-    const MSG_EXECUTOR = uuid;
-    const MSG_GET_DATA = 'wf-report-get-data';
-    const MSG_DATA = 'wf-report-data';
+    // postMessage protocol
+    const MSG_EXECUTOR = SCRIPT_UUID;
+    const MSG_GET_DATA = "wf-report-get-data";
+    const MSG_DATA = "wf-report-data";
 
-    // Cache of last report payload in the Wayfarer tab
-    let lastReportPayload = null;
-
-    // ======================================================================
-    // WAYFARER SIDE
-    // ======================================================================
-
-    // Cache of live POIs loaded via the live-pois-in-radius API
-    let livePois = [];
-
-    // Side panel detection
+    // Wayfarer routes / DOM ids
     const SUBMIT_PATH = "/new/submit/new";
+    const POI_BRIDGE_ID = "wfmapmods-poi-bridge";
+    const SIDE_PANEL_ID = "wfmapmods-side-panel";
 
-    let sidePanelObserver = null;
-    let sidePanelMutationScheduled = false;
-
+    // Geocoder bridge postMessage types (page-context bridge)
     const WFMM_GEO_REQ = "wfmm-geocode-req";
     const WFMM_GEO_RES = "wfmm-geocode-res";
 
+    // Helpshift form slots
+    const HS_SLOTS = {
+        name: "niantic_form_field_20180829003003565-76757f675145667",
+        email: "niantic_form_field_20180829003003570-d2b19abe3155a0b",
+        title: "niantic_form_field_20181211224850128-efdfc202dc778ac",
+        latlon: "niantic_form_field_20181106014139990-b5f071a799fac06",
+        address: "niantic_form_field_20181211224719769-a7344f7cdb793cf",
+        city: "niantic_form_field_20181211224807182-f5413d861a8199c",
+        state: "niantic_form_field_20190624210109230-d8ec77a2ab51d49",
+        postcode: "niantic_form_field_20190624210109237-37afb1f548efd12"
+    };
+
+    // Helpshift country dropdown slot
+    const HS_COUNTRY_SLOT = "niantic_form_field_20190926192331730-5f5841a93bbe40b";
+
+    // Helpshift countries (big list)
+    const HELPSHIFT_COUNTRIES = [
+        "Afghanistan",
+        "Åland Islands",
+        "Albania",
+        "Algeria",
+        "American Samoa",
+        "Andorra",
+        "Angola",
+        "Anguilla",
+        "Antarctica",
+        "Antigua and Barbuda",
+        "Argentina",
+        "Armenia",
+        "Aruba",
+        "Australia",
+        "Austria",
+        "Azerbaijan",
+        "Bahamas",
+        "Bahrain",
+        "Bangladesh",
+        "Barbados",
+        "Belarus",
+        "Belgium",
+        "Belize",
+        "Benin",
+        "Bermuda",
+        "Bhutan",
+        "Bolivia",
+        "Bonaire, Sint Eustatius and Saba",
+        "Bosnia and Herzegovina",
+        "Botswana",
+        "Bouvet Island",
+        "Brazil",
+        "British Indian Ocean Territory ",
+        "Brunei Darussalam",
+        "Bulgaria",
+        "Burkina Faso",
+        "Burundi",
+        "Cabo Verde",
+        "Cambodia",
+        "Cameroon",
+        "Canada",
+        "Cayman Islands",
+        "Central African Republic",
+        "Chad",
+        "Chile",
+        "China",
+        "Christmas Island",
+        "Cocos (Keeling) Islands",
+        "Colombia",
+        "Comoros",
+        "Congo",
+        "Cook Islands",
+        "Costa Rica",
+        "Côte d'Ivoire",
+        "Croatia",
+        "Cuba",
+        "Curaçao",
+        "Cyprus",
+        "Czechia",
+        "Democratic People's Republic of Korea",
+        "Democratic Republic of the Congo",
+        "Denmark",
+        "Djibouti",
+        "Dominica",
+        "Dominican Republic",
+        "Ecuador",
+        "Egypt",
+        "El Salvador",
+        "Equatorial Guinea",
+        "Eritrea",
+        "Estonia",
+        "Eswatini",
+        "Ethiopia",
+        "Falkland Islands  [Malvinas]",
+        "Faroe Islands ",
+        "Fiji",
+        "Finland",
+        "France",
+        "French Guiana",
+        "French Polynesia",
+        "French Southern Territories ",
+        "Gabon",
+        "Gambia",
+        "Georgia",
+        "Germany",
+        "Ghana",
+        "Gibraltar",
+        "Greece",
+        "Greenland",
+        "Grenada",
+        "Guadeloupe",
+        "Guam",
+        "Guatemala",
+        "Guernsey",
+        "Guinea-Bissau",
+        "Guinea",
+        "Guyana",
+        "Haiti",
+        "Heard Island and McDonald Islands",
+        "Holy See ",
+        "Honduras",
+        "Hong Kong",
+        "Hungary",
+        "Iceland",
+        "India",
+        "Indonesia",
+        "Iran",
+        "Iraq",
+        "Ireland",
+        "Isle of Man",
+        "Israel",
+        "Italy",
+        "Jamaica",
+        "Japan",
+        "Jersey",
+        "Jordan",
+        "Kazakhstan",
+        "Kenya",
+        "Kiribati",
+        "Kuwait",
+        "Kyrgyzstan",
+        "Lao People's Democratic Republic ",
+        "Latvia",
+        "Lebanon",
+        "Lesotho",
+        "Liberia",
+        "Libya",
+        "Liechtenstein",
+        "Lithuania",
+        "Luxembourg",
+        "Macao",
+        "Madagascar",
+        "Malawi",
+        "Malaysia",
+        "Maldives",
+        "Mali",
+        "Malta",
+        "Marshall Islands",
+        "Martinique",
+        "Mauritania",
+        "Mauritius",
+        "Mayotte",
+        "Mexico",
+        "Micronesia (Federated States of)",
+        "Moldova (the Republic of)",
+        "Monaco",
+        "Mongolia",
+        "Montenegro",
+        "Montserrat",
+        "Morocco",
+        "Mozambique",
+        "Myanmar",
+        "Namibia",
+        "Nauru",
+        "Nepal",
+        "Netherlands",
+        "New Caledonia",
+        "New Zealand",
+        "Nicaragua",
+        "Niger",
+        "Nigeria",
+        "Niue",
+        "Norfolk Island",
+        "North Macedonia",
+        "Northern Mariana Islands ",
+        "Norway",
+        "Oman",
+        "Pakistan",
+        "Palau",
+        "Palestine, State of",
+        "Panama",
+        "Papua New Guinea",
+        "Paraguay",
+        "Peru",
+        "Philippines",
+        "Pitcairn",
+        "Poland",
+        "Portugal",
+        "Puerto Rico",
+        "Qatar",
+        "Republic of Korea",
+        "Réunion",
+        "Romania",
+        "Russian Federation ",
+        "Rwanda",
+        "Saint Barthélemy",
+        "Saint Helena, Ascension and Tristan da Cunha",
+        "Saint Kitts and Nevis",
+        "Saint Lucia",
+        "Saint Martin (French)",
+        "Saint Pierre and Miquelon",
+        "Saint Vincent and the Grenadines",
+        "Samoa",
+        "San Marino",
+        "Sao Tome and Principe",
+        "Saudi Arabia",
+        "Senegal",
+        "Serbia",
+        "Seychelles",
+        "Sierra Leone",
+        "Singapore",
+        "Sint Maarten (Dutch)",
+        "Slovakia",
+        "Slovenia",
+        "Solomon Islands",
+        "Somalia",
+        "South Africa",
+        "South Georgia and the South Sandwich Islands",
+        "South Sudan",
+        "Spain",
+        "Sri Lanka",
+        "Sudan",
+        "Suriname",
+        "Svalbard and Jan Mayen",
+        "Sweden",
+        "Switzerland",
+        "Syrian Arab Republic",
+        "Taiwan (Province of China)",
+        "Tajikistan",
+        "Tanzania, the United Republic of",
+        "Thailand",
+        "Timor-Leste",
+        "Togo",
+        "Tokelau",
+        "Tonga",
+        "Trinidad and Tobago",
+        "Tunisia",
+        "Turkey",
+        "Turkmenistan",
+        "Turks and Caicos",
+        "Tuvalu",
+        "Uganda",
+        "Ukraine",
+        "United Arab Emirates",
+        "United Kingdom",
+        "United States Minor Outlying Islands ",
+        "United States of America",
+        "Uruguay",
+        "Uzbekistan",
+        "Vanuatu",
+        "Venezuela (Bolivarian Republic of)",
+        "Vietnam",
+        "Virgin Islands (British)",
+        "Virgin Islands (U.S.)",
+        "Wallis and Futuna",
+        "Western Sahara",
+        "Yemen",
+        "Zambia",
+        "Zimbabwe",
+    ];
+
+    // Country aliases
+    const COUNTRY_ALIASES = {
+        "usa": "United States of America",
+        "us": "United States of America",
+        "united states": "United States of America",
+        "uk": "United Kingdom",
+        "uae": "United Arab Emirates",
+        "south korea": "Republic of Korea",
+        "north korea": "Democratic People's Republic of Korea",
+        "dr congo": "Democratic Republic of the Congo",
+        "drc": "Democratic Republic of the Congo",
+        "syria": "Syrian Arab Republic",
+        "russia": "Russian Federation ",
+        "venezuela": "Venezuela (Bolivarian Republic of)",
+        "tanzania": "Tanzania, the United Republic of",
+        "laos": "Lao People's Democratic Republic ",
+        "moldova": "Moldova (the Republic of)",
+        "micronesia": "Micronesia (Federated States of)",
+        "palestine": "Palestine, State of",
+        "taiwan": "Taiwan (Province of China)",
+        "macau": "Macao",
+        "cape verde": "Cabo Verde",
+        "czech republic": "Czechia",
+        "swaziland": "Eswatini",
+        "east timor": "Timor-Leste",
+        "ivory coast": "Côte d'Ivoire",
+        "reunion": "Réunion",
+        "curacao": "Curaçao",
+        "vatican city": "Holy See ",
+    };
+
     // ======================================================================
-    // Settings persistence
+    // Shared state
     // ======================================================================
 
+    let lastReportPayload = null;
+
+    // Wayfarer-side state
+    let livePois = [];
+    let sidePanelObserver = null;
+    let sidePanelMutationScheduled = false;
+
+    // Settings cache
     const userSettings = {};
+
+    // ======================================================================
+    // Utilities
+    // ======================================================================
+
+    function getPageWin() {
+        return (typeof unsafeWindow !== "undefined") ? unsafeWindow : window;
+    }
 
     function mergeDeep(target, source) {
         for (const key in source) {
@@ -110,6 +417,10 @@
             console.error(`${SETTINGS_KEY} - Failed to save settings:`, e);
         }
     }
+
+    // ======================================================================
+    // WAYFARER
+    // ======================================================================
 
     // ======================================================================
     // Wayfarer boot + route lifecycle
@@ -1123,17 +1434,6 @@
         return null;
     }
 
-    const HS_SLOTS = {
-        name: "niantic_form_field_20180829003003565-76757f675145667",
-        email: "niantic_form_field_20180829003003570-d2b19abe3155a0b",
-        title: "niantic_form_field_20181211224850128-efdfc202dc778ac",
-        latlon: "niantic_form_field_20181106014139990-b5f071a799fac06",
-        address: "niantic_form_field_20181211224719769-a7344f7cdb793cf",
-        city: "niantic_form_field_20181211224807182-f5413d861a8199c",
-        state: "niantic_form_field_20190624210109230-d8ec77a2ab51d49",
-        postcode: "niantic_form_field_20190624210109237-37afb1f548efd12"
-    };
-
     function findField(key) {
         const slot = HS_SLOTS[key];
         return slot ? getShadowInputBySlot(slot) : null;
@@ -1201,6 +1501,185 @@
 
         const postcodeInput = findField('postcode');
         setFormValue(postcodeInput, wayspot.postcode);
+
+        const helpshiftCountries = HELPSHIFT_COUNTRIES; // array of the titles from your list
+        const resolved = resolveHelpshiftCountryName(wayspot.country, helpshiftCountries);
+
+        if (resolved) {
+            setCountryInStaticDropdown(resolved);
+        } else {
+            // fallback: try raw value anyway
+            setCountryInStaticDropdown(wayspot.country);
+        }
+    }
+
+    // ======================================================================
+    // Helpshift: country dropdown + scroll
+    // ======================================================================
+
+    function findCountryDropdownHost() {
+        // Your confirmed slot
+        return querySelectorDeep(
+            'static-dropdown[slot="niantic_form_field_20190926192331730-5f5841a93bbe40b"]'
+        );
+    }
+
+    function clickReal(el) {
+        const w = getPageWin();
+        if (!el) return;
+        // Some components require mousedown rather than click
+        el.dispatchEvent(new w.MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+        el.dispatchEvent(new w.MouseEvent("mouseup",   { bubbles: true, cancelable: true }));
+        el.click?.();
+    }
+
+    function setInputValue(inputEl, value) {
+        const w = (typeof unsafeWindow !== "undefined") ? unsafeWindow : window;
+        if (!inputEl) return;
+
+        inputEl.value = value;
+        inputEl.dispatchEvent(new w.Event("input", { bubbles: true }));
+        inputEl.dispatchEvent(new w.Event("change", { bubbles: true }));
+    }
+
+    function setCountryInStaticDropdown(countryName) {
+        const host = findCountryDropdownHost();
+        if (!host?.shadowRoot) return false;
+
+        const sr = host.shadowRoot;
+
+        // 1) Open it: click the title container (this matches your HTML)
+        const opener =
+              sr.querySelector(".hc-static-dropdown__search-input-title-container") ||
+              sr.querySelector(".hc-static-dropdown__search-input-title") ||
+              sr.querySelector(".hc-static-dropdown");
+
+        if (!opener) return false;
+        clickReal(opener);
+
+        // 2) Wait until modal exists inside shadow root, then fill search and click option
+        const t0 = Date.now();
+        const timeoutMs = 5000;
+
+        const timer = setInterval(() => {
+            const modal = sr.querySelector(".hc-static-dropdown__popover-modal");
+            if (!modal) {
+                if (Date.now() - t0 > timeoutMs) {
+                    clearInterval(timer);
+                }
+                return;
+            }
+
+            // Search input is inside <hc-input> shadow root (as your HTML shows)
+            const hcInputHost = sr.querySelector("hc-input.hc-static-dropdown__search-input");
+            const searchInput = hcInputHost?.shadowRoot?.querySelector("input.static-dropdown-input");
+
+            if (searchInput) {
+                setInputValue(searchInput, countryName);
+            }
+
+            // Find a matching <li> by its <p title="...">
+            const items = Array.from(sr.querySelectorAll("li.hc-static-dropdown__popover-item"));
+            const match = items.find(li => {
+                const p = li.querySelector("p.hc-static-dropdown__item-title");
+                const title = p?.getAttribute("title") || p?.textContent?.trim();
+                return title === countryName;
+            });
+
+            if (match) {
+                clickReal(match);
+                clearInterval(timer);
+                scrollHelpshiftToTop();
+            }
+        }, 100);
+
+        return true;
+    }
+
+    function getHelpshiftScroller() {
+        return document.querySelector(".content-wrapper.js-content-wrapper");
+    }
+
+    function scrollHelpshiftToTop() {
+        const scroller = getHelpshiftScroller();
+        if (!scroller) return;
+
+        // Stop focus fighting the scroll
+        try { document.activeElement?.blur?.(); } catch {}
+
+        // Force to top (repeat a few times because the dropdown focus can re-scroll)
+        scroller.scrollTop = 0;
+        setTimeout(() => { scroller.scrollTop = 0; }, 50);
+        setTimeout(() => { scroller.scrollTop = 0; }, 150);
+        setTimeout(() => { scroller.scrollTop = 0; }, 350);
+    }
+
+    function normalizeCountryKey(s) {
+        return String(s || "")
+            .trim()
+            .toLowerCase()
+        // strip accents (Côte d'Ivoire, Réunion, Curaçao, Åland, etc.)
+            .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+        // unify apostrophes
+            .replace(/[’‘`]/g, "'")
+        // remove dots after abbreviations (U.S. -> US)
+            .replace(/\./g, "")
+        // collapse whitespace
+            .replace(/\s+/g, " ")
+        // remove surrounding junk punctuation
+            .replace(/^[\s,;()\-]+|[\s,;()\-]+$/g, "");
+    }
+
+    function stripLeadingThe(k) {
+        return k.startsWith("the ") ? k.slice(4) : k;
+    }
+
+    function buildHelpshiftCountryLookup(helpshiftTitles) {
+        const byNorm = new Map();
+
+        for (const title of helpshiftTitles) {
+            const norm = normalizeCountryKey(title);
+            if (norm) byNorm.set(norm, title);
+
+            // also index without leading "the"
+            const noThe = stripLeadingThe(norm);
+            if (noThe && !byNorm.has(noThe)) byNorm.set(noThe, title);
+        }
+
+        return byNorm;
+    }
+
+    function resolveHelpshiftCountryName(googleCountry, helpshiftTitles) {
+        const inputRaw = String(googleCountry || "").trim();
+        if (!inputRaw) return null;
+
+        const byNorm = buildHelpshiftCountryLookup(helpshiftTitles);
+
+        // 1) direct exact match via normalization
+        let k = normalizeCountryKey(inputRaw);
+        const direct = byNorm.get(k) || byNorm.get(stripLeadingThe(k));
+        if (direct) return direct;
+
+        // 2) alias table
+        const aliasTarget = COUNTRY_ALIASES[k] || COUNTRY_ALIASES[stripLeadingThe(k)];
+        if (aliasTarget) {
+            // Ensure aliasTarget exists in Helpshift list; if not, still return it (but you'll see mismatch)
+            return byNorm.get(normalizeCountryKey(aliasTarget)) || aliasTarget;
+        }
+
+        // 3) safe fuzzy fallback: only if there is a single clear candidate
+        // Example: "Venezuela, Bolivarian Republic of" -> "Venezuela (Bolivarian Republic of)"
+        const candidates = [];
+        for (const [normTitle, originalTitle] of byNorm.entries()) {
+            if (normTitle.includes(k) || k.includes(normTitle)) {
+                candidates.push(originalTitle);
+            }
+        }
+
+        // Only accept if unambiguous
+        if (candidates.length === 1) return candidates[0];
+
+        return null; // give up safely
     }
 
     // ======================================================================
