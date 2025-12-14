@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Report Wayspots
-// @version      0.3.0
+// @version      0.2.0
 // @description  Adds a "Report Wayspot" link to the side panel and pre-fills the Helpshift form
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
@@ -1007,7 +1007,7 @@
                 basePayload.city     ||= "Unknown";
                 basePayload.state    ||= "Unknown";
                 basePayload.country  ||= "Unknown";
-                basePayload.postcode ||= "0000";
+                basePayload.postcode ||= "-";
             }
         }
 
