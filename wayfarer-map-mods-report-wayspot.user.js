@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Report Wayspots
-// @version      0.1.5
-// @description  Adds a "Report Wayspot" link to the side panel and pre-fills the Helpshift form using POI bridge data
+// @version      0.2.0
+// @description  Adds a "Report Wayspot" link to the side panel and pre-fills the Helpshift form
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
@@ -23,7 +23,7 @@
 // GNU General Public License for more details.
 
 // You can find a copy of the GNU General Public License in the root
-// directory of this script's GitHub repository:
+// directory of this script's GitLab repository:
 // <https://gitlab.com/Tntnnbltn/wayfarer-addons/-/blob/main/LICENSE>
 // If not, see <https://www.gnu.org/licenses/>.
 
@@ -50,6 +50,10 @@
     // Cache of last report payload in the Wayfarer tab
     let lastReportPayload = null;
 
+    // ======================================================================
+    // WAYFARER SIDE
+    // ======================================================================
+
     // Cache of live POIs loaded via the live-pois-in-radius API
     let livePois = [];
 
@@ -59,8 +63,11 @@
     let sidePanelObserver = null;
     let sidePanelMutationScheduled = false;
 
+    const WFMM_GEO_REQ = "wfmm-geocode-req";
+    const WFMM_GEO_RES = "wfmm-geocode-res";
+
     // ======================================================================
-    // WAYFARER SIDE
+    // Settings persistence
     // ======================================================================
 
     const userSettings = {};
@@ -103,6 +110,10 @@
             console.error(`${SETTINGS_KEY} - Failed to save settings:`, e);
         }
     }
+
+    // ======================================================================
+    // Wayfarer boot + route lifecycle
+    // ======================================================================
 
     function initWayfarer() {
         hookLivePoisXHR();
@@ -151,6 +162,10 @@
         // Handle the initial URL on page load
         wrappedRouteChange();
     }
+
+    // ======================================================================
+    // Wayfarer data sources (live-pois-in-radius)
+    // ======================================================================
 
     function hookLivePoisXHR() {
         const XHR = window.XMLHttpRequest || XMLHttpRequest;
@@ -204,37 +219,40 @@
 
             return origSend.apply(this, args);
         };
-
-        function mergePoiIntoLivePois(newPoi) {
-            if (!newPoi) return;
-
-            if (newPoi.guid) {
-                const idx = livePois.findIndex(p => p && p.guid === newPoi.guid);
-                if (idx >= 0) {
-                    livePois[idx] = newPoi;
-                    return;
-                }
-            }
-
-            const idx2 = livePois.findIndex(p =>
-                                            p &&
-                                            typeof p.lat === "number" &&
-                                            typeof p.lng === "number" &&
-                                            p.lat === newPoi.lat &&
-                                            p.lng === newPoi.lng
-                                           );
-
-            if (idx2 >= 0) {
-                livePois[idx2] = newPoi;
-                return;
-            }
-
-            livePois.push(newPoi);
-        }
     }
 
+    function mergePoiIntoLivePois(newPoi) {
+        if (!newPoi) return;
+
+        if (newPoi.guid) {
+            const idx = livePois.findIndex(p => p && p.guid === newPoi.guid);
+            if (idx >= 0) {
+                livePois[idx] = newPoi;
+                return;
+            }
+        }
+
+        const idx2 = livePois.findIndex(p =>
+                                        p &&
+                                        typeof p.lat === "number" &&
+                                        typeof p.lng === "number" &&
+                                        p.lat === newPoi.lat &&
+                                        p.lng === newPoi.lng
+                                       );
+
+        if (idx2 >= 0) {
+            livePois[idx2] = newPoi;
+            return;
+        }
+
+        livePois.push(newPoi);
+    }
+
+    // ======================================================================
+    // Wayfarer DOM observers (side panel + POI bridge)
+    // ======================================================================
+
     function startSidePanelWatcher() {
-        console.log('startSidePanelWatcher');
         // Don't create multiple observers
         if (sidePanelObserver) return;
 
@@ -269,7 +287,6 @@
         const panelPresent = !!document.querySelector("#wfmapmods-side-panel");
 
         if (panelPresent) {
-            console.log('sidePanelMutationHandler');
             insertReportWayspotLinkIfReady();
             insertReportingSettingsLinkIfReady();
             startPoiBridgeWatcherIfReady();
@@ -277,6 +294,33 @@
         }
 
     }
+
+    function startPoiBridgeWatcherIfReady() {
+        const bridge = document.getElementById('wfmapmods-poi-bridge');
+        if (!bridge) return;
+
+        // Avoid multiple observers on the same element
+        if (bridge._wfPoiBridgeObserver) return;
+
+        const mo = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                if (m.type === 'attributes' && m.attributeName === 'data-payload') {
+                    updateReportWayspotLinkVisibility();
+                }
+            }
+        });
+
+        mo.observe(bridge, {
+            attributes: true,
+            attributeFilter: ['data-payload']
+        });
+
+        bridge._wfPoiBridgeObserver = mo;
+    }
+
+    // ======================================================================
+    // Wayfarer UI injection
+    // ======================================================================
 
     function insertReportWayspotLinkIfReady() {
         const reportLinkBody = document.querySelector('.wfmapmods-poi-function-links');
@@ -303,117 +347,6 @@
                 handleReportWayspotClick();
             });
         }
-    }
-
-    function shouldShowReportLink(info, livePois) {
-        if (!info) return false;
-
-        const { status, source, lat, lng } = info;
-
-        if (status === 'LIVE' && source === 'wfmapmods-base') {
-            // Condition 1: live marker from the base plug-in
-            return true;
-        }
-
-        if (source === 'wfmm-s2') {
-            // Condition 2: Gym/Pokestop custom marker from s2 plug-in
-            // Code may need to be adjusted for manually placed markers
-            return true;
-        }
-
-        if (status === 'LIVE' || status === 'ACCEPTED') {
-            // Condition 3: LIVE/ACCEPTED from any other plug-in, but must match a loaded POI lat,lng
-            const pois = Array.isArray(livePois) ? livePois : [];
-            return pois.some(p => p?.lat === lat && p?.lng === lng);
-        }
-
-        return false;
-    }
-
-    function updateReportWayspotLinkVisibility() {
-        const link = document.getElementById('wfmapmods-settings-report-wayspot');
-        if (!link) return;
-
-        const info = getCurrentWayspotBridgeData();
-        const visible = shouldShowReportLink(info, livePois);
-
-        link.style.display = visible ? '' : 'none';
-    }
-
-
-    function getCurrentWayspotBridgeData() {
-        const bridge = document.getElementById('wfmapmods-poi-bridge');
-        if (!bridge) return null;
-
-        const payloadAttr = bridge.getAttribute('data-payload');
-        if (!payloadAttr) return null;
-
-        let jsonStr = payloadAttr.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
-
-        try {
-            const payload = JSON.parse(jsonStr);
-            if (!payload || typeof payload !== 'object') return null;
-
-            const status = typeof payload.status === 'string'
-            ? payload.status.toUpperCase()
-            : null;
-
-            const source = typeof payload.source === 'string'
-            ? payload.source
-            : null;
-
-            // Normalise lat/lng to numbers
-            let lat = payload.lat;
-            let lng = payload.lng;
-
-            if (typeof lat !== 'number' && lat != null && lat !== '') {
-                const parsedLat = parseFloat(lat);
-                lat = Number.isNaN(parsedLat) ? null : parsedLat;
-            }
-
-            if (typeof lng !== 'number' && lng != null && lng !== '') {
-                const parsedLng = parseFloat(lng);
-                lng = Number.isNaN(parsedLng) ? null : parsedLng;
-            }
-
-            return {
-                status,
-                source,
-                lat: typeof lat === 'number' ? lat : null,
-                lng: typeof lng === 'number' ? lng : null
-            };
-        } catch (e) {
-            console.warn('[Report Wayspot] Failed to parse bridge payload:', e);
-            return null;
-        }
-    }
-
-    function getCurrentWayspotStatus() {
-        const info = getCurrentWayspotBridgeData();
-        return info ? info.status : null;
-    }
-
-    function startPoiBridgeWatcherIfReady() {
-        const bridge = document.getElementById('wfmapmods-poi-bridge');
-        if (!bridge) return;
-
-        // Avoid multiple observers on the same element
-        if (bridge._wfPoiBridgeObserver) return;
-
-        const mo = new MutationObserver((mutations) => {
-            for (const m of mutations) {
-                if (m.type === 'attributes' && m.attributeName === 'data-payload') {
-                    updateReportWayspotLinkVisibility();
-                }
-            }
-        });
-
-        mo.observe(bridge, {
-            attributes: true,
-            attributeFilter: ['data-payload']
-        });
-
-        bridge._wfPoiBridgeObserver = mo;
     }
 
     function insertReportingSettingsLinkIfReady() {
@@ -634,328 +567,143 @@
         document.body.appendChild(backdrop);
     }
 
-    function handleReportWayspotClick() {
-        // Important: don't read address from DOM here; it may be for a different map click.
-        // We only want bridge data at this stage.
-        const wayspotData = collectCurrentWayspotData({ includeDomAddress: false });
+    // ======================================================================
+    // Wayfarer: POI bridge read + report-link gating
+    // ======================================================================
 
-        // Ensure settings loaded
+    function getCurrentWayspotBridgeData() {
+        const bridge = document.getElementById('wfmapmods-poi-bridge');
+        if (!bridge) return null;
+
+        const payloadAttr = bridge.getAttribute('data-payload');
+        if (!payloadAttr) return null;
+
+        let jsonStr = payloadAttr.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+
+        try {
+            const payload = JSON.parse(jsonStr);
+            if (!payload || typeof payload !== 'object') return null;
+
+            const status = typeof payload.status === 'string'
+            ? payload.status.toUpperCase()
+            : null;
+
+            const source = typeof payload.source === 'string'
+            ? payload.source
+            : null;
+
+            // Normalise lat/lng to numbers
+            let lat = payload.lat;
+            let lng = payload.lng;
+
+            if (typeof lat !== 'number' && lat != null && lat !== '') {
+                const parsedLat = parseFloat(lat);
+                lat = Number.isNaN(parsedLat) ? null : parsedLat;
+            }
+
+            if (typeof lng !== 'number' && lng != null && lng !== '') {
+                const parsedLng = parseFloat(lng);
+                lng = Number.isNaN(parsedLng) ? null : parsedLng;
+            }
+
+            return {
+                status,
+                source,
+                lat: typeof lat === 'number' ? lat : null,
+                lng: typeof lng === 'number' ? lng : null
+            };
+        } catch (e) {
+            console.warn('[Report Wayspot] Failed to parse bridge payload:', e);
+            return null;
+        }
+    }
+
+    function shouldShowReportLink(info, livePois) {
+        if (!info) return false;
+
+        const { status, source, lat, lng } = info;
+
+        if (status === 'LIVE' && source === 'wfmapmods-base') {
+            // Condition 1: live marker from the base plug-in
+            return true;
+        }
+
+        if (source === 'wfmm-s2' && status !== 'MISSING' && status !== 'MANUAL IMPORT') {
+            // Condition 2: Gym/Pokestop custom marker from s2 plug-in
+            // Code may need to be adjusted for manually placed markers
+            return true;
+        }
+
+        if (status === 'LIVE' || status === 'ACCEPTED') {
+            // Condition 3: LIVE/ACCEPTED from any other plug-in, but must match a loaded POI lat,lng
+            const pois = Array.isArray(livePois) ? livePois : [];
+            return pois.some(p => p?.lat === lat && p?.lng === lng);
+        }
+
+        return false;
+    }
+
+    function updateReportWayspotLinkVisibility() {
+        const link = document.getElementById('wfmapmods-settings-report-wayspot');
+        if (!link) return;
+
+        const info = getCurrentWayspotBridgeData();
+        const visible = shouldShowReportLink(info, livePois);
+
+        link.style.display = visible ? '' : 'none';
+    }
+
+    // ======================================================================
+    // Wayfarer: report click flow
+    // ======================================================================
+
+    async function handleReportWayspotClick() {
+        const wayspotData = collectCurrentWayspotData();
+
         loadSettings();
-        const reporting = (userSettings.reporting && typeof userSettings.reporting === "object")
-        ? userSettings.reporting
-        : {};
+        const reporting = userSettings.reporting || {};
 
-        // Base payload that we WANT to send to Helpshift
-        const basePayload = Object.assign(
-            {},
-            wayspotData || {},
-            {
-                name: reporting.name || null,
-                email: reporting.email || null
-            }
-        );
-
-        // Do we already have a good address from the POI bridge?
-        const hasAddress =
-              !!(basePayload.address ||
-                 basePayload.city ||
-                 basePayload.state ||
-                 basePayload.postcode ||
-                 basePayload.country);
-
-        // If we have coords but NOT an address, use the original flow:
-        //  1) simulate a map click at the POI
-        //  2) wait for reverse geocode to fill the "Loading..." field
-        //  3) parse that address and then open Helpshift
-        if (!hasAddress && basePayload.lat != null && basePayload.lng != null) {
-            // Kick off reverse geocoding for THIS POI
-            clickMapAtPoi(basePayload.lat, basePayload.lng);
-
-            // Poll the DOM for the updated address and only then open Helpshift
-            waitForAddressAndOpen(basePayload);
-        } else {
-            // Either we already have a proper address from the bridge,
-            // or we don't have coords to reverse-geocode with.
-            // Go straight to opening Helpshift.
-            openHelpshiftWithData(basePayload);
-        }
-    }
-
-    function setupWayfarerMessaging() {
-        window.addEventListener('message', function (event) {
-            // Only accept messages from Helpshift
-            if (event.origin !== ORIGIN_HELPSHIFT) return;
-
-            const data = event.data || {};
-            if (data.executor !== MSG_EXECUTOR) return;
-
-            if (data.type === MSG_GET_DATA) {
-                if (lastReportPayload) {
-                    event.source.postMessage({
-                        executor: MSG_EXECUTOR,
-                        type: MSG_DATA,
-                        payload: lastReportPayload
-                    }, ORIGIN_HELPSHIFT);
-                }
-            }
-        }, false);
-    }
-
-    // ======================================================================
-    // MAP UTILITIES
-    // ======================================================================
-
-    function getMap() {
-        return new Promise(resolve => {
-            let attempts = 40;
-
-            function tryFindMap() {
-                const candidates = document.querySelectorAll('app-submit-wayspot-map nia-map');
-                let foundMap = null;
-
-                candidates.forEach(el => {
-                    if (foundMap || !el.__ngContext__) return;
-
-                    const ctx = el.__ngContext__;
-
-                    for (const entry of ctx) {
-                        if (!entry) continue;
-
-                        try {
-                            if (entry.componentRef && entry.componentRef.map) {
-                                foundMap = entry.componentRef.map;
-                                break;
-                            }
-                        } catch {
-                            /* ignore invalid entries */
-                        }
-                    }
-                });
-
-                if (foundMap) {
-                    resolve(foundMap);
-                    return;
-                }
-
-                if (attempts-- <= 0) {
-                    console.warn("[Report Wayspot] Failed to find submit map after several attempts");
-                    resolve(null);
-                    return;
-                }
-
-                setTimeout(tryFindMap, 250);
-            }
-
-            tryFindMap();
-        });
-    }
-
-    // Click the submit map at the given lat/lng (Google Maps version)
-    async function clickMapAtPoi(lat, lng) {
-        const submitMap = await getMap();
-        if (!submitMap) {
-            console.warn("[Report Wayspot] Map not found, cannot simulate click.");
-            return;
-        }
-
-        const savedMarkerLatLng = new google.maps.LatLng(lat, lng);
-
-        // Simulate a click at the stored submission marker coordinates.
-        // This should trigger the same internal Wayfarer logic as a real user click.
-        google.maps.event.trigger(submitMap, "click", {
-            latLng: savedMarkerLatLng
-        });
-    }
-
-    // If you decide to use this later, it now just reuses the same pattern
-    function openHelpshiftWithData(data) {
-        const payload = Object.assign({ timestamp: Date.now() }, data || {});
-        lastReportPayload = payload;
-        window.open(REPORT_URL, '_blank');
-    }
-
-    function waitForAddressAndOpen(baseWayspot) {
-        const maxAttempts = 40;
-        let attempts = 0;
-
-        const intervalId = setInterval(() => {
-            attempts++;
-
-            const parsed = extractAddressFromDom();
-            // We expect extractAddressFromDom() to give us { raw, address, city, state, postcode, country }
-            if (parsed && parsed.raw && parsed.raw !== "Loading...") {
-                clearInterval(intervalId);
-
-                const merged = Object.assign({}, baseWayspot);
-
-                if (parsed.address) merged.address = parsed.address;
-                if (parsed.city) merged.city = parsed.city;
-                if (parsed.state) merged.state = parsed.state;
-                if (parsed.postcode) merged.postcode = parsed.postcode;
-                if (parsed.country) merged.country = parsed.country;
-
-                openHelpshiftWithData(merged);
-            } else if (attempts >= maxAttempts) {
-                // Timed out waiting → just go with what we already have
-                clearInterval(intervalId);
-                openHelpshiftWithData(baseWayspot);
-            }
-        }, 250);
-    }
-
-    // ======================================================================
-    // ADDRESS PARSING + POI BRIDGE
-    // ======================================================================
-
-    function parseAddressText(text) {
-        const trimmed = (text || "").trim();
-        const result = {
-            raw: trimmed || null,
-            address: null,
-            city: null,
-            state: null,
-            postcode: null,
-            country: null
+        const basePayload = {
+            ...wayspotData,
+            name: reporting.name || null,
+            email: reporting.email || null
         };
 
-        if (!trimmed) return result;
+        const needsAddress =
+              !(basePayload.address &&
+                basePayload.city &&
+                basePayload.state &&
+                basePayload.country &&
+                basePayload.postcode);
 
-        const parts = trimmed.split(",").map(p => p.trim()).filter(Boolean);
-        if (parts.length === 0) return result;
+        if (needsAddress && basePayload.lat != null && basePayload.lng != null) {
+            try {
+                const geoResults = await pageReverseGeocode(basePayload.lat, basePayload.lng);
+                const geo = extractBestAddress(geoResults);
 
-        // Country is usually last part if there is more than one
-        if (parts.length >= 2) {
-            result.country = parts[parts.length - 1];
-        }
+                basePayload.address  ||= geo.street1;
+                basePayload.city     ||= geo.city;
+                basePayload.state    ||= geo.state;
+                basePayload.country  ||= geo.country;
+                basePayload.postcode ||= geo.postcode;
 
-        // Only one part → treat as generic address / plus-code only
-        if (parts.length === 1) {
-            result.address = parts[0];
-            return result;
-        }
+                basePayload.rawAddress ||= geo.formatted;
+            } catch (e) {
+                console.warn("[Report Wayspot] Reverse geocode failed:", e);
 
-        // Try to find a numeric postcode in any part except the last (country)
-        let postcode = null;
-        let postcodePartIndex = null;
-        let postcodeTokenIndex = null;
-
-        for (let i = parts.length - 2; i >= 0 && postcodePartIndex === null; i--) {
-            const tokens = parts[i].split(/\s+/);
-            for (let j = tokens.length - 1; j >= 0; j--) {
-                const tok = tokens[j];
-                if (/^\d{3,}$/.test(tok)) {
-                    postcode = tok;
-                    postcodePartIndex = i;
-                    postcodeTokenIndex = j;
-                    break;
-                }
+                // Hard fallbacks (mandatory fields)
+                basePayload.address  ||= "Unknown";
+                basePayload.city     ||= "Unknown";
+                basePayload.state    ||= "Unknown";
+                basePayload.country  ||= "Unknown";
+                basePayload.postcode ||= "0000";
             }
         }
 
-        if (postcodePartIndex !== null) {
-            const tokens = parts[postcodePartIndex].split(/\s+/);
-            result.postcode = postcode;
-
-            // State is the token immediately before postcode, if any
-            let stateTokenIndex = (postcodeTokenIndex > 0) ? postcodeTokenIndex - 1 : null;
-            if (stateTokenIndex !== null) {
-                result.state = tokens[stateTokenIndex];
-            }
-
-            // City may be before state/postcode OR after postcode
-            const cutoff = (stateTokenIndex !== null) ? stateTokenIndex : postcodeTokenIndex;
-            const cityFragment = (cutoff > 0) ? tokens.slice(0, cutoff).join(" ") : "";
-            const cityTail = (postcodeTokenIndex + 1 < tokens.length)
-            ? tokens.slice(postcodeTokenIndex + 1).join(" ")
-            : "";
-
-            if (cityFragment) {
-                result.city = cityFragment;
-            } else if (cityTail) {
-                result.city = cityTail;
-            }
-
-            // Address is everything before the postcode part, unless we had to steal
-            // the previous part for city
-            if (!cityFragment && !cityTail && postcodePartIndex - 1 >= 0) {
-                // city = previous part, address = everything before that
-                result.city = parts[postcodePartIndex - 1];
-                if (postcodePartIndex - 1 > 0) {
-                    result.address = parts.slice(0, postcodePartIndex - 1).join(", ");
-                }
-            } else {
-                if (postcodePartIndex > 0) {
-                    result.address = parts.slice(0, postcodePartIndex).join(", ");
-                }
-            }
-
-            return result;
-        }
-
-        // No postcode → likely plus-code formats or partial addresses
-        const remainingParts = parts.slice(0, -1); // everything except country
-        if (remainingParts.length === 0) {
-            return result;
-        }
-
-        if (remainingParts.length === 1) {
-            const seg = remainingParts[0];
-            const tokens = seg.split(/\s+/);
-            const plusCode = tokens[0] && tokens[0].includes("+") ? tokens[0] : null;
-            result.address = seg;
-
-            if (plusCode && tokens.length > 1) {
-                const rest = tokens.slice(1);
-                const last = rest[rest.length - 1];
-                if (/^[A-Z]{1,3}$/.test(last)) {
-                    result.state = last;
-                    result.city = rest.slice(0, -1).join(" ") || null;
-                } else {
-                    result.city = rest.join(" ") || null;
-                }
-            }
-
-            return result;
-        }
-
-        const first = remainingParts[0];
-        const tokens = first.split(/\s+/);
-        const plusCode = tokens[0] && tokens[0].includes("+") ? tokens[0] : null;
-
-        if (plusCode) {
-            result.address = first;                   // keep plus code + descriptor
-            result.city = tokens.slice(1).join(" ") || null;
-            result.state = remainingParts[1] || null; // e.g. "Long An"
-        } else {
-            // Generic fallback
-            result.address = first;
-            if (remainingParts.length >= 2) {
-                result.city = remainingParts[0];
-                result.state = remainingParts[1];
-            }
-        }
-
-        return result;
+        openHelpshiftWithData(basePayload);
     }
 
-    function extractAddressFromDom() {
-        try {
-            const addrEl = document.querySelector(".submit-address-text");
-            if (addrEl) {
-                const addressText = (addrEl.textContent || "").trim();
-                if (addressText && addressText !== "Loading...") {
-                    const parsed = parseAddressText(addressText);
-                    return parsed;
-                }
-            }
-        } catch (err) {
-            console.warn("[WF→HS] Error in extractAddressFromDom:", err);
-        }
-    }
-
-    function collectCurrentWayspotData(options = {}) {
-        const includeDomAddress = options.includeDomAddress !== false; // default: true
-
+    function collectCurrentWayspotData() {
         let title = null;
         let lat = null;
         let lng = null;
@@ -1012,19 +760,6 @@
             }
         }
 
-        // If any of the address fields are missing AND we're allowed to,
-        // try to read them from the Wayfarer DOM
-        if (includeDomAddress && (!address || !city || !state || !postcode || !country)) {
-            const parsed = extractAddressFromDom();
-            if (parsed) {
-                if (!address && parsed.address) address = parsed.address;
-                if (!city && parsed.city) city = parsed.city;
-                if (!state && parsed.state) state = parsed.state;
-                if (!postcode && parsed.postcode) postcode = parsed.postcode;
-                if (!country && parsed.country) country = parsed.country;
-            }
-        }
-
         // Normalise lat/lng to numbers if possible
         let latNum = null;
         let lngNum = null;
@@ -1064,13 +799,265 @@
         return result;
     }
 
+    // If you decide to use this later, it now just reuses the same pattern
+    function openHelpshiftWithData(data) {
+        const payload = Object.assign({ timestamp: Date.now() }, data || {});
+        lastReportPayload = payload;
+        window.open(REPORT_URL, '_blank');
+    }
+
     // ======================================================================
-    // HELPSHIFT SIDE (shadow-DOM aware, using postMessage)
+    // Geocoder bridge (in-page injection + reverse geocode)
     // ======================================================================
 
-    function initHelpshift() {
-        setupHelpshiftMessaging();
-        requestWayspotDataFromOpener();
+    function injectPageGeocoderBridge() {
+        if (document.getElementById("wfmm-geocoder-bridge")) return;
+
+        const script = document.createElement("script");
+        script.id = "wfmm-geocoder-bridge";
+        script.textContent = `
+        (function () {
+            const REQ = ${JSON.stringify(WFMM_GEO_REQ)};
+            const RES = ${JSON.stringify(WFMM_GEO_RES)};
+
+            function geocodeAll(lat, lng) {
+                return new Promise((resolve, reject) => {
+                    if (!window.google || !google.maps || !google.maps.Geocoder) {
+                        reject("google.maps.Geocoder not available");
+                        return;
+                    }
+
+                    const geocoder = new google.maps.Geocoder();
+                    geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+                        if (status !== "OK" || !Array.isArray(results) || !results.length) {
+                            reject("Geocoder failed: " + status);
+                            return;
+                        }
+
+                        // Return JSON-safe subset only
+                        resolve(results.slice(0, 6).map(r => ({
+                            formatted_address: r.formatted_address || null,
+                            types: Array.isArray(r.types) ? r.types.slice() : [],
+                            address_components: Array.isArray(r.address_components)
+                                ? r.address_components.map(c => ({
+                                    long_name: c.long_name || null,
+                                    short_name: c.short_name || null,
+                                    types: Array.isArray(c.types) ? c.types.slice() : []
+                                }))
+                                : []
+                        })));
+                    });
+                });
+            }
+
+            window.addEventListener("message", async (ev) => {
+                const d = ev.data;
+                if (!d || d.type !== REQ) return;
+
+                try {
+                    const results = await geocodeAll(d.lat, d.lng);
+                    window.postMessage({
+                        type: RES,
+                        id: d.id,
+                        ok: true,
+                        results
+                    }, "*");
+                } catch (e) {
+                    window.postMessage({
+                        type: RES,
+                        id: d.id,
+                        ok: false,
+                        error: String(e)
+                    }, "*");
+                }
+            });
+        })();
+    `;
+
+        (document.head || document.documentElement).appendChild(script);
+    }
+
+    function pageReverseGeocode(lat, lng, timeoutMs = 10000) {
+        injectPageGeocoderBridge();
+
+        const id = Date.now() + "-" + Math.random().toString(16).slice(2);
+
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                window.removeEventListener("message", onMessage);
+                reject(new Error("Reverse geocode timeout"));
+            }, timeoutMs);
+
+            function onMessage(ev) {
+                const d = ev.data;
+                if (!d || d.type !== WFMM_GEO_RES || d.id !== id) return;
+
+                clearTimeout(timer);
+                window.removeEventListener("message", onMessage);
+
+                if (d.ok) resolve(d.results);
+                else reject(new Error(d.error || "Reverse geocode failed"));
+            }
+
+            window.addEventListener("message", onMessage);
+            window.postMessage({
+                type: WFMM_GEO_REQ,
+                id,
+                lat,
+                lng
+            }, "*");
+        });
+    }
+
+    // ======================================================================
+    // Reverse geocode parsing + scoring
+    // ======================================================================
+
+    function pick(components, type) {
+        const c = components.find(x => x?.types?.includes(type));
+        return c ? c.long_name : null;
+    }
+
+    function pickFirst(components, types) {
+        for (const t of types) {
+            const v = pick(components, t);
+            if (v) return v;
+        }
+        return null;
+    }
+
+    function isBadRouteName(route) {
+        if (!route) return true;
+        const r = String(route).trim().toLowerCase();
+
+        // Too generic to be useful
+        const bad = new Set([
+            "road", "street", "st", "rd", "avenue", "ave", "lane", "ln",
+            "drive", "dr", "highway", "hwy", "boulevard", "blvd", "way", "path"
+        ]);
+
+        if (bad.has(r)) return true;
+
+        // Very short / non-descriptive
+        if (r.length <= 3) return true;
+
+        return false;
+    }
+
+    function scoreResult(r) {
+        const comps = r.address_components || [];
+        const types = r.types || [];
+
+        const route = pick(comps, "route");
+        const hasGoodRoute = route && !isBadRouteName(route);
+
+        let s = 0;
+
+        // Strong signal, but not absolute
+        if (types.includes("street_address")) s += 35;
+        if (types.includes("premise")) s += 15;
+        if (types.includes("establishment")) s += 12;
+        if (types.includes("point_of_interest")) s += 8;
+
+        // Components
+        if (pick(comps, "street_number")) s += 20;
+        if (pick(comps, "postal_code")) s += 25;
+
+        // Route quality matters
+        if (hasGoodRoute) s += 25;
+        else if (route) s -= 30; // penalise generic routes like "Road"
+
+        // City/state/country presence
+        if (pickFirst(comps, ["locality", "postal_town"])) s += 12;
+        if (pickFirst(comps, ["administrative_area_level_1"])) s += 10;
+        if (pick(comps, "country")) s += 8;
+
+        // If result is ONLY a plus_code type, down-rank it unless nothing else works
+        if (types.length === 1 && types[0] === "plus_code") s -= 20;
+
+        return s;
+    }
+
+    function extractBestAddress(results) {
+        const best = (results || [])
+        .slice()
+        .sort((a, b) => scoreResult(b) - scoreResult(a))[0];
+
+        const comps = best?.address_components || [];
+        const formatted = best?.formatted_address || null;
+
+        const streetNumber = pick(comps, "street_number");
+        const route = pick(comps, "route");
+
+        let street1 = null;
+
+        // Only use route if it looks meaningful
+        if (route && !isBadRouteName(route)) {
+            street1 = [streetNumber, route].filter(Boolean).join(" ").trim() || null;
+        }
+
+        // If route was bad or missing, fall back to formatted first segment
+        if (!street1 && formatted) {
+            street1 = formatted.split(",")[0].trim() || null;
+        }
+
+        return {
+            street1: street1 || "Unknown",
+            city: pickFirst(comps, [
+                "locality",
+                "postal_town",
+                "administrative_area_level_3",
+                "administrative_area_level_2",
+                "sublocality",
+                "sublocality_level_1"
+            ]) || "Unknown",
+            state: pickFirst(comps, [
+                "administrative_area_level_1",
+                "administrative_area_level_2"
+            ]) || "Unknown",
+            country: pick(comps, "country") || "Unknown",
+            postcode: pick(comps, "postal_code") || "0000",
+            formatted
+        };
+    }
+
+    // ======================================================================
+    // Cross-window messaging (Wayfarer ↔ Helpshift)
+    // ======================================================================
+
+    function setupWayfarerMessaging() {
+        window.addEventListener('message', function (event) {
+            // Only accept messages from Helpshift
+            if (event.origin !== ORIGIN_HELPSHIFT) return;
+
+            const data = event.data || {};
+            if (data.executor !== MSG_EXECUTOR) return;
+
+            if (data.type === MSG_GET_DATA) {
+                if (lastReportPayload) {
+                    event.source.postMessage({
+                        executor: MSG_EXECUTOR,
+                        type: MSG_DATA,
+                        payload: lastReportPayload
+                    }, ORIGIN_HELPSHIFT);
+                }
+            }
+        }, false);
+    }
+
+    function setupHelpshiftMessaging() {
+        window.addEventListener('message', function (event) {
+            // Only accept messages from Wayfarer
+            if (event.origin !== ORIGIN_WAYFARER) return;
+
+            const data = event.data || {};
+            if (data.executor !== MSG_EXECUTOR) return;
+
+            if (data.type === MSG_DATA && data.payload) {
+                // We got the wayspot payload: wait for form, then fill
+                waitForHelpshiftFormAndFill(data.payload);
+            }
+        }, false);
     }
 
     function requestWayspotDataFromOpener() {
@@ -1089,24 +1076,18 @@
         }
     }
 
-    function setupHelpshiftMessaging() {
-        window.addEventListener('message', function (event) {
-            // Only accept messages from Wayfarer
-            if (event.origin !== ORIGIN_WAYFARER) return;
+    // ======================================================================
+    // Helpshift boot
+    // ======================================================================
 
-            const data = event.data || {};
-            if (data.executor !== MSG_EXECUTOR) return;
-
-            if (data.type === MSG_DATA && data.payload) {
-                // We got the wayspot payload: wait for form, then fill
-                waitForHelpshiftFormAndFill(data.payload);
-            }
-        }, false);
+    function initHelpshift() {
+        setupHelpshiftMessaging();
+        requestWayspotDataFromOpener();
     }
 
-    // -----------------------------------------------------------
-    // Deep query helpers (walks open shadow roots)
-    // -----------------------------------------------------------
+    // ======================================================================
+    // Helpshift DOM helpers (shadow-root aware)
+    // ======================================================================
 
     function querySelectorDeep(selector, root = document) {
         const queue = [root];
@@ -1142,61 +1123,25 @@
         return null;
     }
 
-    // -----------------------------------------------------------
-    // Field-specific finders (using known slot names from your DOM)
-    // -----------------------------------------------------------
+    const HS_SLOTS = {
+        name: "niantic_form_field_20180829003003565-76757f675145667",
+        email: "niantic_form_field_20180829003003570-d2b19abe3155a0b",
+        title: "niantic_form_field_20181211224850128-efdfc202dc778ac",
+        latlon: "niantic_form_field_20181106014139990-b5f071a799fac06",
+        address: "niantic_form_field_20181211224719769-a7344f7cdb793cf",
+        city: "niantic_form_field_20181211224807182-f5413d861a8199c",
+        state: "niantic_form_field_20190624210109230-d8ec77a2ab51d49",
+        postcode: "niantic_form_field_20190624210109237-37afb1f548efd12"
+    };
 
-    // Your Name
-    // slot="niantic_form_field_20180829003003565-76757f675145667"
-    function findNameInput() {
-        return getShadowInputBySlot("niantic_form_field_20180829003003565-76757f675145667");
+    function findField(key) {
+        const slot = HS_SLOTS[key];
+        return slot ? getShadowInputBySlot(slot) : null;
     }
 
-    // Your email address
-    // slot="niantic_form_field_20180829003003570-d2b19abe3155a0b"
-    function findEmailInput() {
-        return getShadowInputBySlot("niantic_form_field_20180829003003570-d2b19abe3155a0b");
-    }
-
-    // Exact name of game location (if known)
-    // slot="niantic_form_field_20181211224850128-efdfc202dc778ac"
-    function findTitleInput() {
-        return getShadowInputBySlot("niantic_form_field_20181211224850128-efdfc202dc778ac");
-    }
-
-    // Latitude/Longitude
-    // slot="niantic_form_field_20181106014139990-b5f071a799fac06"
-    function findLatLonInput() {
-        return getShadowInputBySlot("niantic_form_field_20181106014139990-b5f071a799fac06");
-    }
-
-    // Address Line 1
-    // slot="niantic_form_field_20181211224719769-a7344f7cdb793cf"
-    function findAddressInput() {
-        return getShadowInputBySlot("niantic_form_field_20181211224719769-a7344f7cdb793cf");
-    }
-
-    // City
-    // slot="niantic_form_field_20181211224807182-f5413d861a8199c"
-    function findCityInput() {
-        return getShadowInputBySlot("niantic_form_field_20181211224807182-f5413d861a8199c");
-    }
-
-    // State
-    // slot="niantic_form_field_20190624210109230-d8ec77a2ab51d49"
-    function findStateInput() {
-        return getShadowInputBySlot("niantic_form_field_20190624210109230-d8ec77a2ab51d49");
-    }
-
-    // Postal Code
-    // slot="niantic_form_field_20190624210109237-37afb1f548efd12"
-    function findPostcodeInput() {
-        return getShadowInputBySlot("niantic_form_field_20190624210109237-37afb1f548efd12");
-    }
-
-    // -----------------------------------------------------------
-    // Wait for form and then fill
-    // -----------------------------------------------------------
+    // ======================================================================
+    // Helpshift form fill
+    // ======================================================================
 
     function waitForHelpshiftFormAndFill(wayspotData) {
         const maxAttempts = 60;
@@ -1205,8 +1150,8 @@
         const intervalId = setInterval(() => {
             attempts++;
 
-            const titleInput = findTitleInput();
-            const latLonInput = findLatLonInput();
+            const titleInput = findField('title');
+            const latLonInput = findField('latlon');
 
             const hasAnyField = !!(titleInput || latLonInput);
 
@@ -1220,10 +1165,6 @@
         }, 500);
     }
 
-    // -----------------------------------------------------------
-    // Generic setter
-    // -----------------------------------------------------------
-
     function setFormValue(el, value) {
         if (!el) return;
         if (value == null || value === "") return;
@@ -1233,41 +1174,37 @@
         el.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
-    // -----------------------------------------------------------
-    // Fill the form (title + lat,lng + address fields)
-    // -----------------------------------------------------------
-
     function fillHelpshiftForm(wayspot) {
-        const nameInput = findNameInput();
+        const nameInput = findField('name');
         setFormValue(nameInput, wayspot.name);
 
-        const emailInput = findEmailInput();
+        const emailInput = findField('email');
         setFormValue(emailInput, wayspot.email);
 
-        const titleInput = findTitleInput();
+        const titleInput = findField('title');
         setFormValue(titleInput, wayspot.title);
 
-        const latLonInput = findLatLonInput();
+        const latLonInput = findField('latlon');
         if (latLonInput && wayspot.lat != null && wayspot.lng != null) {
             const latLonStr = `${wayspot.lat}, ${wayspot.lng}`;
             setFormValue(latLonInput, latLonStr);
         }
 
-        const addrInput = findAddressInput();
+        const addrInput = findField('address');
         setFormValue(addrInput, wayspot.address);
 
-        const cityInput = findCityInput();
+        const cityInput = findField('city');
         setFormValue(cityInput, wayspot.city);
 
-        const stateInput = findStateInput();
+        const stateInput = findField('state');
         setFormValue(stateInput, wayspot.state);
 
-        const postcodeInput = findPostcodeInput();
+        const postcodeInput = findField('postcode');
         setFormValue(postcodeInput, wayspot.postcode);
     }
 
     // ======================================================================
-    // ENTRY POINT
+    // Entry point
     // ======================================================================
 
     if (CURRENT_ORIGIN === ORIGIN_WAYFARER) {
