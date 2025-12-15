@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.6
+// @version      2.5.7
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -24,7 +24,7 @@
 // GNU General Public License for more details.
 
 // You can find a copy of the GNU General Public License in the root
-// directory of this script's GitHub repository:
+// directory of this script's GitLab repository:
 // <https://gitlab.com/Tntnnbltn/wayfarer-addons/-/blob/main/LICENSE>
 // If not, see <https://www.gnu.org/licenses/>.
 
@@ -108,6 +108,10 @@
 
     // ----- LocalStorage key for this plugin -----
     const SETTINGS_KEY = "wfmap_settings";
+
+    // Geolocation loading - bug fix
+    let geoKickStartedForSubmit = false;
+    let lastPathname = location.pathname;
 
     // ----- Nomination status text -----
     const STATUS_LABELS = {
@@ -612,19 +616,23 @@
         // React to back/forward and any manual popstate dispatches
         window.addEventListener('popstate', () => {
             applySidenavPaddingForCurrentRoute();
+            handleRouteChangeForGeoKick();
         });
 
         // Wrap history.pushState so any SPA navigation is noticed too
         const origPushState = history.pushState;
         history.pushState = function (...args) {
             const ret = origPushState.apply(this, args);
-            // Apply after the URL/path has actually changed
-            setTimeout(applySidenavPaddingForCurrentRoute, 0);
+            setTimeout(() => {
+                applySidenavPaddingForCurrentRoute();
+                handleRouteChangeForGeoKick();
+            }, 0);
             return ret;
         };
 
         // Initial pass for the current route
         applySidenavPaddingForCurrentRoute();
+        handleRouteChangeForGeoKick();
     }
 
     async function resizeSubmitMapToViewport() {
@@ -652,6 +660,54 @@
 
         // Adjust immediately
         adjustHeight();
+    }
+
+    // ==================================
+    // Geolocation bug fix
+    // ==================================
+
+    // This code does a call for navigator.geolocation.getCurrentPosition when the map page is loading.
+    // Doing this fixes an issue on some browsers where the site will say location is not found.
+    async function kickstartGeolocationIfOnSubmitPage() {
+        if (geoKickStartedForSubmit) return;
+        if (location.pathname !== "/new/submit/new") return;
+
+        try {
+            // Wait until the submit component actually exists
+            await awaitElement(() =>
+                               document.querySelector("app-submit-wayspot")
+                              );
+        } catch {
+            // If it never appears, just bail silently
+            return;
+        }
+
+        geoKickStartedForSubmit = true;
+
+        try {
+            navigator.geolocation.getCurrentPosition(
+                () => {},
+                () => {},
+                { enableHighAccuracy: true }
+            );
+        } catch (e) {
+            // Never throw – this must not break Wayfarer
+            console.debug("WF Map Mods: geolocation kickstart failed", e);
+        }
+    }
+
+    function handleRouteChangeForGeoKick() {
+        const now = location.pathname;
+
+        // If we LEFT the submit page, allow the kick to run again next time we return.
+        if (lastPathname === "/new/submit/new" && now !== "/new/submit/new") {
+            geoKickStartedForSubmit = false;
+        }
+
+        lastPathname = now;
+
+        // If we are ON the submit page, attempt the kick (guarded).
+        kickstartGeolocationIfOnSubmitPage();
     }
 
     // ==================================
@@ -7256,7 +7312,6 @@
 
     // Initial map-mode layout on load
     formatPageForMapMode();
-    // updateSidebarActiveForMapMode();
 
     // Keep behaviour in sync with SPA navigation
     window.addEventListener('popstate', () => {
