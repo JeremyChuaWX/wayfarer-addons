@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - s2 Cells
-// @version      0.2.1
+// @version      0.2.2
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-s2-cells.user.js
@@ -117,6 +117,7 @@
     // =====================================================
 
     let gamePoiMarkers = [];
+
 
     // =====================================================
     // S2 cell shading + overlay reuse
@@ -259,9 +260,21 @@
                 borderWidth: 2,
                 fillColor: "#f195eb",
                 fillOpacity: 1.0
+            },
+            na: {
+                enabled: false,
+                markerSize: 8,
+                borderColor: "#474747",
+                borderOpacity: 1.0,
+                borderWidth: 2,
+                fillColor: "#ffe8b8",
+                fillOpacity: 1.0
             }
         }
     };
+
+    // Edit code to 'true' to show N/A markers on the map
+    userSettings.poiMarkers.na.enabled = false;
 
     function mergeDeep(target, source) {
         for (const key in source) {
@@ -4538,7 +4551,6 @@
 
         for (const poi of gamePois.values()) {
             if (!poi || poi.game !== "pokemon-go") continue;
-            if (poi.poiType !== "stop" && poi.poiType !== "gym" && poi.poiType !== "powerspot") continue;
             if (typeof poi.lat !== "number" || typeof poi.lng !== "number") continue;
 
             const style = getMarkerStyleForPoiType(poi.poiType);
@@ -4577,7 +4589,7 @@
                     position: { lat: poi.lat, lng: poi.lng },
                     icon,
                     title: poi.title || "",
-                    zIndex: 7000 + (poi.poiType === "gym" ? 10 : poi.poiType === "powerspot" ? 5 : 0)
+                    zIndex: 7000 + (poi.poiType === "gym" ? 10 : poi.poiType === "stop" ? 5 : 0)
                 });
 
                 marker.__poiId = id;
