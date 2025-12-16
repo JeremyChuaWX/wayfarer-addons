@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.7
+// @version      2.5.8
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -45,6 +45,9 @@
     };
 
     const NIANTIC_PLACEHOLDER_IMAGE = 'https://lh3.googleusercontent.com/fs2mYM4r9Qq93ejdOP_2lwefRNLVa9tqmJW7XXwqNhMCMXNKwoJoFuMboBpXwnKUf7fJGImbajM9mHAOMlndt5A-Ts9Qh9f_t6YoaQ6u';
+
+    // ----- URL for submit page -----
+    const SUBMIT_ROUTE = "/new/submit/new";
 
     // ----- Radius for retrieving POIs -----
     let radius = 200;
@@ -387,7 +390,7 @@
         mapAnchor.addEventListener('click', function(e) {
             e.preventDefault();
 
-            const url = '/new/submit/new'; // SPA-style path
+            const url = SUBMIT_ROUTE;
 
             // Mark that this navigation came from the Map button
             sessionStorage.setItem('wf_map_nav', '1');
@@ -465,7 +468,7 @@
         if (sessionStorage.getItem('wf_map_nav') !== '1') return;
 
         // Only run on the correct route
-        if (location.pathname !== '/new/submit/new') return;
+        if (location.pathname !== SUBMIT_ROUTE) return;
 
         const interval = setInterval(() => {
             // --- Change the active highlight to the Map button ----
@@ -592,7 +595,7 @@
 
     function applySidenavPaddingForCurrentRoute() {
         const fromMap = sessionStorage.getItem('wf_map_nav') === '1';
-        const onMapPage = location.pathname === '/new/submit/new';
+        const onMapPage = location.pathname === SUBMIT_ROUTE;
 
         if (fromMap && onMapPage) {
             removeSidenavPaddingForMapPage();
@@ -607,6 +610,8 @@
                 wfMapResizeListenerAttached = false;
             }
         }
+
+        applyCssForCurrentRoute();
     }
 
     function initSidenavPaddingRouteWatcher() {
@@ -670,7 +675,7 @@
     // Doing this fixes an issue on some browsers where the site will say location is not found.
     async function kickstartGeolocationIfOnSubmitPage() {
         if (geoKickStartedForSubmit) return;
-        if (location.pathname !== "/new/submit/new") return;
+        if (location.pathname !== SUBMIT_ROUTE) return;
 
         try {
             // Wait until the submit component actually exists
@@ -700,7 +705,7 @@
         const now = location.pathname;
 
         // If we LEFT the submit page, allow the kick to run again next time we return.
-        if (lastPathname === "/new/submit/new" && now !== "/new/submit/new") {
+        if (lastPathname === SUBMIT_ROUTE && now !== SUBMIT_ROUTE) {
             geoKickStartedForSubmit = false;
         }
 
@@ -5154,7 +5159,7 @@
                 poi.generic.fillOpacity = clamp(ctx.genFillOpacityInput.value, 0, 1, 0.5);
 
                 saveSettings();
-                injectCss();
+                applyCssForCurrentRoute();
                 rebuildAllPoiMarkers();
 
                 closeModal();
@@ -6813,24 +6818,6 @@
     }
 
     /* -------------------------
-       Sidebar Icon & Link
-       ------------------------- */
-    .sidebar-wayfarermap svg {
-        width: 24px;
-        height: 24px;
-        filter: none;
-        fill: currentColor;
-    }
-
-    a.sidebar-link.sidebar-wayfarermap {
-        color: #d3d3d3 !important;
-    }
-
-    a.sidebar-link.sidebar-wayfarermap:hover {
-        color: #ffffff !important;
-    }
-
-    /* -------------------------
        Search Placeholder Styles
        ------------------------- */
     #wfmapmods-search-input::placeholder {
@@ -7299,6 +7286,39 @@
         }
     }
 
+    function injectSidebarCss() {
+        // This css is separate because it needs to stay persistent
+        // even when nagivating to other pages on the Wayfarer site.
+        const cssText = `
+    /* -------------------------
+       Sidebar Icon & Link
+       ------------------------- */
+    .sidebar-wayfarermap svg {
+        width: 24px;
+        height: 24px;
+        filter: none;
+        fill: currentColor;
+    }
+      `
+
+        let style = document.createElement("style");
+        style.id = "wfmapmods-sidebar-css";
+        style.textContent = cssText;
+        document.head.appendChild(style);
+    }
+
+    function removeInjectedCss() {
+        const style = document.getElementById("wfmapmods-all-css");
+        if (style) style.remove();
+    }
+
+    function applyCssForCurrentRoute() {
+        if (location.pathname === SUBMIT_ROUTE) {
+            injectCss();
+        } else {
+            removeInjectedCss();
+        }
+    }
 
     // ==================================
     // Bootstrap & event wiring
@@ -7330,7 +7350,8 @@
         }
 
         loadSettings();
-        injectCss();
+        applyCssForCurrentRoute();
+        injectSidebarCss();
         watchForLatLngElement();
         initMapModeWatcher();
         initSidenavPaddingRouteWatcher();
