@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.9
+// @version      2.5.10
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -497,7 +497,58 @@
             clearInterval(wfMapModeInterval);
             wfMapModeInterval = null;
 
-            // ... rest of your existing “hide everything other than the map” logic ...
+            // --- Hide everything other than the map ----
+
+            // Find the direct child that contains the map component once
+            const mapSection = Array.from(container.children).find((child) =>
+                                                                   child.contains(mapComp)
+                                                                  );
+
+            // 1) Hide all siblings of the map section
+            Array.from(container.children).forEach((child) => {
+                if (child === mapSection) return;
+                child.style.display = 'none';
+            });
+
+            // 2) Inside the map section, hide everything except the map host itself
+            if (mapSection) {
+                Array.from(mapSection.children).forEach((child) => {
+                    if (child === mapComp || child.contains(mapComp)) {
+                        // keep the map host (and any wrapper immediately around it)
+                        return;
+                    }
+                    child.style.display = 'none';
+                });
+            }
+
+            // --- Remove padding from mat-sidenav-content (full-screen map) ----
+            removeSidenavPaddingForMapPage();
+
+            // --- Remove Niantic width limiter ----
+            const limiter = container.closest('.max-w-7xl');
+            if (limiter) {
+                limiter.classList.remove('max-w-7xl');
+                limiter.dataset.wfRemovedMaxWidth = "1";
+            }
+
+            // --- Disable vertical scrolling ----
+            let node = root;
+            while (node && node !== document.body) {
+                if (node instanceof HTMLElement) {
+                    const cs = getComputedStyle(node);
+                    if (cs.overflowY === 'auto' || cs.overflowY === 'scroll') {
+                        node.style.overflowY = 'hidden';
+                    }
+                }
+                node = node.parentElement;
+            }
+
+            // --- Resize map to fill viewport ----
+            resizeSubmitMapToViewport();
+            if (!wfMapResizeListenerAttached) {
+                window.addEventListener('resize', resizeSubmitMapToViewport);
+                wfMapResizeListenerAttached = true;
+            }
         }, 150);
     }
 
