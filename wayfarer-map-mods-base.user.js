@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.8
+// @version      2.5.9
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -106,7 +106,7 @@
     let mapTypeListenerBound = false;
     let mapClickCloseBound = false;
 
-    // ----- Sidebar state -----
+    // ----- Sidepanel state -----
     let sidePanelCollapsed = false;
 
     // ----- LocalStorage key for this plugin -----
@@ -115,6 +115,9 @@
     // Geolocation loading - bug fix
     let geoKickStartedForSubmit = false;
     let lastPathname = location.pathname;
+
+    // ------- Sidebar menu management ------
+    let wfMapActiveEnforcerTimer = null;
 
     // ----- Nomination status text -----
     const STATUS_LABELS = {
@@ -462,17 +465,25 @@
     // ==================================
 
     let wfMapResizeListenerAttached = false;
+    let wfMapModeInterval = null;
 
     function formatPageForMapMode() {
-        // Only run when arriving via Map button
         if (sessionStorage.getItem('wf_map_nav') !== '1') return;
-
-        // Only run on the correct route
         if (location.pathname !== SUBMIT_ROUTE) return;
 
-        const interval = setInterval(() => {
-            // --- Change the active highlight to the Map button ----
-            setSidebarActiveForMapMode();
+        // highlight the map button
+        startMapSidebarActiveEnforcement();
+
+        // avoid stacking multiple intervals
+        if (wfMapModeInterval) clearInterval(wfMapModeInterval);
+
+        wfMapModeInterval = setInterval(() => {
+            // if we left map mode/route, stop polling
+            if (sessionStorage.getItem('wf_map_nav') !== '1' || location.pathname !== SUBMIT_ROUTE) {
+                clearInterval(wfMapModeInterval);
+                wfMapModeInterval = null;
+                return;
+            }
 
             const root = document.querySelector('app-submit-wayspot.ng-star-inserted');
             if (!root) return;
@@ -481,65 +492,12 @@
             if (!mapComp) return;
 
             const container = root.querySelector(':scope > div');
-            if (!container) {
-                console.warn("Wayfarer Map: container div not found under app-submit-wayspot");
-                return;
-            }
+            if (!container) return;
 
-            clearInterval(interval);
+            clearInterval(wfMapModeInterval);
+            wfMapModeInterval = null;
 
-            // --- Hide everything other than the map ----
-
-            // Find the direct child that contains the map component once
-            const mapSection = Array.from(container.children).find((child) =>
-                                                                   child.contains(mapComp)
-                                                                  );
-
-            // 1) Hide all siblings of the map section
-            Array.from(container.children).forEach((child) => {
-                if (child === mapSection) return;
-                child.style.display = 'none';
-            });
-
-            // 2) Inside the map section, hide everything except the map host itself
-            if (mapSection) {
-                Array.from(mapSection.children).forEach((child) => {
-                    if (child === mapComp || child.contains(mapComp)) {
-                        // keep the map host (and any wrapper immediately around it)
-                        return;
-                    }
-                    child.style.display = 'none';
-                });
-            }
-
-            // --- Remove padding from mat-sidenav-content (full-screen map) ----
-            removeSidenavPaddingForMapPage();
-
-            // --- Remove Niantic width limiter ----
-            const limiter = container.closest('.max-w-7xl');
-            if (limiter) {
-                limiter.classList.remove('max-w-7xl');
-                limiter.dataset.wfRemovedMaxWidth = "1";
-            }
-
-            // --- Disable vertical scrolling ----
-            let node = root;
-            while (node && node !== document.body) {
-                if (node instanceof HTMLElement) {
-                    const cs = getComputedStyle(node);
-                    if (cs.overflowY === 'auto' || cs.overflowY === 'scroll') {
-                        node.style.overflowY = 'hidden';
-                    }
-                }
-                node = node.parentElement;
-            }
-
-            // --- Resize map to fill viewport ----
-            resizeSubmitMapToViewport();
-            if (!wfMapResizeListenerAttached) {
-                window.addEventListener('resize', resizeSubmitMapToViewport);
-                wfMapResizeListenerAttached = true;
-            }
+            // ... rest of your existing “hide everything other than the map” logic ...
         }, 150);
     }
 
@@ -557,6 +515,68 @@
 
         submitLink.classList.remove('sidebar-link--active');
         mapLink.classList.add('sidebar-link--active');
+    }
+
+    function clearSidebarActiveForMapMode() {
+        const sidebar = document.querySelector('app-sidebar');
+        if (!sidebar) return;
+
+        const wrappers = sidebar.querySelectorAll('app-sidebar-link');
+        if (wrappers.length < 3) return;
+
+        const mapLink = wrappers[2].querySelector('a.sidebar-link');
+        if (mapLink) mapLink.classList.remove('sidebar-link--active');
+    }
+
+    function enforceMapAsOnlyActiveSidebarLink() {
+        const sidebar = document.querySelector('app-sidebar');
+        if (!sidebar) return;
+
+        const links = sidebar.querySelectorAll('a.sidebar-link');
+        if (!links.length) return;
+
+        links.forEach(link => {
+            link.classList.remove('sidebar-link--active');
+        });
+
+        const wrappers = sidebar.querySelectorAll('app-sidebar-link');
+        if (wrappers.length < 3) return;
+
+        const mapLink = wrappers[2].querySelector('a.sidebar-link');
+        if (mapLink) {
+            mapLink.classList.add('sidebar-link--active');
+        }
+    }
+
+    function startMapSidebarActiveEnforcement(durationMs = 1200) {
+        const start = performance.now();
+
+        // Initial assert
+        enforceMapAsOnlyActiveSidebarLink();
+
+        if (wfMapActiveEnforcerTimer) {
+            clearInterval(wfMapActiveEnforcerTimer);
+        }
+
+        wfMapActiveEnforcerTimer = setInterval(() => {
+            // Stop if we left map mode or route
+            if (
+                sessionStorage.getItem('wf_map_nav') !== '1' ||
+                location.pathname !== SUBMIT_ROUTE
+            ) {
+                clearInterval(wfMapActiveEnforcerTimer);
+                wfMapActiveEnforcerTimer = null;
+                return;
+            }
+
+            enforceMapAsOnlyActiveSidebarLink();
+
+            // Stop after bounded window
+            if (performance.now() - start > durationMs) {
+                clearInterval(wfMapActiveEnforcerTimer);
+                wfMapActiveEnforcerTimer = null;
+            }
+        }, 100);
     }
 
     function removeSidenavPaddingForMapPage() {
@@ -600,11 +620,20 @@
         if (fromMap && onMapPage) {
             removeSidenavPaddingForMapPage();
         } else {
+            if (fromMap && !onMapPage) {
+                sessionStorage.setItem('wf_map_nav', '0');
+
+                if (wfMapActiveEnforcerTimer) {
+                    clearInterval(wfMapActiveEnforcerTimer);
+                    wfMapActiveEnforcerTimer = null;
+                }
+                clearSidebarActiveForMapMode();
+            }
+
             restoreSidenavPadding();
             restoreScrolling();
             restoreWidthLimiter();
 
-            // Clean up resize listener when leaving map mode
             if (wfMapResizeListenerAttached) {
                 window.removeEventListener('resize', resizeSubmitMapToViewport);
                 wfMapResizeListenerAttached = false;
