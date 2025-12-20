@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Contributions Overlay
-// @version      1.2.6
+// @version      1.2.7
 // @description  Loads nominations from the Contributions list and shows them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-contributions-overlay.user.js
@@ -564,14 +564,12 @@
      * and push the result into local state / markers.
      */
     function fetchLatestNominations() {
-        fetch("/api/v1/vault/manage", {
+        return fetch("/api/v1/vault/manage", {
             method: "GET",
             credentials: "include"
         })
             .then(res => {
-            if (!res.ok) {
-                throw new Error(`HTTP ${res.status}`);
-            }
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res.json();
         })
             .then(json => {
@@ -1027,7 +1025,13 @@
         }
 
         pendingSubmissionTimers[id] = setTimeout(() => {
-            fetchLatestNominations();
+            Promise.resolve(fetchLatestNominations())
+                .finally(() => {
+                // If it’s still pending (i.e. reconcile didn’t remove it), schedule the next check
+                if (pendingSubmissions[id]) {
+                    schedulePendingSubmissionRecheck(id);
+                }
+            });
         }, delay);
     }
 
@@ -1044,11 +1048,6 @@
         const supportingStatement = (startPayload.supportingStatement || "").trim();
         const lat = startPayload.lat;
         const lng = startPayload.lng;
-
-        if (!title || !description || !supportingStatement) {
-            // If the caller somehow skipped validation, don't record a pending entry
-            return;
-        }
 
         if (typeof lat !== "number" || typeof lng !== "number" ||
             !Number.isFinite(lat) || !Number.isFinite(lng)) {
@@ -3098,8 +3097,6 @@
         const supportingUrls = Array.isArray(poi.supportingImageUrls)
         ? poi.supportingImageUrls.map(u => normalizeImageUrl(u || "")).filter(Boolean)
         : [];
-
-        console.log(mainUrl);
 
         const payload = {
             source: POI_BRIDGE_SOURCE,
