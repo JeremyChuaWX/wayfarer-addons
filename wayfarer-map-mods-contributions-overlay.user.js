@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Contributions Overlay
-// @version      1.2.5
+// @version      1.2.6
 // @description  Loads nominations from the Contributions list and shows them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-contributions-overlay.user.js
@@ -715,8 +715,14 @@
                 return;
             }
 
-            if (!json || json.captcha || json.result !== "DONE") {
+            if (!json || json.result !== "DONE") {
                 console.warn("[ContribOverlay] Edit submission not accepted by server", json);
+
+                const message =
+                      json?.message ||
+                      "An unknown error occurred while submitting the edit.";
+
+                alert("Edit failed:\n\n" + message);
                 return;
             }
 
