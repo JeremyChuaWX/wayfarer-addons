@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.16
+// @version      2.5.17
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -2232,7 +2232,7 @@
         });
     }
 
-    async function submitWayspotViaApi(submitData) {
+    async function submitWayspotViaApi(submitData, options = {}) {
         const { poi, images } = submitData || {};
         if (!poi) return;
 
@@ -2486,6 +2486,16 @@
                 window.wfmapmodsIsUploading = false;
                 alert("Submit/complete did not succeed: " + (completeResp.code || completeResp.result));
                 return;
+            }
+
+            // ONLY delete draft after complete succeeded
+            if (options.draftIdToDelete) {
+                try {
+                    await deleteDraftSubmissionFromIDB(options.draftIdToDelete);
+                } catch (e) {
+                    console.warn("[WF Submit] Draft deletion failed:", e);
+                    // don't fail the submission UI just because cleanup failed
+                }
             }
 
             wfmapmodsUpdateSubmitProgress("Nomination submitted!", 100);
@@ -3506,12 +3516,7 @@
                     supporting: ctx.imageState.supporting
                 };
 
-                // If this was a draft, remove it once we submit
-                if (merged.draftId) {
-                    deleteDraftSubmissionFromIDB(merged.draftId);
-                }
-
-                submitWayspotViaApi(merged);
+                submitWayspotViaApi(merged, { draftIdToDelete: merged.draftId });
                 closeModal();
             }
         });
