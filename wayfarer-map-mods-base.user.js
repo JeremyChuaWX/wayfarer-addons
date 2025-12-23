@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.14
+// @version      2.5.15
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -2290,7 +2290,8 @@
         return { ok: false, attempts: maxAttempts, error: lastErr };
     }
 
-    async function submitWayspotViaApi(submitData) {
+    async function submitWayspotViaApi(submitData, options = {}) {
+        const { onCompleted } = options || {};
         const { poi, images } = submitData || {};
         if (!poi) return;
 
@@ -2634,6 +2635,16 @@
                 window.wfmapmodsIsUploading = false;
                 alert("Submit/complete did not succeed: " + (completeResp.code || completeResp.result));
                 return;
+            }
+
+            // Draft cleanup hook — ONLY after complete succeeded
+            try {
+                if (typeof onCompleted === "function") {
+                    await onCompleted({ submissionId, completeResp });
+                }
+            } catch (e) {
+                console.warn("[WF Submit] onCompleted callback failed:", e);
+                // Don't fail the submission UI just because cleanup failed
             }
 
             if (uploadFailures.length) {
@@ -3671,12 +3682,17 @@
                     supporting: ctx.imageState.supporting
                 };
 
-                // If this was a draft, remove it once we submit
-                if (merged.draftId) {
-                    deleteDraftSubmissionFromIDB(merged.draftId);
-                }
+                const draftIdToDelete = merged.draftId || null;
 
-                submitWayspotViaApi(merged);
+                // Kick off submit; delete draft only after successful complete
+                submitWayspotViaApi(merged, {
+                    onCompleted: async () => {
+                        if (draftIdToDelete) {
+                            await deleteDraftSubmissionFromIDB(draftIdToDelete);
+                        }
+                    }
+                });
+
                 closeModal();
             }
         });
