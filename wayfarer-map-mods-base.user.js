@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.12
+// @version      2.5.13
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -2230,46 +2230,32 @@
     }
 
     // Single attempt PUT (keeps your "no Content-Type header" rule)
-    async function putImageToSignedUrlForSubmit(url, blob, options = {}) {
-        const {
-            label = "image",
-            maxAttempts = 3,
-            backoffMs = [500, 1500],
-            onStatus = null   // <— NEW
-        } = options;
+    async function putImageToSignedUrlForSubmitOnce(url, blob) {
+        if (!url || !blob) return;
 
-        let lastErr = null;
+        const buf = await blob.arrayBuffer();
 
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-            try {
-                if (onStatus) onStatus({ phase: "attempt", attempt, maxAttempts, label });
+        const controller = new AbortController();
+        const timeoutMs = 120000; // 2 minutes
+        const t = setTimeout(() => controller.abort(), timeoutMs);
 
-                if (attempt > 1) {
-                    console.log(`[WF Submit] Retrying upload (${attempt}/${maxAttempts}) for ${label}…`);
-                }
+        try {
+            const res = await fetch(url, {
+                method: "PUT",
+                body: buf,
+                signal: controller.signal
+                // IMPORTANT: no Content-Type header
+            });
 
-                await putImageToSignedUrlForSubmitOnce(url, blob);
-
-                if (onStatus) onStatus({ phase: "success", attempt, maxAttempts, label });
-                return { ok: true, attempts: attempt };
-
-            } catch (err) {
-                lastErr = err;
-
-                const retryable = isRetryableUploadError(err);
-                console.warn(`[WF Submit] Upload attempt ${attempt}/${maxAttempts} failed for ${label}. Retryable=${retryable}`, err);
-
-                if (!retryable || attempt >= maxAttempts) break;
-
-                const delay = backoffMs[Math.min(attempt - 1, backoffMs.length - 1)] || 1500;
-                if (onStatus) onStatus({ phase: "retry_wait", attempt, maxAttempts, label, delayMs: delay });
-
-                await sleep(delay);
+            if (!res.ok) {
+                let text = "";
+                try { text = (await res.text()) || ""; } catch {}
+                console.warn("[WF Submit] PUT HTTP error:", res.status, res.statusText, text.slice(0, 200));
+                throw new Error("PUT to signed URL failed: HTTP " + res.status);
             }
+        } finally {
+            clearTimeout(t);
         }
-
-        if (onStatus) onStatus({ phase: "fail", attempt: maxAttempts, maxAttempts, label, error: lastErr });
-        return { ok: false, attempts: maxAttempts, error: lastErr };
     }
 
     // Retries around the single attempt
