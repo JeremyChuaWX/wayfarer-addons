@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.13
+// @version      2.5.14
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -2229,52 +2229,48 @@
         return false;
     }
 
-    // Single attempt PUT (keeps your "no Content-Type header" rule)
-    async function putImageToSignedUrlForSubmitOnce(url, blob) {
-        if (!url || !blob) return;
+    // Single attempt PUT
+    function putImageToSignedUrlForSubmit(url, blob) {
+        if (!url || !blob) return Promise.resolve();
 
-        const buf = await blob.arrayBuffer();
-
-        const controller = new AbortController();
-        const timeoutMs = 120000; // 2 minutes
-        const t = setTimeout(() => controller.abort(), timeoutMs);
-
-        try {
-            const res = await fetch(url, {
+        return blob.arrayBuffer().then((buf) => {
+            return fetch(url, {
                 method: "PUT",
-                body: buf,
-                signal: controller.signal
+                body: buf
                 // IMPORTANT: no Content-Type header
+            }).then((res) => {
+                if (!res.ok) {
+                    throw new Error("PUT to signed URL failed: " + res.status);
+                }
             });
-
-            if (!res.ok) {
-                let text = "";
-                try { text = (await res.text()) || ""; } catch {}
-                console.warn("[WF Submit] PUT HTTP error:", res.status, res.statusText, text.slice(0, 200));
-                throw new Error("PUT to signed URL failed: HTTP " + res.status);
-            }
-        } finally {
-            clearTimeout(t);
-        }
+        });
     }
 
     // Retries around the single attempt
-    async function putImageToSignedUrlForSubmit(url, blob, options = {}) {
+    async function putImageToSignedUrlForSubmitWithRetry(url, blob, options = {}) {
         const {
             label = "image",
-            maxAttempts = 3,     // 1 initial + 2 retries
-            backoffMs = [500, 1500] // delays before retry #2 and #3
+            maxAttempts = 3,
+            backoffMs = [500, 1500],
+            onStatus = null
         } = options;
 
         let lastErr = null;
 
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
+                if (onStatus) onStatus({ phase: "attempt", attempt, maxAttempts, label });
+
                 if (attempt > 1) {
                     console.log(`[WF Submit] Retrying upload (${attempt}/${maxAttempts}) for ${label}…`);
                 }
-                await putImageToSignedUrlForSubmitOnce(url, blob);
+
+                // Call your OLD known-good function
+                await putImageToSignedUrlForSubmit(url, blob);
+
+                if (onStatus) onStatus({ phase: "success", attempt, maxAttempts, label });
                 return { ok: true, attempts: attempt };
+
             } catch (err) {
                 lastErr = err;
 
@@ -2284,10 +2280,13 @@
                 if (!retryable || attempt >= maxAttempts) break;
 
                 const delay = backoffMs[Math.min(attempt - 1, backoffMs.length - 1)] || 1500;
+                if (onStatus) onStatus({ phase: "retry_wait", attempt, maxAttempts, label, delayMs: delay });
+
                 await sleep(delay);
             }
         }
 
+        if (onStatus) onStatus({ phase: "fail", attempt: maxAttempts, maxAttempts, label, error: lastErr });
         return { ok: false, attempts: maxAttempts, error: lastErr };
     }
 
@@ -2471,7 +2470,7 @@
             );
             console.log("[WF Submit] PUT main image to:", mainUploadUrl);
 
-            const mainUp = await putImageToSignedUrlForSubmit(mainUploadUrl, mainBlob, {
+            const mainUp = await putImageToSignedUrlForSubmitWithRetry(mainUploadUrl, mainBlob, {
                 label: "main photo",
                 maxAttempts: 3,
                 onStatus: ({ phase, attempt, maxAttempts, delayMs }) => {
@@ -2549,7 +2548,7 @@
 
                 console.log(`[WF Submit] PUT ${label} to:`, url);
 
-                const up = await putImageToSignedUrlForSubmit(url, blob, {
+                const up = await putImageToSignedUrlForSubmitWithRetry(url, blob, {
                     label,
                     maxAttempts: 3,
                     onStatus: ({ phase, attempt, maxAttempts, delayMs }) => {
