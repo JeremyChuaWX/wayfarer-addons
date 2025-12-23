@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.10
+// @version      2.5.11
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -2216,20 +2216,80 @@
         });
     }
 
-    function putImageToSignedUrlForSubmit(url, blob) {
-        if (!url || !blob) return Promise.resolve();
+    function sleep(ms) {
+        return new Promise(r => setTimeout(r, ms));
+    }
 
-        return blob.arrayBuffer().then((buf) => {
-            return fetch(url, {
+    // Heuristic: only retry errors that look transient/networky
+    function isRetryableUploadError(err) {
+        const msg = (err && err.message) ? err.message : String(err || "");
+        // fetch network failures are commonly TypeError with message like "Load failed" / "Failed to fetch"
+        if (err instanceof TypeError) return true;
+        if (/load failed|failed to fetch|network|connection|timeout|timed out|socket/i.test(msg)) return true;
+        return false;
+    }
+
+    // Single attempt PUT (keeps your "no Content-Type header" rule)
+    async function putImageToSignedUrlForSubmitOnce(url, blob) {
+        if (!url || !blob) return;
+
+        const buf = await blob.arrayBuffer();
+
+        const controller = new AbortController();
+        const timeoutMs = 120000; // 2 minutes
+        const t = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+            const res = await fetch(url, {
                 method: "PUT",
-                body: buf
+                body: buf,
+                signal: controller.signal
                 // IMPORTANT: no Content-Type header
-            }).then((res) => {
-                if (!res.ok) {
-                    throw new Error("PUT to signed URL failed: " + res.status);
-                }
             });
-        });
+
+            if (!res.ok) {
+                // Try to log a tiny bit of response text (often empty for signed PUT)
+                let text = "";
+                try { text = (await res.text()) || ""; } catch {}
+                console.warn("[WF Submit] PUT HTTP error:", res.status, res.statusText, text.slice(0, 200));
+                throw new Error("PUT to signed URL failed: HTTP " + res.status);
+            }
+        } finally {
+            clearTimeout(t);
+        }
+    }
+
+    // Retries around the single attempt
+    async function putImageToSignedUrlForSubmit(url, blob, options = {}) {
+        const {
+            label = "image",
+            maxAttempts = 3,     // 1 initial + 2 retries
+            backoffMs = [500, 1500] // delays before retry #2 and #3
+        } = options;
+
+        let lastErr = null;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                if (attempt > 1) {
+                    console.log(`[WF Submit] Retrying upload (${attempt}/${maxAttempts}) for ${label}…`);
+                }
+                await putImageToSignedUrlForSubmitOnce(url, blob);
+                return { ok: true, attempts: attempt };
+            } catch (err) {
+                lastErr = err;
+
+                const retryable = isRetryableUploadError(err);
+                console.warn(`[WF Submit] Upload attempt ${attempt}/${maxAttempts} failed for ${label}. Retryable=${retryable}`, err);
+
+                if (!retryable || attempt >= maxAttempts) break;
+
+                const delay = backoffMs[Math.min(attempt - 1, backoffMs.length - 1)] || 1500;
+                await sleep(delay);
+            }
+        }
+
+        return { ok: false, attempts: maxAttempts, error: lastErr };
     }
 
     async function submitWayspotViaApi(submitData) {
@@ -2337,8 +2397,8 @@
             }
 
             const result = startResp.result || {};
-            const imageUrlMap = result.imageUrlMap || result.uploadUrlMap || {};
-            const submissionId = result.submissionId || result.nominationId;
+            const imageUrlMap = result.imageUrlMap || {};
+            const submissionId = result.submissionId;
 
             console.log("[WF Submit] submissionId:", submissionId);
             console.log("[WF Submit] imageUrlMap:", imageUrlMap);
@@ -2364,8 +2424,6 @@
             // Build supporting URLs
             // =====================================================
 
-            let supportingUploadUrls = [];
-
             // Collect supporting, supporting1, supporting2, ...
             const supportingKeys = Object.keys(imageUrlMap)
             .filter(k => k === "supporting" || /^supporting\d+$/.test(k))
@@ -2377,13 +2435,16 @@
                 return na - nb;
             });
 
-            supportingUploadUrls = supportingKeys
-                .map(k => imageUrlMap[k])
-                .filter(Boolean);
+            const supportingUploadUrls = supportingKeys
+            .map(k => imageUrlMap[k])
+            .filter(Boolean);
 
             const totalSupporting = supportingBlobs.length;
             const totalImages = 1 + totalSupporting; // main + supporting
             let uploadedImages = 0;
+
+            // Track any upload failures (we might still be able to complete)
+            const uploadFailures = []; // { label, urlKey, attempts, error }
 
             // Hard fail if Wayfarer didn't give us a URL for every supporting image.
             if (totalSupporting > 0 && supportingUploadUrls.length < totalSupporting) {
@@ -2403,27 +2464,44 @@
                 return;
             }
 
-            // === Upload main image (first of totalImages) ===
-            uploadedImages = 0;
-            uploadedImages++;
-
-            const mainPct = imageUploadPercent(uploadedImages, totalImages);
+            // =========================
+            // Upload main image
+            // =========================
             wfmapmodsUpdateSubmitProgress(
-                `Uploading main photo…`,
-                mainPct
+                "Uploading main photo…",
+                imageUploadPercent(uploadedImages, totalImages)
             );
             console.log("[WF Submit] PUT main image to:", mainUploadUrl);
-            await putImageToSignedUrlForSubmit(mainUploadUrl, mainBlob);
 
-            // === Upload supporting ===
+            const mainUp = await putImageToSignedUrlForSubmit(mainUploadUrl, mainBlob, {
+                label: "main photo",
+                maxAttempts: 3
+            });
+
+            if (mainUp.ok) {
+                uploadedImages++;
+                wfmapmodsUpdateSubmitProgress(
+                    "Main photo uploaded.",
+                    imageUploadPercent(uploadedImages, totalImages)
+                );
+            } else {
+                uploadFailures.push({
+                    label: "main photo",
+                    urlKey: "main",
+                    attempts: mainUp.attempts,
+                    error: mainUp.error
+                });
+            }
+
+            // =========================
+            // Upload supporting images
+            // =========================
             if (totalSupporting > 0) {
                 wfmapmodsUpdateSubmitProgress(
                     `Uploading supporting photos (0 of ${totalSupporting})…`,
                     imageUploadPercent(uploadedImages, totalImages)
                 );
             }
-
-            let uploadedSupportingCount = 0;
 
             for (let i = 0; i < totalSupporting; i++) {
                 const blob = supportingBlobs[i];
@@ -2448,31 +2526,63 @@
                     return;
                 }
 
-                uploadedSupportingCount++;
-                uploadedImages++;
+                const label = `supporting photo (${i + 1} of ${totalSupporting})`;
+                const urlKey = (i === 0) ? "supporting" : `supporting${i}`;
 
-                const pct = imageUploadPercent(uploadedImages, totalImages);
-                const label = `Uploading supporting photos (${uploadedSupportingCount} of ${totalSupporting})…`;
+                wfmapmodsUpdateSubmitProgress(
+                    `Uploading supporting photos (${Math.min(i, totalSupporting)} of ${totalSupporting})…`,
+                    imageUploadPercent(uploadedImages, totalImages)
+                );
 
-                wfmapmodsUpdateSubmitProgress(label, pct);
+                console.log(`[WF Submit] PUT ${label} to:`, url);
 
-                console.log(`[WF Submit] PUT supporting image #${uploadedSupportingCount} to:`, url);
-                await putImageToSignedUrlForSubmit(url, blob);
+                const up = await putImageToSignedUrlForSubmit(url, blob, {
+                    label,
+                    maxAttempts: 3
+                });
+
+                if (up.ok) {
+                    uploadedImages++;
+                    wfmapmodsUpdateSubmitProgress(
+                        `Uploading supporting photos (${i + 1} of ${totalSupporting})…`,
+                        imageUploadPercent(uploadedImages, totalImages)
+                    );
+                } else {
+                    uploadFailures.push({
+                        label,
+                        urlKey,
+                        attempts: up.attempts,
+                        error: up.error
+                    });
+                    // Continue attempting remaining uploads; we may still be able to complete
+                }
             }
 
-            // === Complete submission ===
+            // If upload failures occurred, offer to try completing anyway
+            if (uploadFailures.length) {
+                console.warn("[WF Submit] Upload failures detected:", uploadFailures);
+
+                const lines = uploadFailures
+                .map(f => `• ${f.label} (attempted ${f.attempts}x)`)
+                .join("\n");
+
+                const proceed = window.confirm(
+                    "Issues were detected during image upload:\n\n" +
+                    lines + "\n\n" +
+                    "Sometimes the photo still uploads despite an error.\n" +
+                    "Your submission quota has already been consumed.\n" +
+                    "Do you want to try finalising the nomination anyway?\n\n" +
+                    "OK = try finalise now\n" +
+                    "Cancel = stop"
+                );
+            }
+
+            // =========================
+            // Complete submission
+            // =========================
             wfmapmodsUpdateSubmitProgress("Finalising nomination…", 95);
 
-            const completePayload = submissionId;
-            const completeUrl =
-                  "/api/v1/vault/submit/complete?submissionId=" + encodeURIComponent(submissionId);
-
-            console.log("[WF Submit] /submit/complete URL:", completeUrl);
-            console.log("[WF Submit] /submit/complete payload:", completePayload);
-
-            const completeResp = await postJsonWithCsrf(completeUrl, completePayload);
-
-            console.log("[WF Submit] /submit/complete response raw:", completeResp);
+            const completeResp = await completeSubmissionViaApi(submissionId);
 
             if (!completeResp || completeResp.captcha) {
                 wfmapmodsHideSubmitProgress();
@@ -2488,11 +2598,15 @@
                 return;
             }
 
-            wfmapmodsUpdateSubmitProgress("Nomination submitted!", 100);
-            console.log("[WF Submit] DONE for submissionId:", submissionId);
+            if (uploadFailures.length) {
+                wfmapmodsUpdateSubmitProgress("Nomination submitted (uploads had warnings).", 100);
+                console.log("[WF Submit] DONE (with upload warnings) for submissionId:", submissionId, uploadFailures);
+            } else {
+                wfmapmodsUpdateSubmitProgress("Nomination submitted!", 100);
+                console.log("[WF Submit] DONE for submissionId:", submissionId);
+            }
 
             window.wfmapmodsIsUploading = false;
-
             wfmapmodsHideSubmitProgress(1500);
 
         } catch (err) {
@@ -2501,6 +2615,19 @@
             window.wfmapmodsIsUploading = false;
             alert("Error while submitting nomination — see console for details.");
         }
+    }
+
+    async function completeSubmissionViaApi(submissionId) {
+        const completeUrl =
+              "/api/v1/vault/submit/complete?submissionId=" + encodeURIComponent(submissionId);
+
+        console.log("[WF Submit] /submit/complete URL:", completeUrl);
+        console.log("[WF Submit] /submit/complete payload:", submissionId);
+
+        const completeResp = await postJsonWithCsrf(completeUrl, submissionId);
+
+        console.log("[WF Submit] /submit/complete response raw:", completeResp);
+        return completeResp;
     }
 
     window.addEventListener("beforeunload", (e) => {
