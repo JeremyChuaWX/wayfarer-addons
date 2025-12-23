@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.11
+// @version      2.5.12
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -2230,33 +2230,46 @@
     }
 
     // Single attempt PUT (keeps your "no Content-Type header" rule)
-    async function putImageToSignedUrlForSubmitOnce(url, blob) {
-        if (!url || !blob) return;
+    async function putImageToSignedUrlForSubmit(url, blob, options = {}) {
+        const {
+            label = "image",
+            maxAttempts = 3,
+            backoffMs = [500, 1500],
+            onStatus = null   // <— NEW
+        } = options;
 
-        const buf = await blob.arrayBuffer();
+        let lastErr = null;
 
-        const controller = new AbortController();
-        const timeoutMs = 120000; // 2 minutes
-        const t = setTimeout(() => controller.abort(), timeoutMs);
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                if (onStatus) onStatus({ phase: "attempt", attempt, maxAttempts, label });
 
-        try {
-            const res = await fetch(url, {
-                method: "PUT",
-                body: buf,
-                signal: controller.signal
-                // IMPORTANT: no Content-Type header
-            });
+                if (attempt > 1) {
+                    console.log(`[WF Submit] Retrying upload (${attempt}/${maxAttempts}) for ${label}…`);
+                }
 
-            if (!res.ok) {
-                // Try to log a tiny bit of response text (often empty for signed PUT)
-                let text = "";
-                try { text = (await res.text()) || ""; } catch {}
-                console.warn("[WF Submit] PUT HTTP error:", res.status, res.statusText, text.slice(0, 200));
-                throw new Error("PUT to signed URL failed: HTTP " + res.status);
+                await putImageToSignedUrlForSubmitOnce(url, blob);
+
+                if (onStatus) onStatus({ phase: "success", attempt, maxAttempts, label });
+                return { ok: true, attempts: attempt };
+
+            } catch (err) {
+                lastErr = err;
+
+                const retryable = isRetryableUploadError(err);
+                console.warn(`[WF Submit] Upload attempt ${attempt}/${maxAttempts} failed for ${label}. Retryable=${retryable}`, err);
+
+                if (!retryable || attempt >= maxAttempts) break;
+
+                const delay = backoffMs[Math.min(attempt - 1, backoffMs.length - 1)] || 1500;
+                if (onStatus) onStatus({ phase: "retry_wait", attempt, maxAttempts, label, delayMs: delay });
+
+                await sleep(delay);
             }
-        } finally {
-            clearTimeout(t);
         }
+
+        if (onStatus) onStatus({ phase: "fail", attempt: maxAttempts, maxAttempts, label, error: lastErr });
+        return { ok: false, attempts: maxAttempts, error: lastErr };
     }
 
     // Retries around the single attempt
@@ -2463,7 +2476,6 @@
                 );
                 return;
             }
-
             // =========================
             // Upload main image
             // =========================
@@ -2475,7 +2487,21 @@
 
             const mainUp = await putImageToSignedUrlForSubmit(mainUploadUrl, mainBlob, {
                 label: "main photo",
-                maxAttempts: 3
+                maxAttempts: 3,
+                onStatus: ({ phase, attempt, maxAttempts, delayMs }) => {
+                    if (phase === "attempt") {
+                        wfmapmodsUpdateSubmitProgress(
+                            `Uploading main photo… (attempt ${attempt}/${maxAttempts})`,
+                            imageUploadPercent(uploadedImages, totalImages)
+                        );
+                    } else if (phase === "retry_wait") {
+                        const secs = Math.max(1, Math.ceil((delayMs || 0) / 1000));
+                        wfmapmodsUpdateSubmitProgress(
+                            `Upload hiccup. Retrying main photo in ${secs}s… (attempt ${attempt + 1}/${maxAttempts})`,
+                            imageUploadPercent(uploadedImages, totalImages)
+                        );
+                    }
+                }
             });
 
             if (mainUp.ok) {
@@ -2493,12 +2519,13 @@
                 });
             }
 
+
             // =========================
             // Upload supporting images
             // =========================
             if (totalSupporting > 0) {
                 wfmapmodsUpdateSubmitProgress(
-                    `Uploading supporting photos (0 of ${totalSupporting})…`,
+                    `Uploading supporting photos (1 of ${totalSupporting})…`,
                     imageUploadPercent(uploadedImages, totalImages)
                 );
             }
@@ -2520,8 +2547,7 @@
                     alert(
                         "Error uploading supporting photos:\n\n" +
                         "One of the supporting images could not be prepared for upload.\n" +
-                        "The nomination has NOT been submitted.\n\n" +
-                        "Please screenshot console log and share on WDD #tools."
+                        "The nomination has NOT been submitted."
                     );
                     return;
                 }
@@ -2529,8 +2555,9 @@
                 const label = `supporting photo (${i + 1} of ${totalSupporting})`;
                 const urlKey = (i === 0) ? "supporting" : `supporting${i}`;
 
+                // Show initial state for this image
                 wfmapmodsUpdateSubmitProgress(
-                    `Uploading supporting photos (${Math.min(i, totalSupporting)} of ${totalSupporting})…`,
+                    `Uploading supporting photos (${i + 1} of ${totalSupporting})…`,
                     imageUploadPercent(uploadedImages, totalImages)
                 );
 
@@ -2538,13 +2565,28 @@
 
                 const up = await putImageToSignedUrlForSubmit(url, blob, {
                     label,
-                    maxAttempts: 3
+                    maxAttempts: 3,
+                    onStatus: ({ phase, attempt, maxAttempts, delayMs }) => {
+                        // Keep % steady during retries; change text so it doesn't look hung
+                        if (phase === "attempt") {
+                            wfmapmodsUpdateSubmitProgress(
+                                `Uploading supporting photos (${i + 1} of ${totalSupporting})… (attempt ${attempt}/${maxAttempts})`,
+                                imageUploadPercent(uploadedImages, totalImages)
+                            );
+                        } else if (phase === "retry_wait") {
+                            const secs = Math.max(1, Math.ceil((delayMs || 0) / 1000));
+                            wfmapmodsUpdateSubmitProgress(
+                                `Upload hiccup. Retrying supporting photo (${i + 1} of ${totalSupporting}) in ${secs}s… (attempt ${attempt + 1}/${maxAttempts})`,
+                                imageUploadPercent(uploadedImages, totalImages)
+                            );
+                        }
+                    }
                 });
 
                 if (up.ok) {
                     uploadedImages++;
                     wfmapmodsUpdateSubmitProgress(
-                        `Uploading supporting photos (${i + 1} of ${totalSupporting})…`,
+                        `Uploading supporting photos (${Math.min(i + 2, totalSupporting)} of ${totalSupporting})…`,
                         imageUploadPercent(uploadedImages, totalImages)
                     );
                 } else {
@@ -2569,12 +2611,23 @@
                 const proceed = window.confirm(
                     "Issues were detected during image upload:\n\n" +
                     lines + "\n\n" +
-                    "Sometimes the photo still uploads despite an error.\n" +
-                    "Your submission quota has already been consumed.\n" +
-                    "Do you want to try finalising the nomination anyway?\n\n" +
-                    "OK = try finalise now\n" +
-                    "Cancel = stop"
+                    "Sometimes the photo still uploads despite an error. " +
+                    "This can happen with poor network connections.\n\n" +
+                    "Your nomination quota has already been consumed. " +
+                    "Would you want to try finalising the nomination depiste the error?\n\n" +
+                    "OK = try finalise now (you might save your submission)\n" +
+                    "Cancel = stop (your submission will be lost)"
                 );
+
+                if (!proceed) {
+                    wfmapmodsHideSubmitProgress();
+                    window.wfmapmodsIsUploading = false;
+                    alert(
+                        "Submission was not finalised.\n\n" +
+                        "Please try again when your connection is more stable."
+                    );
+                    return;
+                }
             }
 
             // =========================
