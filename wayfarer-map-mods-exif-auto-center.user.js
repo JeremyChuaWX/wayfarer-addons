@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Exif Auto-Center
-// @version      0.1.0
+// @version      0.2.0
 // @description  Read EXIF GPS from the main photo upload and auto-center the submit map.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-exif-auto-center.user.js
@@ -29,6 +29,105 @@
 
 (function () {
     'use strict';
+
+    // ================================
+    // Route lifecycle (SPA-safe)
+    // ================================
+
+    const SUBMIT_PATH = "/new/submit/new";
+
+    let mo = null;
+    let lifecycleActive = false;
+
+    function isOnSubmitRoute() {
+        return location.pathname === SUBMIT_PATH;
+    }
+
+    function startObserver() {
+        if (mo) return; // already running
+
+        mo = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                for (const node of m.addedNodes) {
+                    if (!(node instanceof HTMLElement)) continue;
+
+                    // Keep your existing behavior: rescan when nodes are added
+                    if (node.matches && node.matches("app-submit-wayspot, app-wayspot-image-entry, form, div")) {
+                        scanForMainPhotoInputs(node);
+                    } else if (node.querySelector) {
+                        scanForMainPhotoInputs(node);
+                    }
+                }
+            }
+        });
+
+        mo.observe(document.documentElement, { childList: true, subtree: true });
+    }
+
+    function stopObserver() {
+        if (!mo) return;
+        mo.disconnect();
+        mo = null;
+    }
+
+    function enterSubmitRoute() {
+        if (lifecycleActive) return;
+        lifecycleActive = true;
+
+        console.log("[Exif Auto-Center] Enter submit route");
+
+        startObserver();
+        scanForMainPhotoInputs(document);
+    }
+
+    function leaveSubmitRoute() {
+        if (!lifecycleActive) return;
+        lifecycleActive = false;
+
+        console.log("[Exif Auto-Center] Leave submit route — teardown");
+
+        stopObserver();
+    }
+
+    function applyRouteLifecycle() {
+        if (isOnSubmitRoute()) enterSubmitRoute();
+        else leaveSubmitRoute();
+    }
+
+    // Patch history methods so we detect SPA navigation
+    (function patchHistoryForRouteChange() {
+        const _pushState = history.pushState;
+        const _replaceState = history.replaceState;
+
+        function notifyRouteChange() {
+            window.dispatchEvent(new Event("wfs-routechange"));
+        }
+
+        history.pushState = function () {
+            const ret = _pushState.apply(this, arguments);
+            notifyRouteChange();
+            return ret;
+        };
+
+        history.replaceState = function () {
+            const ret = _replaceState.apply(this, arguments);
+            notifyRouteChange();
+            return ret;
+        };
+
+        window.addEventListener("popstate", notifyRouteChange);
+    })();
+
+    function startSubmitLifecycle() {
+        // Run once now
+        applyRouteLifecycle();
+
+        // And on every internal navigation
+        window.addEventListener("wfs-routechange", () => {
+            // Small delay lets Angular swap the DOM first
+            setTimeout(applyRouteLifecycle, 50);
+        });
+    }
 
     // ================================
     // Helpers — get submit map instance
@@ -202,43 +301,12 @@
 
 
     // ================================
-    // Bootstrapping / SPA handling
+    // Boot
     // ================================
 
-    // MutationObserver for SPA navigation + lazy-loaded components
-    const mo = new MutationObserver(mutations => {
-        for (const m of mutations) {
-            for (const node of m.addedNodes) {
-                if (!(node instanceof HTMLElement)) continue;
-
-                // If a new submit component or image entry appears, rescan inside it
-                if (node.matches &&
-                    node.matches('app-submit-wayspot, app-wayspot-image-entry, form, div')
-                ) {
-                    scanForMainPhotoInputs(node);
-                } else if (node.querySelector) {
-                    scanForMainPhotoInputs(node);
-                }
-            }
-        }
-    });
-
-    function startObservers() {
-        mo.observe(document.documentElement, {
-            childList: true,
-            subtree: true
-        });
-        scanForMainPhotoInputs();
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', startObservers);
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", startSubmitLifecycle);
     } else {
-        startObservers();
+        startSubmitLifecycle();
     }
-
-    // In case Wayfarer SPA routing swaps out the submit view
-    window.addEventListener('popstate', () => {
-        setTimeout(() => scanForMainPhotoInputs(), 500);
-    });
 })();
