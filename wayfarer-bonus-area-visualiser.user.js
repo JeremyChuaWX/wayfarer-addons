@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Bonus Area Visualiser
-// @version      1.0.0
+// @version      1.0.1
 // @description  Shows L7 cells covered by Home and Bonus areas
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-bonus-area-visualiser.user.js
@@ -32,7 +32,6 @@
   "use strict";
 
   const TARGET_ROUTE = "/new/settings";
-  const TAG = "[WF Settings Map]";
 
   let routeActive = false;
   let lastLoggedKey = null;
@@ -162,12 +161,11 @@
 
       if (!routeActive || !pos) return ret;
 
-      // Normalize pos -> {lat:number, lng:number}
-      const lat = typeof pos.lat === "function" ? pos.lat() : pos.lat;
-      const lng = typeof pos.lng === "function" ? pos.lng() : pos.lng;
+      const lat = pos.lat;
+      const lng = pos.lng;
       if (typeof lat !== "number" || typeof lng !== "number") return ret;
 
-      const key = `${lat.toFixed(7)},${lng.toFixed(7)}`;
+      const key = `${lat.toFixed(6)},${lng.toFixed(6)}`;
       if (key === lastLoggedKey) return ret;
 
       // Only react to markers on the settings map
