@@ -9,7 +9,6 @@
 // @match        https://wayfarer.nianticlabs.com/*
 // @run-at       document-start
 // @grant        none
-// @require      https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js
 // ==/UserScript==
 
 // Copyright 2026 tntnnbltn
