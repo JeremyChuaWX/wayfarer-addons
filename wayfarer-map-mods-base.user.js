@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.17
+// @version      2.5.18
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -333,7 +333,7 @@
             }
 
             // Any other sidebar link → we're not "from Map" anymore
-            sessionStorage.setItem('wf_map_nav', '0');
+            localStorage.setItem('wf_map_nav', '0');
 
             // Remove Map's active state if present
             if (mapLink) {
@@ -396,7 +396,7 @@
             const url = SUBMIT_ROUTE;
 
             // Mark that this navigation came from the Map button
-            sessionStorage.setItem('wf_map_nav', '1');
+            localStorage.setItem('wf_map_nav', '1');
 
             // Try SPA-style navigation first
             if (window.history && typeof window.history.pushState === 'function') {
@@ -468,7 +468,7 @@
     let wfMapModeInterval = null;
 
     function formatPageForMapMode() {
-        if (sessionStorage.getItem('wf_map_nav') !== '1') return;
+        if (localStorage.getItem('wf_map_nav') !== '1') return;
         if (location.pathname !== SUBMIT_ROUTE) return;
 
         // highlight the map button
@@ -479,7 +479,7 @@
 
         wfMapModeInterval = setInterval(() => {
             // if we left map mode/route, stop polling
-            if (sessionStorage.getItem('wf_map_nav') !== '1' || location.pathname !== SUBMIT_ROUTE) {
+            if (localStorage.getItem('wf_map_nav') !== '1' || location.pathname !== SUBMIT_ROUTE) {
                 clearInterval(wfMapModeInterval);
                 wfMapModeInterval = null;
                 return;
@@ -612,7 +612,7 @@
         wfMapActiveEnforcerTimer = setInterval(() => {
             // Stop if we left map mode or route
             if (
-                sessionStorage.getItem('wf_map_nav') !== '1' ||
+                localStorage.getItem('wf_map_nav') !== '1' ||
                 location.pathname !== SUBMIT_ROUTE
             ) {
                 clearInterval(wfMapActiveEnforcerTimer);
@@ -665,14 +665,14 @@
     }
 
     function applySidenavPaddingForCurrentRoute() {
-        const fromMap = sessionStorage.getItem('wf_map_nav') === '1';
+        const fromMap = localStorage.getItem('wf_map_nav') === '1';
         const onMapPage = location.pathname === SUBMIT_ROUTE;
 
         if (fromMap && onMapPage) {
             removeSidenavPaddingForMapPage();
         } else {
             if (fromMap && !onMapPage) {
-                sessionStorage.setItem('wf_map_nav', '0');
+                localStorage.setItem('wf_map_nav', '0');
 
                 if (wfMapActiveEnforcerTimer) {
                     clearInterval(wfMapActiveEnforcerTimer);
@@ -1669,7 +1669,7 @@
             ? poi.lng.toFixed(6)
             : "--";
 
-            coordsEl.textContent = `${latStr}, ${lngStr}`;
+            coordsEl.textContent = `${latStr},${lngStr}`;
             coordsEl.dataset.lat = String(poi.lat ?? "");
             coordsEl.dataset.lng = String(poi.lng ?? "");
 
@@ -1683,7 +1683,7 @@
                 const lat = coordsEl.dataset.lat;
                 const lng = coordsEl.dataset.lng;
                 if (!lat || !lng) return;
-                navigator.clipboard?.writeText(`${lat}, ${lng}`).catch(() => {});
+                navigator.clipboard?.writeText(`${lat},${lng}`).catch(() => {});
             };
 
             // Build deep link
@@ -6072,7 +6072,7 @@
         ? domEvt.clientY
         : rect.top + rect.height / 2;
 
-        const coordsText = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+        const coordsText = `${lat.toFixed(6)},${lng.toFixed(6)}`;
 
         const menu = document.createElement("div");
         menu.className = "wfmapmods-map-context-menu";
@@ -6369,13 +6369,15 @@
     }
 
     function tryParseLatLng(str) {
-        // Basic "lat,lng" parser: e.g. "-31.9535, 115.8570"
-        const match = str.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+        const match = str.match(
+            /^\s*\(?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)?\s*$/
+        );
         if (!match) return null;
 
-        const lat = parseFloat(match[1]);
-        const lng = parseFloat(match[2]);
-        if (isNaN(lat) || isNaN(lng)) return null;
+        const lat = Number(match[1]);
+        const lng = Number(match[2]);
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
         return new google.maps.LatLng(lat, lng);
     }
@@ -7430,7 +7432,7 @@
         if (coordsFromUrl) {
             deepLinkTarget = coordsFromUrl;
             skipRestoreMapViewForThisLoad = true;
-            sessionStorage.setItem('wf_map_nav', '1');
+            localStorage.setItem('wf_map_nav', '1');
             formatPageForMapMode();
         }
 
