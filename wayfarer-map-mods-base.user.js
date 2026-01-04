@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      2.5.18
+// @version      2.5.19
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -1421,6 +1421,7 @@
             const linkCopyCoords = document.createElement("a");
             linkCopyCoords.href = "#";
             linkCopyCoords.textContent = "Copy coords";
+            linkCopyCoords.title = "Click to copy coordinates of submission marker";
 
             const linkNearby = document.createElement("a");
             linkNearby.href = "#";
@@ -1676,7 +1677,7 @@
             coordsEl.style.cursor = "pointer";
             coordsEl.style.textDecoration = "none";
             coordsEl.style.color = "inherit";
-            coordsEl.title = "Click to copy coordinates";
+            coordsEl.title = "Click to copy coordinates of selected Wayspot";
 
             // Avoid stacking multiple listeners – just overwrite onclick
             coordsEl.onclick = () => {
@@ -4347,9 +4348,9 @@
                 class="wfmapmods-iw-copy-coords"
                 data-lat="${latStr}"
                 data-lng="${lngStr}"
-                title="Click to copy coordinates"
+                title="Click to copy coordinates of selected Wayspot"
             >
-                ${latStr}, ${lngStr}
+                ${latStr},${lngStr}
             </span>
         </div>
 
@@ -4375,7 +4376,7 @@
             coordEl.addEventListener("click", () => {
                 const lat = coordEl.getAttribute("data-lat");
                 const lng = coordEl.getAttribute("data-lng");
-                const coords = `${lat}, ${lng}`;
+                const coords = `${lat},${lng}`;
 
                 if (navigator.clipboard?.writeText) {
                     navigator.clipboard.writeText(coords).catch(err =>
