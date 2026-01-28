@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.0.1
+// @version      3.0.2
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -489,8 +489,6 @@
             reportApiLive = false;
         }
     }
-
-    checkWhichApisAreLive();
 
     // ==================================
     // Navigation state & sidebar integration
@@ -7077,6 +7075,9 @@
         // Apply css styles specific for this route
         applyCssForCurrentRoute();
 
+        // Stop zooming in on iOS devices
+        setIOSMapZoomLock(true);
+
         // Find a fresh map
         const map = await getMap();
 
@@ -7095,6 +7096,26 @@
 
         // Mark success AFTER setup completes
         lastSetupRouteKey = routeKey;
+    }
+
+    function setIOSMapZoomLock(enabled) {
+        if (!isIOS()) return;
+
+        let meta = document.querySelector('meta[name="viewport"]');
+        if (!meta) return; // or create it, but minimal = just bail
+
+        if (enabled) {
+            meta.setAttribute(
+                "content",
+                "width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
+            );
+        } else {
+            // restore to what you observed as the site's stable default
+            meta.setAttribute(
+                "content",
+                "width=device-width, initial-scale=1, viewport-fit=cover"
+            );
+        }
     }
 
     function setupMapRouteWatcher() {
@@ -7322,6 +7343,8 @@
             zoomHintObserver.disconnect();
             zoomHintObserver = null;
         }
+
+        setIOSMapZoomLock(false);
 
         // Reset map click guard and map reference
         mapClickCloseBound = false;
@@ -10541,39 +10564,6 @@ body.wfmapmods-mapmode-body .submit-wayspot-map-container {
 #wfmapmods-report-progress.is-hidden {
   display: none;
 }
-
-/* =============================================================================
-   iOS fix for small text zooming issue
-   ============================================================================= */
-
-/* iOS Safari zoom prevention for your UI inputs */
-.wf-ios #wfmapmods-search-input,
-.wf-ios .wfmapmods-modal-input-small,
-.wf-ios .wfmapmods-modal-select,
-.wf-ios .wfmapmods-modal-textarea,
-.wf-ios .wfmapmods-submit-input,
-.wf-ios .wfmapmods-submit-textarea {
-  font-size: 16px !important; /* key part: stops iOS focus zoom */
-}
-
-/* keep your original visual sizes */
-.wf-ios #wfmapmods-search-input {
-  transform: scale(0.75);           /* 12/16 */
-  transform-origin: left center;
-}
-
-.wf-ios .wfmapmods-modal-input-small,
-.wf-ios .wfmapmods-modal-select,
-.wf-ios .wfmapmods-modal-textarea {
-  transform: scale(0.6875);         /* 11/16 */
-  transform-origin: left top;
-}
-
-.wf-ios .wfmapmods-submit-input,
-.wf-ios .wfmapmods-submit-textarea {
-  transform: scale(0.75);           /* 12/16 */
-  transform-origin: left top;
-}
   `
 
         let style = document.getElementById("wfmapmods-all-css");
@@ -10696,6 +10686,8 @@ canvas#deckgl-overlay {
         initSidenavPaddingRouteWatcher();
         createBridges();
         setupMapRouteWatcher();
+
+        checkWhichApisAreLive();
     }
     init();
 
