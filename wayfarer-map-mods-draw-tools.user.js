@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Draw Tools
-// @version      0.3.0
+// @version      3.0.0
 // @description  Adds simple drawing tools (markers, polylines, circles) to the Wayfarer submission map, with persistence.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-draw-tools.user.js
@@ -36,11 +36,9 @@
     // =============================
 
     const SETTINGS_KEY = "wfmap_drawing_tools_settings";
-    const MAP_PATH = "/new/submit/new";
 
-    // getSubmitMap polling
-    const MAP_FIND_ATTEMPTS = 40;
-    const MAP_FIND_INTERVAL_MS = 250;
+    const SUBMIT_ROUTE = "/new/submit/new";
+    const MAPVIEW_ROUTE = "/new/mapview";
 
     // panel polling for settings link injection
     const SETTINGS_LINK_POLL_MS = 300;
@@ -62,6 +60,11 @@
         (navigator && (navigator.maxTouchPoints > 0 || navigator.msMaxTouchPoints > 0))
     );
 
+    // Cross-script exclusive toggle
+    const WF_TOGGLE_GROUP = "wf-lefttop-controls";
+    const WF_TOGGLE_ACTIVE_CLASS = "wf-toggle-active";
+    let wfGlobalToggleObserver = null;
+
     // =============================
     // Mutable state
     // =============================
@@ -69,7 +72,7 @@
     // -----------------------------
     // Map attachment state
     // -----------------------------
-    let submitMap = null;
+    let wfMap = null;
     let mapAttached = false;
 
     let mapPanelObserver = null;
@@ -188,15 +191,68 @@
     }
 
     // -----------------------------
+    // Exclusive toggle
+    // -----------------------------
+
+    // When a draw tools button is clicked, it disables other active toggles from other scripts
+    // e.g. Submission pin toggle on Mapview page (WFMM Base)
+    function wfExclusiveToggle(buttonEl, group = WF_TOGGLE_GROUP) {
+        if (!buttonEl) return false;
+
+        buttonEl.dataset.wfToggleGroup = group;
+
+        const isActive = buttonEl.classList.contains(WF_TOGGLE_ACTIVE_CLASS);
+        if (isActive) {
+            buttonEl.classList.remove(WF_TOGGLE_ACTIVE_CLASS);
+            return false;
+        }
+
+        document
+            .querySelectorAll(`[data-wf-toggle-group="${group}"].${WF_TOGGLE_ACTIVE_CLASS}`)
+            .forEach((el) => {
+            if (el !== buttonEl) el.classList.remove(WF_TOGGLE_ACTIVE_CLASS);
+        });
+
+        buttonEl.classList.add(WF_TOGGLE_ACTIVE_CLASS);
+        return true;
+    }
+
+    function attachGlobalToggleObserver() {
+        if (wfGlobalToggleObserver) return;
+
+        wfGlobalToggleObserver = new MutationObserver((mutations) => {
+            // If we have no active drawing mode, nothing to do
+            if (!currentMode) return;
+
+            // Is any draw-mode button currently active?
+            const activeDrawBtn = Object.values(modeButtons).find((b) =>
+                                                                  b?.classList?.contains(WF_TOGGLE_ACTIVE_CLASS)
+                                                                 );
+
+            // If our draw button lost active state, another plugin stole it → turn off drawing
+            if (!activeDrawBtn) {
+                setMode(null);
+            }
+        });
+
+        wfGlobalToggleObserver.observe(document.body, {
+            subtree: true,
+            attributes: true,
+            attributeFilter: ["class"],
+        });
+    }
+
+    // -----------------------------
     // Map lifecycle + DOM watchers
     // -----------------------------
 
-    function isOnMapPage() {
-        return window.location.pathname.startsWith(MAP_PATH);
+    function isOnMapCapableRoute() {
+        const p = window.location.pathname;
+        return p.startsWith(SUBMIT_ROUTE) || p.startsWith(MAPVIEW_ROUTE);
     }
 
     function onMapRouteChange() {
-        if (isOnMapPage()) {
+        if (isOnMapCapableRoute()) {
             startMapPanelWatcher();
         } else {
             stopMapPanelWatcher();
@@ -272,45 +328,41 @@
         }
     }
 
-    function getSubmitMap() {
-        return new Promise(resolve => {
-            let attempts = MAP_FIND_ATTEMPTS;
+    function looksLikeGoogleMap(obj) {
+        return !!(obj &&
+                  typeof obj.getCenter === "function" &&
+                  typeof obj.addListener === "function" &&
+                  typeof obj.getDiv === "function");
+    }
+
+    function extractMapFromCtxEntry(entry) {
+        if (!entry) return null;
+        if (looksLikeGoogleMap(entry)) return entry; // mapview
+        const m = entry?.componentRef?.map;          // submit
+        return looksLikeGoogleMap(m) ? m : null;
+    }
+
+    function getWfMap() {
+        return new Promise((resolve) => {
+            let attempts = 80;
 
             function tryFindMap() {
-                const candidates = document.querySelectorAll('app-submit-wayspot-map nia-map');
-                let foundMap = null;
+                const candidates = document.querySelectorAll("app-submit-wayspot-map nia-map, app-wf-base-map");
 
-                candidates.forEach(el => {
-                    if (foundMap || !el.__ngContext__) return;
-
-                    const ctx = el.__ngContext__;
+                for (const el of candidates) {
+                    const ctx = el && el.__ngContext__;
+                    if (!ctx) continue;
 
                     for (const entry of ctx) {
-                        if (!entry) continue;
-
                         try {
-                            if (entry.componentRef && entry.componentRef.map) {
-                                foundMap = entry.componentRef.map;
-                                break;
-                            }
-                        } catch {
-                            /* ignore invalid entries */
-                        }
+                            const map = extractMapFromCtxEntry(entry);
+                            if (map) return resolve(map);
+                        } catch { /* ignore */ }
                     }
-                });
-
-                if (foundMap) {
-                    resolve(foundMap);
-                    return;
                 }
 
-                if (attempts-- <= 0) {
-                    console.warn("[DrawingTools] Failed to find submit map after several attempts");
-                    resolve(null);
-                    return;
-                }
-
-                setTimeout(tryFindMap, MAP_FIND_INTERVAL_MS);
+                if (attempts-- <= 0) return resolve(null);
+                setTimeout(tryFindMap, 250);
             }
 
             tryFindMap();
@@ -318,19 +370,27 @@
     }
 
     async function attachDrawingToolsToMapIfNeeded() {
-        if (mapAttached) return;
+        // If we think we're attached, but the map div is gone, treat as detached
+        if (mapAttached && wfMap && wfMap.getDiv && wfMap.getDiv()?.isConnected) {
+            return;
+        }
 
-        const map = await getSubmitMap();
+        // We were "attached" but the old map is gone
+        if (mapAttached) {
+            teardownMap();
+        }
 
+        const map = await getWfMap();
         if (!map) {
             console.warn("[DrawingTools] Map not found – cannot attach");
             return;
         }
 
-        submitMap = map;
+        wfMap = map;
         initDrawingTools();
         mapAttached = true;
     }
+
 
     function teardownMap() {
         if (!mapAttached) return;
@@ -346,7 +406,7 @@
         clearInMemoryShapes(true);
 
         // Reset map-related globals so a fresh map can be initialised cleanly
-        submitMap = null;
+        wfMap = null;
         mapAttached = false;
 
         // Allow controls + helpers to be recreated next time we attach
@@ -398,62 +458,25 @@
 
         const backdrop = document.createElement("div");
         backdrop.id = "wfmapmods-drawing-modal-backdrop";
-        Object.assign(backdrop.style, {
-            position: "fixed",
-            inset: "0",
-            background: "rgba(0,0,0,0.35)",
-            zIndex: "2000",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            overflowY: "auto",
-            paddingTop: "12px",
-            paddingBottom: "12px"
-        });
+        backdrop.className = "wfmapmods-modal-backdrop";
 
         const dialog = document.createElement("div");
-        Object.assign(dialog.style, {
-            background: "#ffffff",
-            borderRadius: "8px",
-            boxShadow: "0 10px 25px rgba(0,0,0,0.35)",
-            width: "260px",
-            maxWidth: "calc(100% - 32px)",
-            padding: "10px 12px 8px",
-            boxSizing: "border-box",
-            fontFamily: "Roboto, Arial, sans-serif",
-            fontSize: "12px",
-            color: "#111827",
-            maxHeight: "90vh",
-            overflowY: "auto"
-        });
+        dialog.className = "wfmapmods-modal";
 
         const title = document.createElement("div");
+        title.className = "wfmapmods-modal__title";
         title.textContent = "Drawing Tool Settings";
-        Object.assign(title.style, {
-            fontSize: "15px",
-            fontWeight: "600",
-            marginBottom: "10px"
-        });
         dialog.appendChild(title);
 
         function makeRow(labelText, inputEl) {
             const row = document.createElement("div");
-            Object.assign(row.style, {
-                display: "flex",
-                alignItems: "center",
-                marginBottom: "6px",
-                gap: "6px"
-            });
+            row.className = "wfmapmods-modal__row";
 
             const label = document.createElement("label");
+            label.className = "wfmapmods-modal__label";
             label.textContent = labelText;
-            Object.assign(label.style, {
-                flex: "0 0 120px",
-                fontSize: "11px",
-                color: "#374151"
-            });
 
-            inputEl.style.flex = "1 0 auto";
+            inputEl.classList.add("wfmapmods-modal__control");
 
             row.appendChild(label);
             row.appendChild(inputEl);
@@ -488,47 +511,22 @@
         dialog.appendChild(makeRow("Shape colour:", colorInput));
 
         const hint = document.createElement("div");
+        hint.className = "wfmapmods-modal__hint";
         hint.textContent = "New shapes will use this colour. Existing shapes keep their original colour.";
-        Object.assign(hint.style, {
-            fontSize: "11px",
-            color: "#6b7280",
-            marginTop: "2px",
-            marginBottom: "8px"
-        });
         dialog.appendChild(hint);
 
         const buttonsRow = document.createElement("div");
-        Object.assign(buttonsRow.style, {
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: "8px",
-            marginTop: "4px"
-        });
+        buttonsRow.className = "wfmapmods-modal__buttons";
 
         const cancelBtn = document.createElement("button");
         cancelBtn.type = "button";
         cancelBtn.textContent = "Cancel";
-        Object.assign(cancelBtn.style, {
-            padding: "4px 10px",
-            borderRadius: "4px",
-            border: "1px solid #d1d5db",
-            background: "#ffffff",
-            cursor: "pointer",
-            fontSize: "12px"
-        });
+        cancelBtn.className = "wfmapmods-btn";
 
         const okBtn = document.createElement("button");
         okBtn.type = "button";
         okBtn.textContent = "OK";
-        Object.assign(okBtn.style, {
-            padding: "4px 12px",
-            borderRadius: "4px",
-            border: "1px solid #2563eb",
-            background: "#2563eb",
-            color: "#ffffff",
-            cursor: "pointer",
-            fontSize: "12px"
-        });
+        okBtn.className = "wfmapmods-btn wfmapmods-btn--primary";
 
         buttonsRow.appendChild(cancelBtn);
         buttonsRow.appendChild(okBtn);
@@ -551,7 +549,7 @@
 
             currentShapeColor = newColor;
 
-            if (submitMap) {
+            if (wfMap) {
                 applyDrawingEnabledState();
             }
 
@@ -639,22 +637,12 @@
     // UI: Map controls
     // -----------------------------
 
-    function createButton(text, title) {
+    function createButton(text, title, extraClass = "") {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.textContent = text;
-        Object.assign(btn.style, {
-            padding: "4px 6px",
-            margin: "2px",
-            fontSize: "11px",
-            borderRadius: "4px",
-            border: "1px solid #d1d5db",
-            background: "#ffffff",
-            cursor: "pointer",
-            fontFamily: "Roboto, Arial, sans-serif",
-            color: "#6b7280"
-        });
         btn.title = title;
+        btn.className = `wfmapmods-draw-btn ${extraClass}`.trim();
         return btn;
     }
 
@@ -663,37 +651,23 @@
         drawingControlsAdded = true;
 
         const controlDiv = document.createElement("div");
-        Object.assign(controlDiv.style, {
-            background: "rgba(255,255,255,0.9)",
-            borderRadius: "6px",
-            padding: "4px",
-            margin: "10px",
-            boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "stretch"
-        });
+        controlDiv.className = "wfmapmods-draw-controls";
 
         const title = document.createElement("div");
+        title.className = "wfmapmods-draw-controls__title";
         title.textContent = "Draw";
-        Object.assign(title.style, {
-            fontSize: "11px",
-            fontWeight: "600",
-            marginBottom: "2px",
-            textAlign: "center",
-            color: "#6b7280",
-        });
         controlDiv.appendChild(title);
 
         const btnMarker = createButton("Marker", "Click the map to add markers");
         const btnArrow = createButton("Arrow", "Click start, move, click end to place an arrow");
         const btnLine = createButton("Polyline", "Click to add points; right-click or double-click to finish");
         const btnCircle = createButton("Circle", "Click centre, move, click again to set radius");
-        const btnDelete = createButton("Delete", "Delete mode: click shapes to remove");
-        const btnDeleteAll = createButton("Delete all", "Delete all drawn shapes");
+        const btnDelete = createButton("Delete", "Delete mode: click shapes to remove", "wfmapmods-draw-btn--delete");
+        const btnDeleteAll = createButton("Delete all", "Delete all drawn shapes", "wfmapmods-draw-btn--danger");
 
-        btnDeleteAll.style.borderColor = "#dc2626";
-        btnDeleteAll.style.color = "#b91c1c";
+        [btnMarker, btnArrow, btnLine, btnCircle, btnDelete].forEach((b) => {
+            b.dataset.wfToggleGroup = WF_TOGGLE_GROUP;
+        });
 
         modeButtons.marker = btnMarker;
         modeButtons.arrow = btnArrow;
@@ -701,11 +675,11 @@
         modeButtons.circle = btnCircle;
         modeButtons.delete = btnDelete;
 
-        btnMarker.addEventListener("click", () => setMode("marker"));
-        btnArrow.addEventListener("click", () => setMode("arrow"));
-        btnLine.addEventListener("click", () => setMode("polyline"));
-        btnCircle.addEventListener("click", () => setMode("circle"));
-        btnDelete.addEventListener("click", () => setMode("delete"));
+        btnMarker.addEventListener("click", () => onModeButtonClick("marker"));
+        btnArrow.addEventListener("click", () => onModeButtonClick("arrow"));
+        btnLine.addEventListener("click", () => onModeButtonClick("polyline"));
+        btnCircle.addEventListener("click", () => onModeButtonClick("circle"));
+        btnDelete.addEventListener("click", () => onModeButtonClick("delete"));
         btnDeleteAll.addEventListener("click", () => {
             if (!allShapes.length) return;
             if (!confirm("Delete all drawn shapes?")) return;
@@ -718,10 +692,7 @@
         controlDiv.appendChild(btnCircle);
 
         const sep = document.createElement("div");
-        Object.assign(sep.style, {
-            borderTop: "1px solid #e5e7eb",
-            margin: "2px 0"
-        });
+        sep.className = "wfmapmods-draw-sep";
         controlDiv.appendChild(sep);
 
         controlDiv.appendChild(btnDelete);
@@ -744,33 +715,15 @@
     function updateControlsLayout() {
         if (!drawingControlDiv) return;
 
-        const drawingSettings = userSettings.drawing || {};
-        const posSetting = drawingSettings.position || "left";
-
-        if (posSetting === "top" || posSetting === "bottom") {
-            drawingControlDiv.style.flexDirection = "row";
-            drawingControlDiv.style.alignItems = "center";
-
-            // Optional: tweak title spacing a bit for horizontal layout
-            const titleEl = drawingControlDiv.firstChild;
-            if (titleEl && titleEl.style) {
-                titleEl.style.marginBottom = "0";
-                titleEl.style.marginRight = "6px";
-            }
-        } else {
-            drawingControlDiv.style.flexDirection = "column";
-            drawingControlDiv.style.alignItems = "stretch";
-
-            const titleEl = drawingControlDiv.firstChild;
-            if (titleEl && titleEl.style) {
-                titleEl.style.marginRight = "0";
-                titleEl.style.marginBottom = "2px";
-            }
-        }
+        const posSetting = (userSettings.drawing || {}).position || "left";
+        drawingControlDiv.classList.toggle(
+            "is-horizontal",
+            posSetting === "top" || posSetting === "bottom"
+        );
     }
 
     function applyControlPosition() {
-        if (!submitMap || !drawingControlDiv) return;
+        if (!wfMap || !drawingControlDiv) return;
 
         const drawingSettings = userSettings.drawing || {};
         const posSetting = drawingSettings.position || "left";
@@ -784,7 +737,7 @@
 
         // Remove from old position if present
         if (drawingControlsPosition != null) {
-            const arr = submitMap.controls[drawingControlsPosition];
+            const arr = wfMap.controls[drawingControlsPosition];
             const a = arr.getArray();
             const idx = a.indexOf(drawingControlDiv);
             if (idx > -1) {
@@ -793,7 +746,7 @@
         }
 
         drawingControlsPosition = newPos;
-        submitMap.controls[newPos].push(drawingControlDiv);
+        wfMap.controls[newPos].push(drawingControlDiv);
 
         // Adjust flex layout for the new position
         updateControlsLayout();
@@ -877,32 +830,21 @@
         currentMode = newMode;
         deleteMode = (newMode === "delete");
 
+        // Sync shared toggle class to the current mode
         Object.entries(modeButtons).forEach(([mode, btn]) => {
-            if (mode === newMode) {
-                btn.style.background = "#2563eb";
-                btn.style.color = "#ffffff";
-            } else {
-                btn.style.background = "#ffffff";
-                btn.style.color = "#111827";
-            }
-
-            if (mode === "delete") {
-                btn.style.borderColor = deleteMode ? "#dc2626" : "#d1d5db";
-            } else {
-                btn.style.borderColor = "#d1d5db";
-            }
+            btn.classList.toggle(WF_TOGGLE_ACTIVE_CLASS, mode === currentMode && !!currentMode);
         });
 
         updateSelectionPinVisibility();
         refreshOverlayClickability();
 
-        if (submitMap) {
-            submitMap.setOptions({
+        if (wfMap) {
+            wfMap.setOptions({
                 draggableCursor: newMode ? "crosshair" : null
             });
         }
 
-        if (!submitMap) return;
+        if (!wfMap) return;
 
         if (newMode === "marker") {
             enableMarkerMode();
@@ -914,6 +856,25 @@
             enableArrowMode();
         }
 
+    }
+
+    function onModeButtonClick(mode) {
+        const btn = modeButtons[mode];
+        if (!btn) return;
+
+        // If clicking the already-active mode, toggle off
+        const alreadyActive = btn.classList.contains(WF_TOGGLE_ACTIVE_CLASS);
+        if (alreadyActive) {
+            btn.classList.remove(WF_TOGGLE_ACTIVE_CLASS);
+            setMode(null);
+            return;
+        }
+
+        // Turn off other plugin toggles + make this the single active toggle
+        wfExclusiveToggle(btn, WF_TOGGLE_GROUP);
+
+        // Now enable the mode
+        setMode(mode);
     }
 
     function applyDrawingEnabledState() {
@@ -930,12 +891,12 @@
 
         syncLayersCheckboxFromSettings();
 
-        if (!submitMap) return;
+        if (!wfMap) return;
 
         if (!enabled) {
             // Hide controls
             if (drawingControlDiv && drawingControlsPosition != null) {
-                const arr = submitMap.controls[drawingControlsPosition];
+                const arr = wfMap.controls[drawingControlsPosition];
                 const a = arr.getArray();
                 const idx = a.indexOf(drawingControlDiv);
                 if (idx > -1) {
@@ -968,18 +929,6 @@
         } else {
             document.body.classList.remove("wf-drawing-active");
         }
-    }
-
-    function ensurePinHideCSS() {
-        if (pinHideStyleInjected) return;
-        const style = document.createElement("style");
-        style.textContent = `
-            body.wf-drawing-active img[src$="map_selection_pin.svg"] {
-                display: none !important;
-            }
-        `;
-        document.head.appendChild(style);
-        pinHideStyleInjected = true;
     }
 
     // -----------------------------
@@ -1113,7 +1062,7 @@
     function recreateMarker(data) {
         const color = data.color || currentShapeColor;
         const marker = new google.maps.Marker({
-            map: submitMap,
+            map: wfMap,
             position: new google.maps.LatLng(data.position.lat, data.position.lng),
             icon: createMarkerIcon(color),
             clickable: false
@@ -1130,7 +1079,7 @@
         const color = data.color || currentShapeColor;
         const path = (data.path || []).map(p => new google.maps.LatLng(p.lat, p.lng));
         const polyline = new google.maps.Polyline({
-            map: submitMap,
+            map: wfMap,
             path,
             strokeColor: color,
             strokeWeight: 3,
@@ -1147,7 +1096,7 @@
     function recreateCircle(data) {
         const color = data.color || currentShapeColor;
         const circle = new google.maps.Circle({
-            map: submitMap,
+            map: wfMap,
             center: new google.maps.LatLng(data.center.lat, data.center.lng),
             radius: data.radius,
             strokeColor: color,
@@ -1172,7 +1121,7 @@
         const end   = new google.maps.LatLng(data.end.lat, data.end.lng);
 
         const arrow = new google.maps.Polyline({
-            map: submitMap,
+            map: wfMap,
             path: [start, end],
             ...createArrowPolylineOptions(color)
         });
@@ -1208,7 +1157,7 @@
     }
 
     function ensureProjectionHelper() {
-        if (projectionHelper || !submitMap || !google.maps || !google.maps.OverlayView) return;
+        if (projectionHelper || !wfMap || !google.maps || !google.maps.OverlayView) return;
 
         function PH() {}
         PH.prototype = Object.create(google.maps.OverlayView.prototype);
@@ -1216,14 +1165,14 @@
         PH.prototype.onRemove = function () {};
         PH.prototype.draw = function () {
             const proj = this.getProjection();
-            if (!proj || !submitMap) return;
+            if (!proj || !wfMap) return;
 
             mapProjection = proj;
 
             // Calibrate offset: where does the map centre land in overlay pixels vs actual map div?
-            const mapDiv = submitMap.getDiv();
+            const mapDiv = wfMap.getDiv();
             const rect = mapDiv.getBoundingClientRect();
-            const centerLatLng = submitMap.getCenter();
+            const centerLatLng = wfMap.getCenter();
 
             const overlayCenterPx = proj.fromLatLngToDivPixel(centerLatLng);
             if (!overlayCenterPx) return;
@@ -1238,12 +1187,12 @@
         };
 
         projectionHelper = new PH();
-        projectionHelper.setMap(submitMap);
+        projectionHelper.setMap(wfMap);
     }
 
     function ensureLabelDiv(kind) {
-        if (!submitMap) return null;
-        const mapDiv = submitMap.getDiv();
+        if (!wfMap) return null;
+        const mapDiv = wfMap.getDiv();
         if (!mapDiv) return null;
 
         // Ensure mapDiv is the positioning context
@@ -1255,19 +1204,7 @@
         if (kind === "circle") {
             if (!circleLabelDiv) {
                 const div = document.createElement("div");
-                Object.assign(div.style, {
-                    position: "absolute",
-                    transform: "translate(-50%, -50%)",
-                    whiteSpace: "nowrap",
-                    fontSize: "11px",
-                    color: "#111827",
-                    background: "transparent",
-                    padding: "0",
-                    border: "none",
-                    pointerEvents: "none",
-                    display: "none",
-                    zIndex: LABEL_ZINDEX
-                });
+                div.className = "wfmapmods-measure-label";
                 mapDiv.appendChild(div);
                 circleLabelDiv = div;
             }
@@ -1275,19 +1212,7 @@
         } else if (kind === "polyline") {
             if (!polyLabelDiv) {
                 const div = document.createElement("div");
-                Object.assign(div.style, {
-                    position: "absolute",
-                    transform: "translate(-50%, -50%)",
-                    whiteSpace: "nowrap",
-                    fontSize: "11px",
-                    color: "#111827",
-                    background: "transparent",
-                    padding: "0",
-                    border: "none",
-                    pointerEvents: "none",
-                    display: "none",
-                    zIndex: LABEL_ZINDEX
-                });
+                div.className = "wfmapmods-measure-label";
                 mapDiv.appendChild(div);
                 polyLabelDiv = div;
             }
@@ -1328,8 +1253,8 @@
     }
 
     function latLngFromClientXY(ev) {
-        if (!submitMap || !mapProjection) return null;
-        const mapDiv = submitMap.getDiv();
+        if (!wfMap || !mapProjection) return null;
+        const mapDiv = wfMap.getDiv();
         const rect = mapDiv.getBoundingClientRect();
 
         // MapDiv → overlay pixel coordinates (undo the offset we apply for labels)
@@ -1344,14 +1269,14 @@
     // =============================
 
     function enableMarkerMode() {
-        if (!submitMap) return;
+        if (!wfMap) return;
 
         cancelCurrentDrawing = () => {}; // nothing to cancel, Escape will just deselect
 
         drawingClickHandler = (latLng) => {
             const color = currentShapeColor;
             const marker = new google.maps.Marker({
-                map: submitMap,
+                map: wfMap,
                 position: latLng,
                 icon: createMarkerIcon(color),
                 clickable: false
@@ -1366,7 +1291,7 @@
             });
         };
 
-        const listener = submitMap.addListener("click", (ev) => {
+        const listener = wfMap.addListener("click", (ev) => {
             if (drawingClickHandler && ev && ev.latLng) {
                 drawingClickHandler(ev.latLng);
             }
@@ -1376,7 +1301,7 @@
     }
 
     function enableArrowMode() {
-        if (!submitMap) return;
+        if (!wfMap) return;
 
         ensureProjectionHelper();
 
@@ -1429,7 +1354,7 @@
                 start = latLng;
 
                 tempArrow = new google.maps.Polyline({
-                    map: submitMap,
+                    map: wfMap,
                     path: [start, start],
                     ...createArrowPolylineOptions(color)
                 });
@@ -1443,12 +1368,12 @@
             finishArrow(latLng);
         };
 
-        const clickListener = submitMap.addListener("click", (ev) => {
+        const clickListener = wfMap.addListener("click", (ev) => {
             if (!drawingClickHandler || !ev || !ev.latLng) return;
             drawingClickHandler(ev.latLng);
         });
 
-        const moveListener = submitMap.addListener("mousemove", (ev) => {
+        const moveListener = wfMap.addListener("mousemove", (ev) => {
             if (!start || !tempArrow || !ev || !ev.latLng) return;
 
             const end = ev.latLng;
@@ -1460,7 +1385,7 @@
             }
         });
 
-        const rightClickListener = submitMap.addListener("rightclick", () => {
+        const rightClickListener = wfMap.addListener("rightclick", () => {
             // cancel if they haven’t placed an end yet
             if (tempArrow) tempArrow.setMap(null);
             if (labelDiv) labelDiv.style.display = "none";
@@ -1471,7 +1396,7 @@
     }
 
     function enablePolylineMode() {
-        if (!submitMap) return;
+        if (!wfMap) return;
 
         ensureProjectionHelper();
 
@@ -1480,7 +1405,7 @@
         const vertexMarkers = [];
 
         let tempPolyline = new google.maps.Polyline({
-            map: submitMap,
+            map: wfMap,
             path: [],
             strokeColor: color,
             strokeWeight: 3,
@@ -1552,7 +1477,7 @@
 
         function addVertexMarker(latLng) {
             const marker = new google.maps.Marker({
-                map: submitMap,
+                map: wfMap,
                 position: latLng,
                 clickable: true,
                 zIndex: DRAWING_MODAL_ZINDEX,
@@ -1608,12 +1533,12 @@
             addVertexMarker(latLng);
         };
 
-        const clickListener = submitMap.addListener("click", (ev) => {
+        const clickListener = wfMap.addListener("click", (ev) => {
             if (!drawingClickHandler || !ev || !ev.latLng) return;
             drawingClickHandler(ev.latLng);
         });
 
-        const moveListener = submitMap.addListener("mousemove", (ev) => {
+        const moveListener = wfMap.addListener("mousemove", (ev) => {
             if (!ev || !ev.latLng) return;
             if (!fixedPoints.length) return;
 
@@ -1628,12 +1553,12 @@
             }
         });
 
-        const dblClickListener = submitMap.addListener("dblclick", (ev) => {
+        const dblClickListener = wfMap.addListener("dblclick", (ev) => {
             if (ev && ev.stop) ev.stop();
             finishPolyline();
         });
 
-        const rightClickListener = submitMap.addListener("rightclick", () => {
+        const rightClickListener = wfMap.addListener("rightclick", () => {
             finishPolyline();
         });
 
@@ -1641,7 +1566,7 @@
     }
 
     function enableCircleMode() {
-        if (!submitMap) return;
+        if (!wfMap) return;
 
         if (isTouchDevice) {
             enableCircleModeTouch();
@@ -1663,7 +1588,7 @@
                 center = latLng;
 
                 tempCircle = new google.maps.Circle({
-                    map: submitMap,
+                    map: wfMap,
                     center,
                     radius: 0,
                     strokeColor: color,
@@ -1674,7 +1599,7 @@
                 });
 
                 tempRadiusLine = new google.maps.Polyline({
-                    map: submitMap,
+                    map: wfMap,
                     path: [center, center],
                     strokeOpacity: 0,
                     clickable: false,
@@ -1727,12 +1652,12 @@
             tempRadiusLine = null;
         };
 
-        const clickListener = submitMap.addListener("click", (ev) => {
+        const clickListener = wfMap.addListener("click", (ev) => {
             if (!drawingClickHandler || !ev || !ev.latLng) return;
             drawingClickHandler(ev.latLng);
         });
 
-        const moveListener = submitMap.addListener("mousemove", (ev) => {
+        const moveListener = wfMap.addListener("mousemove", (ev) => {
             if (!center || !tempCircle || !tempRadiusLine || !ev || !ev.latLng) return;
 
             const edge = ev.latLng;
@@ -1757,12 +1682,12 @@
     }
 
     function enableCircleModeTouch() {
-        if (!submitMap) return;
+        if (!wfMap) return;
 
         ensureProjectionHelper();
 
         const color = currentShapeColor;
-        const mapDiv = submitMap.getDiv();
+        const mapDiv = wfMap.getDiv();
         if (!mapDiv) return;
 
         let center = null;
@@ -1773,7 +1698,7 @@
         const labelDiv = ensureLabelDiv("circle");
 
         function latLngFromTouch(touch) {
-            if (!submitMap || !mapProjection) return null;
+            if (!wfMap || !mapProjection) return null;
             const rect = mapDiv.getBoundingClientRect();
 
             const x = touch.clientX - rect.left - overlayOffset.x;
@@ -1797,7 +1722,7 @@
             lastEdge = latLng;
 
             tempCircle = new google.maps.Circle({
-                map: submitMap,
+                map: wfMap,
                 center,
                 radius: 0,
                 strokeColor: color,
@@ -1808,7 +1733,7 @@
             });
 
             tempRadiusLine = new google.maps.Polyline({
-                map: submitMap,
+                map: wfMap,
                 path: [center, center],
                 strokeOpacity: 0,
                 clickable: false,
@@ -1917,9 +1842,9 @@
 
         document.addEventListener("click", (ev) => {
             // Only active when a drawing mode is on and we have a handler
-            if (!currentMode || !drawingClickHandler || !submitMap) return;
+            if (!currentMode || !drawingClickHandler || !wfMap) return;
 
-            const mapDiv = submitMap.getDiv();
+            const mapDiv = wfMap.getDiv();
             if (!mapDiv) return;
             if (!mapDiv.contains(ev.target)) return;
 
@@ -1945,28 +1870,231 @@
     }
 
     // =============================
+    // Css styles
+    // =============================
+
+    function injectDrawingToolsCSS() {
+        const STYLE_ID = "wfmap-drawing-tools-css";
+        if (document.getElementById(STYLE_ID)) return;
+
+        const style = document.createElement("style");
+        style.id = STYLE_ID;
+        style.textContent = `
+/* ============================
+   Drawing tools: controls panel
+   ============================ */
+.wfmapmods-draw-controls {
+  background: rgba(255,255,255,0.9);
+  border-radius: 6px;
+  padding: 4px;
+  margin: 10px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  font-family: Roboto, Arial, sans-serif;
+  user-select: none;
+}
+
+.wfmapmods-draw-controls.is-horizontal {
+  flex-direction: row;
+  align-items: center;
+}
+
+.wfmapmods-draw-controls__title {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 2px;
+  text-align: center;
+  color: #6b7280;
+}
+
+.wfmapmods-draw-controls.is-horizontal .wfmapmods-draw-controls__title {
+  margin-bottom: 0;
+  margin-right: 6px;
+}
+
+.wfmapmods-draw-sep {
+  border-top: 1px solid #e5e7eb;
+  margin: 2px 0;
+}
+
+/* ============================
+   Buttons
+   ============================ */
+.wfmapmods-draw-btn {
+  padding: 4px 6px;
+  margin: 2px;
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  cursor: pointer;
+  color: #111827;
+  line-height: 1.2;
+  text-align: center;
+  font-family: Roboto, Arial, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.wfmapmods-draw-btn:hover { background: #f3f4f6; }
+
+.wfmapmods-draw-btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+}
+
+.wfmapmods-draw-btn--danger {
+  border-color: #dc2626;
+  color: #b91c1c;
+}
+.wfmapmods-draw-btn--danger:hover {
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.wfmapmods-draw-btn--delete.wf-toggle-active {
+  border-color: #dc2626 !important;
+}
+
+/* Your shared exclusive-toggle ON state */
+.wf-toggle-active {
+  background-color: #ffce04 !important;
+  border-color: #ffce04 !important;
+  color: #000000 !important;
+}
+
+/* ============================
+   Modal (settings)
+   ============================ */
+.wfmapmods-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 12px 0;
+}
+
+.wfmapmods-modal {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.35);
+  width: 260px;
+  max-width: calc(100% - 32px);
+  padding: 10px 12px 8px;
+  box-sizing: border-box;
+  font-family: Roboto, Arial, sans-serif;
+  font-size: 12px;
+  color: #111827;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.wfmapmods-modal__title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.wfmapmods-modal__row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+  gap: 6px;
+}
+
+.wfmapmods-modal__label {
+  flex: 0 0 120px;
+  font-size: 11px;
+  color: #374151;
+}
+
+.wfmapmods-modal__control {
+  flex: 1 0 auto;
+}
+
+.wfmapmods-modal__hint {
+  font-size: 11px;
+  color: #6b7280;
+  margin: 2px 0 8px;
+}
+
+.wfmapmods-modal__buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.wfmapmods-btn {
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.wfmapmods-btn--primary {
+  padding: 4px 12px;
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #ffffff;
+}
+
+/* ============================
+   Measure labels (circle/line)
+   ============================ */
+.wfmapmods-measure-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  font-size: 11px;
+  color: #111827;
+  background: transparent;
+  padding: 0;
+  border: none;
+  pointer-events: none;
+  display: none;
+  z-index: ${LABEL_ZINDEX};
+}
+
+/* Hide selection pin while drawing */
+body.wf-drawing-active img[src$="map_selection_pin.svg"] {
+  display: none !important;
+}
+`;
+        document.head.appendChild(style);
+    }
+
+    // =============================
     // Initialisation
     // =============================
 
     function initDrawingTools() {
-        if (!submitMap) return;
+        if (!wfMap) return;
 
         ensureDrawingDefaults();
         currentShapeColor = userSettings.drawing.color || "#ff0000";
 
-        ensurePinHideCSS();
         ensureProjectionHelper();
         attachMarkerClickCapture();
         attachEscapeToCancelHandler();
 
         applyDrawingEnabledState();
 
-        submitMap._wfDrawingToolsInitialised = true;
+        attachGlobalToggleObserver();
+
+        wfMap._wfDrawingToolsInitialised = true;
     }
 
     function bootstrap() {
         loadSettings();
         setupMapRouteWatcher();
+        injectDrawingToolsCSS();
     }
 
     bootstrap();
