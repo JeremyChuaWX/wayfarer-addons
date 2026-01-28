@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.0.9
+// @version      3.0.10
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -484,6 +484,7 @@
     }
 
     function addMapSidebarLink() {
+        return;
         const sidebar = document.querySelector('app-sidebar');
         if (!sidebar) return;
 
