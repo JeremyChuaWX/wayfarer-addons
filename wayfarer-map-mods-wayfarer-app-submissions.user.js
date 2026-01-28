@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Wayfarer App Submissions
-// @version      0.1.5
+// @version      3.0.0
 // @description  Import Wayfarer App submissions from Lightship Geospatial Browser and show them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-wayfarer-app-submissions.user.js
@@ -40,28 +40,22 @@
     const SETTINGS_KEY = "wfmap_wayfarerApp_settings";
     const OBJECT_STORE_NAME = "wayfarerAppSubmissions";
 
-    const POI_BRIDGE_ID = "wfmapmods-poi-bridge";
-    const POI_BRIDGE_SOURCE = "wf-wayfarerapp-overlay";
-    const SUBMISSION_BRIDGE_ID = "wfmapmods-submit-bridge";
-
-    const PERFORMANCE_MAX_VISIBLE_MARKERS = 400;
+    // postMessage channel
+    const POSTMESSAGE_TYPE_IMPORT = "wfmap-wayfarerapp-import";
 
     const WFAPPSUB_CHILD_NAME = "wf-lightship-geospatial";
 
-    const LIGHTSHIP_LOGO_SVG = '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" fill-rule="evenodd"><path d="M32 8c3.812 0 7.465.874 10.856 2.598a.208.208 0 01.037.348l-.04.026-4.591 2.256a.208.208 0 01-.158.01A19.714 19.714 0 0032 12.273a19.598 19.598 0 00-13.95 5.779A19.598 19.598 0 0012.27 32c0 1.53.518 2.646 1.539 3.316 2.098 1.379 5.996.795 9.625-.252l.656-.195.647-.203.637-.21.313-.106.613-.215.596-.217.852-.322.537-.21.51-.205.923-.385.408-.175a.939.939 0 011.054.199.938.938 0 01.2 1.053l-.362.854-.297.73-.313.796-.214.563-.215.586-.215.605-.213.622-.105.317-.206.643-.199.652-.19.66c-.982 3.535-1.487 7.264-.151 9.296.667 1.016 1.777 1.53 3.299 1.53a19.6 19.6 0 0013.95-5.778A19.599 19.599 0 0051.73 32c0-2.234-.376-4.434-1.115-6.54a.208.208 0 01-.008-.11l.017-.051 2.22-4.517a.209.209 0 01.183-.116c.07-.002.15.041.188.11A24.05 24.05 0 0156 32.002c0 13.233-10.767 24-24 24S8 45.234 8 32C8 18.767 18.767 8 32 8zm19.336 2.399c1.257-.618 2.58.653 2.069 1.913l-.048.108-11.31 23.018c-.57 1.161-2.22 1.104-2.73-.04l-.05-.122-2.574-7.293a1.509 1.509 0 00-.794-.87l-.127-.051-7.292-2.574c-1.22-.43-1.356-2.075-.279-2.717l.116-.062 23.019-11.31z"/></svg>';
-
-    // postMessage channel
-    const POSTMESSAGE_TYPE_IMPORT = "wfmap-wayfarerapp-import";
+    const ORIGIN_WAYFARER = "wayfarer.nianticlabs.com";
+    const ORIGIN_LIGHTSHIP = "lightship.dev"
 
     // -----------------------------
     // Branch based on hostname
     // -----------------------------
 
-    if (location.hostname === "lightship.dev") {
+    if (location.hostname === ORIGIN_LIGHTSHIP) {
         // Child tab: intercept getSubmittedPois and send to parent
-        console.log("on lightship.dev");
         setupLightshipInterceptor();
-    } else if (location.hostname === "wayfarer.nianticlabs.com") {
+    } else if (location.hostname === ORIGIN_WAYFARER) {
         // Main Wayfarer tab: map overlay + settings + import handler
         setupWayfarerOverlay();
     }
@@ -75,7 +69,7 @@
         // Use the real page context if available (Tampermonkey/Violentmonkey)
         const global = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
 
-        // ✅ Only run in the child window that was opened by the App Submissions plugin
+        // Only run in the child window that was opened by the App Submissions plugin
         if (global.name !== WFAPPSUB_CHILD_NAME) {
             console.log(
                 "[WFAppSub] Not App Submissions child window (name =",
@@ -132,7 +126,7 @@
                                                     type: POSTMESSAGE_TYPE_IMPORT,
                                                     submittedPois: json.submittedPois,
                                                 },
-                                                "https://wayfarer.nianticlabs.com"
+                                                ORIGIN_WAYFARER
                                             );
                                         } catch (e) {
                                             console.warn(
@@ -243,7 +237,7 @@
                                             type: POSTMESSAGE_TYPE_IMPORT,
                                             submittedPois: json.submittedPois,
                                         },
-                                        "https://wayfarer.nianticlabs.com"
+                                        ORIGIN_WAYFARER
                                     );
                                 } catch (e) {
                                     console.warn(
@@ -299,11 +293,25 @@
     function setupWayfarerOverlay() {
 
         // -----------------------------
+        // Wayfarer constants
+        // -----------------------------
+        const SUBMIT_ROUTE = "/new/submit/new";
+        const MAPVIEW_ROUTE = "/new/mapview";
+
+        const POI_BRIDGE_ID = "wfmapmods-poi-bridge";
+        const POI_BRIDGE_SOURCE = "wf-wayfarerapp-overlay";
+        const SUBMISSION_BRIDGE_ID = "wfmapmods-submit-bridge";
+
+        const PERFORMANCE_MAX_VISIBLE_MARKERS = 400;
+
+        const LIGHTSHIP_LOGO_SVG = '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" fill-rule="evenodd"><path d="M32 8c3.812 0 7.465.874 10.856 2.598a.208.208 0 01.037.348l-.04.026-4.591 2.256a.208.208 0 01-.158.01A19.714 19.714 0 0032 12.273a19.598 19.598 0 00-13.95 5.779A19.598 19.598 0 0012.27 32c0 1.53.518 2.646 1.539 3.316 2.098 1.379 5.996.795 9.625-.252l.656-.195.647-.203.637-.21.313-.106.613-.215.596-.217.852-.322.537-.21.51-.205.923-.385.408-.175a.939.939 0 011.054.199.938.938 0 01.2 1.053l-.362.854-.297.73-.313.796-.214.563-.215.586-.215.605-.213.622-.105.317-.206.643-.199.652-.19.66c-.982 3.535-1.487 7.264-.151 9.296.667 1.016 1.777 1.53 3.299 1.53a19.6 19.6 0 0013.95-5.778A19.599 19.599 0 0051.73 32c0-2.234-.376-4.434-1.115-6.54a.208.208 0 01-.008-.11l.017-.051 2.22-4.517a.209.209 0 01.183-.116c.07-.002.15.041.188.11A24.05 24.05 0 0156 32.002c0 13.233-10.767 24-24 24S8 45.234 8 32C8 18.767 18.767 8 32 8zm19.336 2.399c1.257-.618 2.58.653 2.069 1.913l-.048.108-11.31 23.018c-.57 1.161-2.22 1.104-2.73-.04l-.05-.122-2.574-7.293a1.509 1.509 0 00-.794-.87l-.127-.051-7.292-2.574c-1.22-.43-1.356-2.075-.279-2.717l.116-.062 23.019-11.31z"/></svg>';
+
+        // -----------------------------
         // Runtime state – submissions
         // -----------------------------
 
         let appSubmissions = null; // array of submittedPois
-        let submitMap = null;
+        let wfMap = null;
         let mapAttached = false;
 
         let submissionMarkers = {}; // id → marker
@@ -311,7 +319,8 @@
         let lastSelectedMarker = null;
         let lastSelectedOriginalIcon = null;
 
-        let lastPanelPresent = false;
+        let mapPanelObserver = null;
+        let mapPanelMutationScheduled = false;
 
         function hideSubmissionActionLinks() {
             const container = document.querySelector(".wfmapmods-poi-function-links");
@@ -354,7 +363,7 @@
                     // Centre the map on this POI and simulate a click
                     // This is to move the marker location to the resubmitted poi
                     if (
-                        submitMap &&
+                        wfMap &&
                         typeof poiForResubmit.lat === "number" &&
                         typeof poiForResubmit.lng === "number"
                     ) {
@@ -364,11 +373,11 @@
                         );
 
                         // centre map
-                        submitMap.setCenter(targetLatLng);
+                        wfMap.setCenter(targetLatLng);
 
                         // simulate a click on that location
                         // (this will trigger any map 'click' listeners used by the base plugin)
-                        google.maps.event.trigger(submitMap, "click", {
+                        google.maps.event.trigger(wfMap, "click", {
                             latLng: targetLatLng
                         });
                     }
@@ -564,69 +573,124 @@
         // Map lifecycle + DOM watchers
         // -----------------------------
 
+        function isOnMapCapableRoute() {
+            const p = window.location.pathname;
+            return p.startsWith(SUBMIT_ROUTE) || p.startsWith(MAPVIEW_ROUTE);
+        }
+
+        function onMapRouteChange() {
+            if (isOnMapCapableRoute()) {
+                startMapPanelWatcher();
+            } else {
+                stopMapPanelWatcher();
+                teardownMap();
+            }
+        }
+
+        function setupMapRouteWatcher() {
+            const origPushState = history.pushState;
+            const origReplaceState = history.replaceState;
+
+            function wrappedRouteChange() {
+                onMapRouteChange();
+            }
+
+            history.pushState = function (...args) {
+                const ret = origPushState.apply(this, args);
+                wrappedRouteChange();
+                return ret;
+            };
+
+            history.replaceState = function (...args) {
+                const ret = origReplaceState.apply(this, args);
+                wrappedRouteChange();
+                return ret;
+            };
+
+            window.addEventListener("popstate", wrappedRouteChange);
+
+            // Initial load
+            wrappedRouteChange();
+        }
+
         function startMapPanelWatcher() {
+            // Don’t double-start
+            if (mapPanelObserver) return;
+
+            // Handle the current state in case the panel is already present
             handlePanelChange();
 
-            const mo = new MutationObserver(handlePanelChange);
-            mo.observe(document.body, {
+            mapPanelObserver = new MutationObserver(() => {
+                // Debounce: collapse many mutations into one handler call
+                if (mapPanelMutationScheduled) return;
+
+                mapPanelMutationScheduled = true;
+                requestAnimationFrame(() => {
+                    mapPanelMutationScheduled = false;
+                    handlePanelChange();
+                });
+            });
+
+            mapPanelObserver.observe(document.body, {
                 childList: true,
                 subtree: true
             });
         }
 
+        function stopMapPanelWatcher() {
+            if (mapPanelObserver) {
+                mapPanelObserver.disconnect();
+                mapPanelObserver = null;
+            }
+        }
+
         function handlePanelChange() {
             const panelPresent = !!document.querySelector("#wfmapmods-side-panel");
 
-            if (panelPresent && !lastPanelPresent) {
+            if (panelPresent) {
                 attachWayfarerAppOverlayToMapIfNeeded();
                 insertSettingsLink();
                 insertLayersToggle();
-                // load cached submissions
                 loadAppSubmissionsFromIDB();
-            } else if (!panelPresent && lastPanelPresent) {
-                teardownWayfarerAppOverlayForMap();
+                setupBridgeSelectionWatcher();
+                stopMapPanelWatcher();
             }
-
-            lastPanelPresent = panelPresent;
         }
 
-        function getSubmitMap() {
-            return new Promise(resolve => {
-                let attempts = 40;
+        function looksLikeGoogleMap(obj) {
+            return !!(obj &&
+                      typeof obj.getCenter === "function" &&
+                      typeof obj.addListener === "function" &&
+                      typeof obj.getDiv === "function");
+        }
+
+        function extractMapFromCtxEntry(entry) {
+            if (!entry) return null;
+            if (looksLikeGoogleMap(entry)) return entry; // mapview
+            const m = entry?.componentRef?.map;          // submit
+            return looksLikeGoogleMap(m) ? m : null;
+        }
+
+        function getWfMap() {
+            return new Promise((resolve) => {
+                let attempts = 80;
 
                 function tryFindMap() {
-                    const candidates = document.querySelectorAll("app-submit-wayspot-map nia-map");
-                    let foundMap = null;
+                    const candidates = document.querySelectorAll("app-submit-wayspot-map nia-map, app-wf-base-map");
 
-                    candidates.forEach(el => {
-                        if (foundMap || !el.__ngContext__) return;
+                    for (const el of candidates) {
+                        const ctx = el && el.__ngContext__;
+                        if (!ctx) continue;
 
-                        const ctx = el.__ngContext__;
                         for (const entry of ctx) {
-                            if (!entry) continue;
-
                             try {
-                                if (entry.componentRef && entry.componentRef.map) {
-                                    foundMap = entry.componentRef.map;
-                                    break;
-                                }
-                            } catch {
-                                /* ignore */
-                            }
+                                const map = extractMapFromCtxEntry(entry);
+                                if (map) return resolve(map);
+                            } catch { /* ignore */ }
                         }
-                    });
-
-                    if (foundMap) {
-                        resolve(foundMap);
-                        return;
                     }
 
-                    if (attempts-- <= 0) {
-                        console.warn("[WFAppSub] Failed to find submit map after several attempts");
-                        resolve(null);
-                        return;
-                    }
-
+                    if (attempts-- <= 0) return resolve(null);
                     setTimeout(tryFindMap, 250);
                 }
 
@@ -634,10 +698,10 @@
             });
         }
 
-        function teardownWayfarerAppOverlayForMap() {
+        function teardownMap() {
             if (!mapAttached) return;
             clearSubmissionMarkers();
-            submitMap = null;
+            wfMap = null;
             mapAttached = false;
         }
 
@@ -651,24 +715,38 @@
             submissionMarkers = {};
         }
 
+        function isMapStale(map) {
+            try {
+                const div = map && map.getDiv && map.getDiv();
+                return !div || !div.isConnected;
+            } catch {
+                return true;
+            }
+        }
+
         async function attachWayfarerAppOverlayToMapIfNeeded() {
             if (mapAttached) {
-                refreshSubmissionMarkers();
-                return;
+                if (wfMap && !isMapStale(wfMap)) {
+                    refreshSubmissionMarkers();
+                    return;
+                }
+
+                // stale / missing
+                teardownMap();
             }
 
-            const map = await getSubmitMap();
+            const map = await getWfMap();
             if (!map) {
                 console.warn("[WFAppSub] Map not found – cannot attach");
                 return;
             }
 
-            submitMap = map;
+            wfMap = map;
             mapAttached = true;
 
-            if (!submitMap._wayfarerAppOverlayBoundsListenerAdded) {
-                submitMap.addListener("idle", refreshSubmissionMarkers);
-                submitMap._wayfarerAppOverlayBoundsListenerAdded = true;
+            if (!wfMap._wayfarerAppOverlayBoundsListenerAdded) {
+                wfMap.addListener("idle", refreshSubmissionMarkers);
+                wfMap._wayfarerAppOverlayBoundsListenerAdded = true;
             }
 
             refreshSubmissionMarkers();
@@ -773,7 +851,7 @@
         }
 
         function refreshSubmissionMarkers() {
-            if (!submitMap || !Array.isArray(appSubmissions)) return;
+            if (!wfMap || !Array.isArray(appSubmissions)) return;
 
             const mapCfg = userSettings.map || {};
             const enabled = mapCfg.wayfarerAppEnabled !== false;
@@ -784,7 +862,7 @@
                 return;
             }
 
-            const bounds = submitMap.getBounds();
+            const bounds = wfMap.getBounds();
             if (!bounds) return;
 
             const maxVisibleMarkers = typeof mapCfg.performanceMaxVisibleMarkers === "number"
@@ -887,7 +965,7 @@
                 }
 
                 if (!marker.getMap()) {
-                    marker.setMap(submitMap);
+                    marker.setMap(wfMap);
                 }
             });
 
@@ -965,7 +1043,7 @@
 
                 const link = document.createElement("a");
                 link.id = "wfmapmods-settings-wayfarerapp";
-                link.textContent = "Wayfarer App submissions";
+                link.textContent = "Wayfarer App";
 
                 settingsBody.appendChild(link);
 
@@ -1203,7 +1281,7 @@
                         try {
                             window.open(
                                 "https://lightship.dev/account/geospatial-browser/",
-                                "wf-lightship-geospatial"
+                                WFAPPSUB_CHILD_NAME
                             );
                         } catch (e) {
                             console.warn("[WFAppSub] Failed to open Lightship Geospatial Browser", e);
@@ -1738,8 +1816,7 @@
         function bootstrap() {
             loadSettings();
             loadAppSubmissionsFromIDB();
-            startMapPanelWatcher();
-            setupBridgeSelectionWatcher();
+            setupMapRouteWatcher();
             setupImportMessageListener();
         }
 
