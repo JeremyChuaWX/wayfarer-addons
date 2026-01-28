@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.0.6
+// @version      3.0.7
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -1629,7 +1629,10 @@
             });
 
             poiFunctionLinks.appendChild(deepLinkA);
-            poiFunctionLinks.appendChild(reportA);
+
+            if (reportApiLive) {
+                poiFunctionLinks.appendChild(reportA);
+            }
             poiFunctionsRow.appendChild(wayspotSvg);
             poiFunctionsRow.appendChild(poiFunctionLinks);
             poiFunctionsSection.appendChild(poiFunctionsRow);
@@ -8097,13 +8100,15 @@
     }
 
     function tryParseLatLng(str) {
-        // Basic "lat,lng" parser: e.g. "-31.9535, 115.8570"
-        const match = str.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+        const match = str.match(/^\s*\(?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)?\s*$/);
         if (!match) return null;
 
         const lat = parseFloat(match[1]);
         const lng = parseFloat(match[2]);
-        if (isNaN(lat) || isNaN(lng)) return null;
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+        // Optional: sanity check ranges
+        if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
 
         return new google.maps.LatLng(lat, lng);
     }
