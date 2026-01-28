@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Contributions Overlay
-// @version      1.2.7
+// @version      3.0.0
 // @description  Loads nominations from the Contributions list and shows them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-contributions-overlay.user.js
@@ -42,6 +42,10 @@
     const POI_BRIDGE_SOURCE = "wf-contrib-overlay";
     const SUBMISSION_BRIDGE_ID = "wfmapmods-submit-bridge";
 
+    // Map URLs
+    const SUBMIT_ROUTE = "/new/submit/new";
+    const MAPVIEW_ROUTE = "/new/mapview";
+
     // Behaviour / performance
     const PERFORMANCE_MAX_VISIBLE_MARKERS = 200;
 
@@ -69,7 +73,7 @@
     let globalCanAppeal = null;
 
     // Map instance & attachment status
-    let submitMap = null;
+    let wfMap = null;
     let mapAttached = false;
 
     // Marker objects keyed by nominationId
@@ -83,7 +87,6 @@
     // UI / DOM state flags
     let mapPanelObserver = null;
     let mapPanelMutationScheduled = false;
-    const MAP_PATH = "/new/submit/new";
 
     // Pending submissions created via /submit/start
     let pendingSubmissions = {};          // id -> { id, title, description, lat, lng, submittedAt }
@@ -866,7 +869,7 @@
  *  - clear any nomination action links (pending submissions have no actions)
  */
     function createPendingSubmissionMarker(pending) {
-        if (!submitMap) return;
+        if (!wfMap) return;
 
         const mapCfg = userSettings.map || {};
         if (mapCfg.contributionsEnabled === false) return;
@@ -876,7 +879,7 @@
         const cfg = getMarkerConfigForStatus("NOMINATED");
 
         const marker = new google.maps.Marker({
-            map: submitMap,
+            map: wfMap,
             position: { lat: pending.lat, lng: pending.lng },
             title: `${pending.title || "Pending nomination"} (NOMINATED – syncing…)`,
             icon: {
@@ -1201,12 +1204,13 @@
     // Map lifecycle + DOM watchers
     // -----------------------------
 
-    function isOnMapPage() {
-        return window.location.pathname.startsWith(MAP_PATH);
+    function isOnMapCapableRoute() {
+        const p = window.location.pathname;
+        return p.startsWith(SUBMIT_ROUTE) || p.startsWith(MAPVIEW_ROUTE);
     }
 
     function onMapRouteChange() {
-        if (isOnMapPage()) {
+        if (isOnMapCapableRoute()) {
             startMapPanelWatcher();
         } else {
             stopMapPanelWatcher();
@@ -1299,44 +1303,40 @@
      * Returns a Promise that resolves to the map object or null if not found.
      * Retries a fixed number of times as the Angular app bootstraps.
      */
-    function getSubmitMap() {
-        return new Promise(resolve => {
-            let attempts = 40;
+    function looksLikeGoogleMap(obj) {
+        return !!(obj &&
+                  typeof obj.getCenter === "function" &&
+                  typeof obj.addListener === "function" &&
+                  typeof obj.getDiv === "function");
+    }
+
+    function extractMapFromCtxEntry(entry) {
+        if (!entry) return null;
+        if (looksLikeGoogleMap(entry)) return entry; // mapview
+        const m = entry?.componentRef?.map;          // submit
+        return looksLikeGoogleMap(m) ? m : null;
+    }
+
+    function getWfMap() {
+        return new Promise((resolve) => {
+            let attempts = 80;
 
             function tryFindMap() {
-                const candidates = document.querySelectorAll("app-submit-wayspot-map nia-map");
-                let foundMap = null;
+                const candidates = document.querySelectorAll("app-submit-wayspot-map nia-map, app-wf-base-map");
 
-                candidates.forEach(el => {
-                    if (foundMap || !el.__ngContext__) return;
-
-                    const ctx = el.__ngContext__;
+                for (const el of candidates) {
+                    const ctx = el && el.__ngContext__;
+                    if (!ctx) continue;
 
                     for (const entry of ctx) {
-                        if (!entry) continue;
-
                         try {
-                            if (entry.componentRef && entry.componentRef.map) {
-                                foundMap = entry.componentRef.map;
-                                break;
-                            }
-                        } catch {
-                            // Ignore malformed context entries
-                        }
+                            const map = extractMapFromCtxEntry(entry);
+                            if (map) return resolve(map);
+                        } catch { /* ignore */ }
                     }
-                });
-
-                if (foundMap) {
-                    resolve(foundMap);
-                    return;
                 }
 
-                if (attempts-- <= 0) {
-                    console.warn("[ContribOverlay] Failed to find submit map after several attempts");
-                    resolve(null);
-                    return;
-                }
-
+                if (attempts-- <= 0) return resolve(null);
                 setTimeout(tryFindMap, 250);
             }
 
@@ -1344,30 +1344,48 @@
         });
     }
 
+    function isMapStale(map) {
+        try {
+            const div = map && map.getDiv && map.getDiv();
+            return !div || !div.isConnected;
+        } catch {
+            return true;
+        }
+    }
+
     /**
      * Ensure the contribution overlay is attached to the submit map.
      * If already attached, simply refreshes the markers.
      */
     async function attachContribOverlayToMapIfNeeded() {
+        // 1) If we think we're attached, verify the map is still alive.
         if (mapAttached) {
-            refreshNominationMarkers();
-            return;
+            const hasLiveMap = wfMap && !isMapStale(wfMap);
+
+            if (hasLiveMap) {
+                refreshNominationMarkers();
+                return;
+            }
+
+            // We thought we were attached, but the underlying map is gone/stale.
+            teardownMap();
+            // fall through to reattach
         }
 
-        const map = await getSubmitMap();
+        const map = await getWfMap();
 
         if (!map) {
             console.warn("[ContribOverlay] Map not found – cannot attach");
             return;
         }
 
-        submitMap = map;
+        wfMap = map;
         mapAttached = true;
 
         // Update markers whenever the user pans or zooms the map
-        if (!submitMap._contribOverlayBoundsListenerAdded) {
-            submitMap.addListener("idle", refreshNominationMarkers);
-            submitMap._contribOverlayBoundsListenerAdded = true;
+        if (!wfMap._contribOverlayBoundsListenerAdded) {
+            wfMap.addListener("idle", refreshNominationMarkers);
+            wfMap._contribOverlayBoundsListenerAdded = true;
         }
 
         // Draw any nominations we already have cached
@@ -1385,7 +1403,7 @@
 
         clearNominationMarkers();
         clearPendingSubmissionMarkers();
-        submitMap = null;
+        wfMap = null;
         mapAttached = false;
     }
 
@@ -1537,7 +1555,7 @@
      * or become ineligible.
      */
     function refreshNominationMarkers() {
-        if (!submitMap || !nominations || !Array.isArray(nominations)) {
+        if (!wfMap || !nominations || !Array.isArray(nominations)) {
             return;
         }
 
@@ -1552,7 +1570,7 @@
             return;
         }
 
-        const bounds = submitMap.getBounds();
+        const bounds = wfMap.getBounds();
         if (!bounds) {
             // Map not fully initialised yet
             return;
@@ -1670,7 +1688,7 @@
             }
 
             if (!marker.getMap()) {
-                marker.setMap(submitMap);
+                marker.setMap(wfMap);
             }
         });
 
@@ -1862,28 +1880,6 @@
                 }
                 if (!poiForResubmit) poiForResubmit = poi; // fallback to the current POI
                 if (!poiForResubmit) return;
-
-                // Centre the map on this POI and simulate a click to copy its location
-                if (
-                    submitMap &&
-                    typeof poiForResubmit.lat === "number" &&
-                    typeof poiForResubmit.lng === "number"
-                ) {
-                    const targetLatLng = new google.maps.LatLng(
-                        poiForResubmit.lat,
-                        poiForResubmit.lng
-                    );
-
-                    // Centre the map
-                    submitMap.setCenter(targetLatLng);
-                    // Optional: tweak zoom if desired
-                    // submitMap.setZoom(18);
-
-                    // Simulate a map click at that point
-                    google.maps.event.trigger(submitMap, "click", {
-                        latLng: targetLatLng
-                    });
-                }
 
                 // Notify the base script to prefill the resubmit form
                 sendResubmitToBase(poiForResubmit);
@@ -3085,7 +3081,6 @@
      */
     function sendResubmitToBase(poi) {
         if (!poi) return;
-
         const bridge = document.getElementById(SUBMISSION_BRIDGE_ID);
         if (!bridge) {
             console.warn("[ContribOverlay] Submission bridge not found");
