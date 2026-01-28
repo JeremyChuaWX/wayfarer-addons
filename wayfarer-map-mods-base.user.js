@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.0.0
+// @version      3.0.1
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -7061,6 +7061,8 @@
             return;
         }
 
+        watchForLatLngElement();
+
         // If we already successfully set up this exact page state, don’t redo.
         if (routeKey === lastSetupRouteKey && wfMap && !isMapStale()) {
             return;
@@ -8836,7 +8838,7 @@
         // Disable optimized thumbnails on submit route
         // Clashes with css that hides the canvas to get rid of default markers
         const optimized =
-              !(isOnSubmitRoute && ap.markerType === "thumbnail");
+              !(isOnSubmitRoute() && ap.markerType === "thumbnail");
 
         const marker = new google.maps.Marker({
             position: { lat: poi.lat, lng: poi.lng },
@@ -10690,7 +10692,6 @@ canvas#deckgl-overlay {
         loadSettings();
         injectCss();
         applyCssForCurrentRoute();
-        watchForLatLngElement();
         initMapModeWatcher();
         initSidenavPaddingRouteWatcher();
         createBridges();
