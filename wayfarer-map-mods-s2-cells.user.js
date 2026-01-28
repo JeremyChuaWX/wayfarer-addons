@@ -5624,35 +5624,6 @@
 .wfmapmods-s2-btn-danger:hover {
   background: rgba(220, 38, 38, 0.08);
 }
-
-/* =========================================================
-   iOS: prevent Safari input auto-zoom (<16px font-size)
-   Strategy: force 16px font-size, then visually scale down
-   ========================================================= */
-
-html.wf-ios .wfmapmods-s2-dialog input[type="text"],
-html.wf-ios .wfmapmods-s2-dialog input[type="number"],
-html.wf-ios .wfmapmods-s2-dialog input[type="search"],
-html.wf-ios .wfmapmods-s2-dialog textarea,
-html.wf-ios .wfmapmods-s2-dialog select {
-  font-size: 16px !important; /* must beat inline styles in row() */
-}
-
-/* Manual POI modal uses ~12px look → scale 12/16 = 0.75 */
-html.wf-ios .wfmapmods-s2-dialog.wfmapmods-s2-dialog--poi input[type="text"],
-html.wf-ios .wfmapmods-s2-dialog.wfmapmods-s2-dialog--poi input[type="number"],
-html.wf-ios .wfmapmods-s2-dialog.wfmapmods-s2-dialog--poi select {
-  transform: scale(0.75);
-  transform-origin: left center;
-  width: calc(100% / 0.75); /* keep visual width ~same after scaling */
-}
-
-/* Settings modal number inputs use 60px width and ~11px look → scale 11/16 = 0.6875 */
-html.wf-ios .wfmapmods-s2-row input[type="number"] {
-  transform: scale(0.6875);
-  transform-origin: left center;
-  width: calc(60px / 0.6875); /* ≈ 87.27px so it looks like 60px after scaling */
-}
 `;
         document.head.appendChild(css);
     }
