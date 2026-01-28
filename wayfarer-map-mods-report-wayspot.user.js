@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Report Wayspots
-// @version      3.0.0
+// @version      3.0.1
 // @description  Adds a "Report Wayspot" link to the side panel and pre-fills the Helpshift form
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
@@ -490,7 +490,6 @@
         loadSettings();
         setupWayfarerMessaging();
         setupRouteWatcher();
-        injectReportWayspotsCSS();
     }
 
     function isOnMapCapableRoute() {
@@ -2371,38 +2370,6 @@
             removalReasonText,
             supportingText
         };
-    }
-
-    // ======================================================================
-    // Css styles
-    // ======================================================================
-
-    function injectReportWayspotsCSS() {
-        if (!document.documentElement.classList.contains("wf-ios")) return;
-
-        const style = document.createElement("style");
-        style.textContent = `
-    /* ======================================================
-       Report Wayspots – iOS Safari input zoom prevention
-       ====================================================== */
-
-    /* Force computed font-size >=16px to stop iOS auto-zoom */
-    html.wf-ios #wfmapmods-reporting-modal-backdrop input,
-    html.wf-ios #wfmapmods-reporting-modal-backdrop select,
-    html.wf-ios #wfmapmods-reporting-modal-backdrop textarea {
-      font-size: 16px !important; /* override inline 11px */
-    }
-
-    /* Restore original small appearance (11px look) */
-    html.wf-ios #wfmapmods-reporting-modal-backdrop input,
-    html.wf-ios #wfmapmods-reporting-modal-backdrop select,
-    html.wf-ios #wfmapmods-reporting-modal-backdrop textarea {
-      transform: scale(0.6875); /* 11 / 16 */
-      transform-origin: left center;
-      width: calc(100% / 0.6875);
-    }
-  `;
-        document.head.appendChild(style);
     }
 
     // ======================================================================
