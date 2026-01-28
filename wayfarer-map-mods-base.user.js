@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.0.4
+// @version      3.0.5
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -9733,6 +9733,59 @@
 
 .wfmapmods-map-host {
   position: relative;
+}
+
+/* ===============================
+   Safari-safe status icon sizing
+   =============================== */
+
+/* Keep the row horizontal, no wrapping surprises */
+.wfmapmods-detail-status-row {
+  flex-wrap: nowrap;
+}
+
+/* Each visible icon reserves exactly 20×20px */
+.wfmapmods-detail-poi-source,
+.wfmapmods-detail-pgo-entity-logo,
+.wfmapmods-detail-community-logo {
+  width: 20px;
+  height: 20px;
+
+  /* critical for Safari */
+  min-width: 20px;
+  min-height: 20px;
+  flex: 0 0 20px;
+
+  display: flex;          /* only applies when you toggle it visible */
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* Kill intrinsic SVG sizing (Safari bug source) */
+.wfmapmods-detail-poi-source svg,
+.wfmapmods-detail-pgo-entity-logo svg,
+.wfmapmods-detail-community-logo svg {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  display: block;
+}
+
+/* Replace margin-based spacing with predictable spacing */
+.wfmapmods-detail-poi-source,
+.wfmapmods-detail-pgo-entity-logo {
+  margin-right: 0;
+}
+
+.wfmapmods-detail-community-logo {
+  margin-left: 0;
+}
+
+/* Centralised spacing that Safari can’t miscompute */
+.wfmapmods-detail-status-row {
+  gap: 10px;
 }
 
 /* =============================================================================
