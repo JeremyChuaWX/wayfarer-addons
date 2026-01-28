@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.0.5
+// @version      3.0.6
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -7259,6 +7259,7 @@
         }
 
         updateAvailability();
+        checkWhichApisAreLive();
     }
 
     function setGoogleMapControls() {
@@ -10743,8 +10744,6 @@ canvas#deckgl-overlay {
         initSidenavPaddingRouteWatcher();
         createBridges();
         setupMapRouteWatcher();
-
-        checkWhichApisAreLive();
     }
     init();
 
