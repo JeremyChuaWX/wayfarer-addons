@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Apple Maps Tiles
-// @version      3.0.0
+// @version      3.0.1
 // @description  Adds Apple Maps as an extra base map provider in Wayfarer, using a token fetched via satellites.pro
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-apple-map-tiles.user.js
@@ -470,8 +470,6 @@
         const newOptions = Object.assign({}, existingOptions, {
             mapTypeIds
         });
-
-        console.log(newOptions);
 
         wfMap.setOptions({
             mapTypeControl: true,
