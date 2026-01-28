@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Map Tiles
-// @version      0.0.4
+// @version      3.0.0
 // @description  Adds extra base map providers (Bing, Esri, OSM, etc.) to the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-map-tiles.user.js
@@ -29,10 +29,11 @@
 (function () {
     'use strict';
 
-    let submitMap = null;
+    let wfMap = null;
     let mapAttached = false;
 
-    const MAP_PATH = "/new/submit/new";
+    const SUBMIT_ROUTE = "/new/submit/new";
+    const MAPVIEW_ROUTE = "/new/mapview";
 
     let mapPanelObserver = null;
     let mapPanelMutationScheduled = false;
@@ -40,14 +41,23 @@
     const SETTINGS_KEY = "wfmap_base_tiles_settings";
 
     const BUILTIN_TYPES = ["roadmap", "satellite", "hybrid"];
-    const CUSTOM_PROVIDER_NAMES = ["Bing", "Esri", "Esri Clarity", "OSM"];
+    const CUSTOM_PROVIDER_NAMES = [
+        "Bing",
+        "Esri",
+        "Esri Clarity",
+        "OSM",
+        "CartoDB DarkMatter",
+        "CartoDB Positron"
+    ];
 
     // -----------------------------
     // Settings (defaults + storage)
     // -----------------------------
 
     const userSettings = {
-        map: {}
+        map: {
+            defaultType: "last-used"
+        }
     };
 
     function mergeDeep(target, source) {
@@ -93,16 +103,17 @@
     // Map lifecycle + DOM watchers
     // -----------------------------
 
-    function isOnMapPage() {
-        return window.location.pathname.startsWith(MAP_PATH);
+    function isOnMapCapableRoute() {
+        const p = window.location.pathname;
+        return p.startsWith(SUBMIT_ROUTE) || p.startsWith(MAPVIEW_ROUTE);
     }
 
     function onMapRouteChange() {
-        if (isOnMapPage()) {
+        if (isOnMapCapableRoute()) {
             startMapPanelWatcher();
         } else {
             stopMapPanelWatcher();
-            teardownBaseMapsForMap();
+            teardownMap();
         }
     }
 
@@ -180,44 +191,40 @@
         }
     }
 
-    function getSubmitMap() {
-        return new Promise(resolve => {
-            let attempts = 40;
+    function looksLikeGoogleMap(obj) {
+        return !!(obj &&
+                  typeof obj.getCenter === "function" &&
+                  typeof obj.addListener === "function" &&
+                  typeof obj.getDiv === "function");
+    }
+
+    function extractMapFromCtxEntry(entry) {
+        if (!entry) return null;
+        if (looksLikeGoogleMap(entry)) return entry; // mapview
+        const m = entry?.componentRef?.map;          // submit
+        return looksLikeGoogleMap(m) ? m : null;
+    }
+
+    function getWfMap() {
+        return new Promise((resolve) => {
+            let attempts = 80;
 
             function tryFindMap() {
-                const candidates = document.querySelectorAll('app-submit-wayspot-map nia-map');
-                let foundMap = null;
+                const candidates = document.querySelectorAll("app-submit-wayspot-map nia-map, app-wf-base-map");
 
-                candidates.forEach(el => {
-                    if (foundMap || !el.__ngContext__) return;
-
-                    const ctx = el.__ngContext__;
+                for (const el of candidates) {
+                    const ctx = el && el.__ngContext__;
+                    if (!ctx) continue;
 
                     for (const entry of ctx) {
-                        if (!entry) continue;
-
                         try {
-                            if (entry.componentRef && entry.componentRef.map) {
-                                foundMap = entry.componentRef.map;
-                                break;
-                            }
-                        } catch {
-                            /* ignore invalid entries */
-                        }
+                            const map = extractMapFromCtxEntry(entry);
+                            if (map) return resolve(map);
+                        } catch { /* ignore */ }
                     }
-                });
-
-                if (foundMap) {
-                    resolve(foundMap);
-                    return;
                 }
 
-                if (attempts-- <= 0) {
-                    console.warn("[BaseMaps] Failed to find submit map after several attempts");
-                    resolve(null);
-                    return;
-                }
-
+                if (attempts-- <= 0) return resolve(null);
                 setTimeout(tryFindMap, 250);
             }
 
@@ -225,24 +232,42 @@
         });
     }
 
-    function teardownBaseMapsForMap() {
+    function teardownMap() {
         if (!mapAttached) return;
 
-        submitMap = null;
+        wfMap = null;
         mapAttached = false;
     }
 
+    function isMapStale(map) {
+        try {
+            const div = map && map.getDiv && map.getDiv();
+            return !div || !div.isConnected;
+        } catch {
+            return true;
+        }
+    }
+
     async function attachBasemapsToMapIfNeeded() {
-        if (mapAttached) return;
+        // If we think we're attached but the underlying map is gone, reset and reattach
+        if (mapAttached) {
+            if (wfMap && !isMapStale(wfMap)) return;
 
-        const map = await getSubmitMap();
+            teardownMap();
+        }
 
+        const map = await getWfMap();
         if (!map) {
             console.warn("[BaseMaps] Map not found – cannot attach");
             return;
         }
 
-        submitMap = map;
+        wfMap = map;
+
+        // Important: new map instance => allow init on this new object
+        wfMap._wfmapmodsBasemapsInitialised = false;
+        wfMap._wfmapmodsLastUsedListenerAttached = false;
+
         initCustomBaseMaps();
         mapAttached = true;
     }
@@ -306,7 +331,7 @@
             background: "#ffffff",
             borderRadius: "8px",
             boxShadow: "0 10px 25px rgba(0,0,0,0.35)",
-            width: "260px",
+            width: "280px",
             maxWidth: "calc(100% - 32px)",
             padding: "10px 12px 8px",
             boxSizing: "border-box",
@@ -472,8 +497,8 @@
             saveSettings();
 
             // Re-init base maps with new settings
-            if (submitMap) {
-                submitMap._wfmapmodsBasemapsInitialised = false;
+            if (wfMap) {
+                wfMap._wfmapmodsBasemapsInitialised = false;
                 initCustomBaseMaps();
             }
 
@@ -507,56 +532,91 @@
 
 
     function initCustomBaseMaps() {
-        if (!submitMap) return;
-        if (submitMap._wfmapmodsBasemapsInitialised) return;
-        submitMap._wfmapmodsBasemapsInitialised = true;
+        if (!wfMap) return;
+        if (wfMap._wfmapmodsBasemapsInitialised) return;
+        wfMap._wfmapmodsBasemapsInitialised = true;
 
         // Make sure the structure exists
         if (!userSettings.map) userSettings.map = {};
         if (!userSettings.map.providers) userSettings.map.providers = {};
 
-        let mapTypeControlOptions = {
+        const isEnabled = (name) => userSettings.map.providers?.[name] !== false;
+
+        const existing = wfMap.get("mapTypeControlOptions") || {};
+        const baseIds = Array.isArray(existing.mapTypeIds) ? existing.mapTypeIds.slice()
+        : ["roadmap", "satellite", "hybrid"];
+
+        let mapTypeControlOptions = Object.assign({}, existing, {
             style: google.maps.MapTypeControlStyle.DROPDOWN_MENU,
             position: google.maps.ControlPosition.TOP_LEFT,
-            mapTypeIds: ["roadmap", "satellite", "hybrid"]
-        };
-
-        // Add extra services
-        mapTypeControlOptions = setupMapLayer(
-            submitMap, mapTypeControlOptions,
-            "Bing", 20, 0,
-            "https://t0.tiles.virtualearth.net/tiles/a{quadKey}.jpeg?g=1398"
-        );
-        mapTypeControlOptions = setupMapLayer(
-            submitMap, mapTypeControlOptions,
-            "Esri", 19, 0,
-            "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-        );
-        mapTypeControlOptions = setupMapLayer(
-            submitMap, mapTypeControlOptions,
-            "Esri Clarity", 19, 0,
-            "https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-        );
-        mapTypeControlOptions = setupMapLayer(
-            submitMap, mapTypeControlOptions,
-            "OSM", 19, 0,
-            "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-        );
-
-        submitMap.setOptions({
-            mapTypeControl: true,
-            mapTypeControlOptions
+            mapTypeIds: baseIds
         });
 
-        // Choose initial map type
-        setInitialMapType();
+        // Add extra services
+        if (isEnabled("Bing")) {
+            mapTypeControlOptions = setupMapLayer(
+                wfMap, mapTypeControlOptions,
+                "Bing", 20, 0,
+                "https://t0.tiles.virtualearth.net/tiles/a{quadKey}.jpeg?g=1398"
+            );
+        }
+
+        if (isEnabled("Esri")) {
+            mapTypeControlOptions = setupMapLayer(
+                wfMap, mapTypeControlOptions,
+                "Esri", 19, 0,
+                "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            );
+        }
+
+        if (isEnabled("Esri Clarity")) {
+            mapTypeControlOptions = setupMapLayer(
+                wfMap, mapTypeControlOptions,
+                "Esri Clarity", 19, 0,
+                "https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            );
+        }
+
+        if (isEnabled("OSM")) {
+            mapTypeControlOptions = setupMapLayer(
+                wfMap, mapTypeControlOptions,
+                "OSM", 19, 0,
+                "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+            );
+        }
+
+        if (isEnabled("CartoDB DarkMatter")) {
+            mapTypeControlOptions = setupMapLayer(
+                wfMap, mapTypeControlOptions,
+                "CartoDB DarkMatter", 20, 0,
+                "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
+            );
+        }
+
+        if (isEnabled("CartoDB Positron")) {
+            mapTypeControlOptions = setupMapLayer(
+                wfMap, mapTypeControlOptions,
+                "CartoDB Positron", 20, 0,
+                "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
+            );
+        }
+
+        wfMap.setOptions({
+            mapTypeControl: true,
+            mapTypeControlOptions,
+            tilt: 0,
+            heading: 0
+        });
 
         // Start tracking "last used"
         attachLastUsedListener();
+
+        // Choose initial map type
+        setInitialMapType();
     }
 
     function setInitialMapType() {
-        if (!submitMap) return;
+        if (!wfMap) return;
 
         const mapSettings = userSettings.map || {};
         const savedDefault = mapSettings.defaultType;
@@ -572,26 +632,26 @@
             preferredType = savedDefault;
         } else {
             // Fallback: keep current map type or go to roadmap
-            preferredType = submitMap.getMapTypeId() || "roadmap";
+            preferredType = wfMap.getMapTypeId() || "roadmap";
         }
 
-        const hasType = submitMap.mapTypes && submitMap.mapTypes.get(preferredType);
+        const hasType = wfMap.mapTypes && wfMap.mapTypes.get(preferredType);
         if (hasType) {
-            submitMap.setMapTypeId(preferredType);
+            wfMap.setMapTypeId(preferredType);
         } else {
-            submitMap.setMapTypeId("roadmap");
+            wfMap.setMapTypeId("roadmap");
         }
     }
 
 
     function attachLastUsedListener() {
-        if (!submitMap) return;
-        if (submitMap._wfmapmodsLastUsedListenerAttached) return;
-        submitMap._wfmapmodsLastUsedListenerAttached = true;
+        if (!wfMap) return;
+        if (wfMap._wfmapmodsLastUsedListenerAttached) return;
+        wfMap._wfmapmodsLastUsedListenerAttached = true;
 
         if (google.maps && google.maps.event) {
-            google.maps.event.addListener(submitMap, "maptypeid_changed", () => {
-                const current = submitMap.getMapTypeId();
+            google.maps.event.addListener(wfMap, "maptypeid_changed", () => {
+                const current = wfMap.getMapTypeId();
                 if (!current) return;
 
                 if (!userSettings.map) userSettings.map = {};
