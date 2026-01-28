@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Report Wayspots
-// @version      0.3.1
+// @version      3.0.0
 // @description  Adds a "Report Wayspot" link to the side panel and pre-fills the Helpshift form
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
@@ -48,15 +48,27 @@
     const MSG_EXECUTOR = SCRIPT_UUID;
     const MSG_GET_DATA = "wf-report-get-data";
     const MSG_DATA = "wf-report-data";
+    const MSG_TICKET = "wf-report-ticket";
 
     // Wayfarer routes / DOM ids
-    const SUBMIT_PATH = "/new/submit/new";
+    const SUBMIT_ROUTE = "/new/submit/new";
+    const MAPVIEW_ROUTE = "/new/mapview";
     const POI_BRIDGE_ID = "wfmapmods-poi-bridge";
     const SIDE_PANEL_ID = "wfmapmods-side-panel";
+
+    // Report history store (Wayfarer-side)
+    const DB_NAME = "wayfarer-tools-db";
+    const REPORTED_STORE_NAME = "reportedWayspots";
 
     // Geocoder bridge postMessage types (page-context bridge)
     const WFMM_GEO_REQ = "wfmm-geocode-req";
     const WFMM_GEO_RES = "wfmm-geocode-res";
+
+    // Rate limit values for Helpshift web form
+    const MAX_HELPSHIFT_TICKETS_PER_HOUR = 10;
+    const HELPSHIFT_WINDOW_MS = 60 * 60 * 1000;
+    const RATE_LIMIT_REPORT_MECHANISM = "pgo-locations-web";
+    const REPORTED_IDX_MECH_TS = "byMechanismTimestamp";
 
     // Helpshift form slots
     const HS_SLOTS = {
@@ -70,8 +82,31 @@
         postcode: "niantic_form_field_20190624210109237-37afb1f548efd12"
     };
 
-    // Helpshift country dropdown slot
-    const HS_COUNTRY_SLOT = "niantic_form_field_20190926192331730-5f5841a93bbe40b";
+    // Helpshift dropdown ids
+    const HS_DROPDOWN_SLOTS = {
+        country: "niantic_form_field_20190926192331730-5f5841a93bbe40b",
+        propertyOwner: "niantic_form_field_20181106191511987-b598f73a256c0ac",
+        preferredLanguage: "niantic_form_field_20181112193004636-810bc70ee8c9615"
+    };
+
+    // Report codes on Helpshift form
+    const REMOVAL_REASON_TEXT_BY_CODE = {
+        "niantic_form_text_20181106014139979-8cfd5c3a002f7df": "It’s on private property",
+        "niantic_form_text_20200806230605256-06de5949656cf83": "Applying limiting hours of operations to public parks",
+        "niantic_form_text_20181106014139979-d78aee9298dc824": "Safety concern - on a major roadway, highway, or bridge",
+        "niantic_form_text_20181106014139979-36a3950dc16b720": "Safety concern - interfering with emergency operations",
+        "niantic_form_text_20181106014139979-457f0bb6061fbfa": "Safety concern - on an industrial site or power plant",
+        "niantic_form_text_20181106014139979-0ab6d91bd225793": "Safety concern - on an airport runway or train tracks",
+        "niantic_form_text_20181106014139979-d907c34fbded66b": "Safety concern - in the middle of a body of water with no land"
+    };
+
+    const HS_DROPDOWN_DEFAULTS = {
+        timeoutMs: 7000,
+        pollMs: 75,
+        useSearch: true,
+        verify: true,
+        verifyDelayMs: 80
+    };
 
     // Helpshift countries (big list)
     const HELPSHIFT_COUNTRIES = [
@@ -367,9 +402,17 @@
     let livePois = [];
     let sidePanelObserver = null;
     let sidePanelMutationScheduled = false;
+    let rateLimitCache = {
+        checkedAtMs: 0,
+        state: null
+    };
+    let rateLimitTimer = null;
 
     // Settings cache
     const userSettings = {};
+
+    // Helshift-side state
+    let helpshiftCurrentWayspotPayload = null;
 
     // ======================================================================
     // Utilities
@@ -418,6 +461,22 @@
         }
     }
 
+    function formatWaitMs(ms) {
+        const s = Math.max(0, Math.ceil(ms / 1000));
+        const m = Math.floor(s / 60);
+        const r = s % 60;
+        if (m <= 0) return `${r}s`;
+        return `${m}m ${String(r).padStart(2, "0")}s`;
+    }
+
+    function formatTimeLocal(ms) {
+        try {
+            return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        } catch {
+            return "";
+        }
+    }
+
     // ======================================================================
     // WAYFARER
     // ======================================================================
@@ -431,16 +490,16 @@
         loadSettings();
         setupWayfarerMessaging();
         setupRouteWatcher();
+        injectReportWayspotsCSS();
     }
 
-    function isOnSubmitPage() {
-        // Adjust if Wayfarer ever changes the path or uses a trailing slash
-        return window.location.pathname.startsWith(SUBMIT_PATH);
+    function isOnMapCapableRoute() {
+        const p = window.location.pathname;
+        return p.startsWith(SUBMIT_ROUTE) || p.startsWith(MAPVIEW_ROUTE);
     }
 
     function onRouteChange() {
-        if (isOnSubmitPage()) {
-            // We’re on /new/submit/new → ensure the side panel watcher is running
+        if (isOnMapCapableRoute()) {
             startSidePanelWatcher();
         } else {
             // Any other internal route → stop watching to save work
@@ -474,6 +533,286 @@
         wrappedRouteChange();
     }
 
+    // ======================================================================
+    // Indexed db
+    // ======================================================================
+
+    function getReportedWayspotsIDBInstance(version) {
+        return new Promise((resolve, reject) => {
+            if (!window.indexedDB) {
+                reject(new Error("This browser doesn't support IndexedDB"));
+                return;
+            }
+
+            const openRequest = (typeof version === "number")
+            ? indexedDB.open(DB_NAME, version)
+            : indexedDB.open(DB_NAME);
+
+            openRequest.onsuccess = (event) => {
+                const db = event.target.result;
+
+                // If store missing, bump version and create it.
+                if (!db.objectStoreNames.contains(REPORTED_STORE_NAME)) {
+                    const currentVersion = db.version;
+                    db.close();
+                    getReportedWayspotsIDBInstance(currentVersion + 1).then(resolve, reject);
+                    return;
+                }
+
+                resolve(db);
+            };
+
+            openRequest.onupgradeneeded = (event) => {
+                const db = event.target.result;
+
+                let store;
+                if (!db.objectStoreNames.contains(REPORTED_STORE_NAME)) {
+                    store = db.createObjectStore(REPORTED_STORE_NAME, { keyPath: "id" });
+                } else {
+                    store = event.target.transaction.objectStore(REPORTED_STORE_NAME);
+                }
+
+                if (!store.indexNames.contains(REPORTED_IDX_MECH_TS)) {
+                    store.createIndex(REPORTED_IDX_MECH_TS, ["reportMechanism", "timestampMs"], { unique: false });
+                }
+            };
+
+            openRequest.onerror = (event) => {
+                reject(event.target.error || new Error("Failed to open IndexedDB"));
+            };
+        });
+    }
+
+    function saveReportedWayspotToIDB(rec) {
+        if (!rec || typeof rec.timestampMs !== "number" || !Number.isFinite(rec.timestampMs)) {
+            console.warn("[Report Wayspot] Refusing to save record: missing/invalid timestampMs", rec);
+            return Promise.resolve(false);
+        }
+
+        if (!rec.id || typeof rec.id !== "string") {
+            console.warn("[Report Wayspot] Refusing to save record: missing id", rec);
+            return Promise.resolve(false);
+        }
+
+        return getReportedWayspotsIDBInstance().then(db => new Promise((resolve) => {
+            const tx = db.transaction(REPORTED_STORE_NAME, "readwrite");
+            const store = tx.objectStore(REPORTED_STORE_NAME);
+
+            // add() fails on duplicate primary key (id)
+            const req = store.add(rec);
+
+            req.onerror = () => {
+                console.warn(
+                    "[Report Wayspot] Collision: record not saved because id already exists:",
+                    rec.id,
+                    req.error,
+                    rec
+                );
+                // tx will abort -> resolve(false) below
+            };
+
+            tx.oncomplete = () => {
+                db.close();
+                resolve(true);
+            };
+
+            tx.onabort = () => {
+                db.close();
+                resolve(false);
+            };
+
+            tx.onerror = () => {
+                db.close();
+                resolve(false);
+            };
+        })).catch(err => {
+            console.warn("[Report Wayspot] IndexedDB not available (save):", err);
+            return false;
+        });
+    }
+
+    function makeReportId(timestampMs = Date.now()) {
+        // time-first so lexical sort ~= chronological
+        const t = Number(timestampMs || Date.now());
+        const timePart = t.toString(36).padStart(10, "0");
+
+        // 10 chars random → collision risk is astronomically low
+        const randPart = Math.random().toString(36).slice(2, 12);
+
+        return `rpt_${timePart}_${randPart}`;
+    }
+
+    // ======================================================================
+    // Rate limiting handling
+    // ======================================================================
+
+    function getHelpshiftRateLimitStateFromIDB(nowMs = Date.now()) {
+        const cutoff = nowMs - HELPSHIFT_WINDOW_MS;
+
+        return getReportedWayspotsIDBInstance().then(db => new Promise((resolve) => {
+            try {
+                const tx = db.transaction(REPORTED_STORE_NAME, "readonly");
+                const store = tx.objectStore(REPORTED_STORE_NAME);
+
+                // Use compound index [mechanism, timestamp]
+                const idx = store.index(REPORTED_IDX_MECH_TS);
+
+                const range = IDBKeyRange.bound(
+                    [RATE_LIMIT_REPORT_MECHANISM, cutoff],
+                    [RATE_LIMIT_REPORT_MECHANISM, nowMs]
+                );
+
+                let count = 0;
+                let oldestTs = null;
+
+                const req = idx.openCursor(range, "next"); // oldest -> newest
+
+                req.onsuccess = (ev) => {
+                    const cursor = ev.target.result;
+                    if (!cursor) return; // done
+
+                    const rec = cursor.value;
+                    const ts = (typeof rec?.timestampMs === "number") ? rec.timestampMs : null;
+
+                    if (typeof ts === "number") {
+                        count++;
+                        if (oldestTs === null || ts < oldestTs) oldestTs = ts;
+                    }
+
+                    // Early exit: once we've found >= limit, we already know oldest (because cursor is "next")
+                    // but keep it safe: oldestTs is already set on first record.
+                    if (count >= MAX_HELPSHIFT_TICKETS_PER_HOUR) {
+                        // We can stop scanning.
+                        try { cursor.advance(1e9); } catch {} // cheap way to end
+                        // Alternatively: resolve immediately and ignore tx completion.
+                        // We'll just let it finish naturally; still small because window size is small.
+                    } else {
+                        cursor.continue();
+                    }
+                };
+
+                req.onerror = () => {
+                    resolve({
+                        ok: true,
+                        countLastHour: 0,
+                        oldestTsInWindow: null,
+                        nextAllowedAtMs: nowMs,
+                        blocked: false
+                    });
+                };
+
+                tx.oncomplete = () => {
+                    db.close();
+
+                    const blocked = count >= MAX_HELPSHIFT_TICKETS_PER_HOUR;
+                    const nextAllowedAtMs = blocked && oldestTs != null
+                    ? (oldestTs + HELPSHIFT_WINDOW_MS)
+                    : nowMs;
+
+                    resolve({
+                        ok: true,
+                        countLastHour: count,
+                        oldestTsInWindow: oldestTs,
+                        nextAllowedAtMs,
+                        blocked
+                    });
+                };
+
+                tx.onabort = tx.onerror = () => {
+                    db.close();
+                    resolve({
+                        ok: false,
+                        countLastHour: 0,
+                        oldestTsInWindow: null,
+                        nextAllowedAtMs: nowMs,
+                        blocked: false
+                    });
+                };
+            } catch (e) {
+                try { db.close(); } catch {}
+                resolve({
+                    ok: false,
+                    countLastHour: 0,
+                    oldestTsInWindow: null,
+                    nextAllowedAtMs: nowMs,
+                    blocked: false
+                });
+            }
+        })).catch(() => ({
+            ok: false,
+            countLastHour: 0,
+            oldestTsInWindow: null,
+            nextAllowedAtMs: nowMs,
+            blocked: false
+        }));
+    }
+
+    function getHelpshiftRateLimitStateCached(ttlMs = 3000) {
+        const now = Date.now();
+        if (rateLimitCache.state && (now - rateLimitCache.checkedAtMs) < ttlMs) {
+            return Promise.resolve(rateLimitCache.state);
+        }
+        return getHelpshiftRateLimitStateFromIDB(now).then(state => {
+            rateLimitCache.checkedAtMs = now;
+            rateLimitCache.state = state;
+            return state;
+        });
+    }
+    function startRateLimitCountdown(link, nextAllowedAtMs) {
+        if (rateLimitTimer) return;
+
+        function updateTooltip() {
+            const now = Date.now();
+            const waitMs = Math.max(0, nextAllowedAtMs - now);
+
+            // Window expired → re-evaluate from IDB once
+            if (waitMs <= 0) {
+                stopRateLimitCountdown();
+                rateLimitCache.checkedAtMs = 0;
+
+                getHelpshiftRateLimitStateCached(0).then(rl => {
+                    const l = document.getElementById('wfmapmods-settings-report-wayspot');
+                    if (!l) return;
+                    applyRateLimitToReportLink(l, rl);
+                });
+                return;
+            }
+
+            // Ceiling to minutes
+            const minutesLeft = Math.ceil(waitMs / 60000);
+
+            const count = rateLimitCache?.state?.countLastHour
+            ?? MAX_HELPSHIFT_TICKETS_PER_HOUR;
+
+            link.title =
+                `Rate limit reached: ${count}/${MAX_HELPSHIFT_TICKETS_PER_HOUR} reports in the last hour.\n` +
+                `Next report available in ${minutesLeft} minute${minutesLeft === 1 ? "" : "s"} ` +
+                `(at ${formatTimeLocal(nextAllowedAtMs)}).`;
+        }
+
+        // Initial update immediately
+        updateTooltip();
+
+        // Align updates roughly to minute boundaries
+        const now = Date.now();
+        const msToNextMinute = 60000 - (now % 60000);
+
+        // First timeout → align to minute edge
+        rateLimitTimer = setTimeout(() => {
+            updateTooltip();
+
+            // Then once per minute
+            rateLimitTimer = setInterval(updateTooltip, 60000);
+        }, msToNextMinute);
+    }
+
+    function stopRateLimitCountdown() {
+        if (rateLimitTimer) {
+            clearTimeout(rateLimitTimer);
+            clearInterval(rateLimitTimer);
+            rateLimitTimer = null;
+        }
+    }
     // ======================================================================
     // Wayfarer data sources (live-pois-in-radius)
     // ======================================================================
@@ -640,24 +979,33 @@
         const linkId = 'wfmapmods-settings-report-wayspot';
         let link = document.getElementById(linkId);
 
-        // If link already exists, nothing more to do here
-        if (!link) {
-            link = document.createElement('a');
-            link.id = linkId;
-            link.textContent = 'Report';
-            link.style.cursor = 'pointer';
-            // default hidden until we know the status
-            link.style.display = 'none';
+        // Already injected
+        if (link) return;
 
+        link = document.createElement('a');
+        link.id = linkId;
+        link.textContent = 'Web Report';
+        link.style.cursor = 'pointer';
+        link.style.display = 'none'; // hidden until status known
+
+        // Try to find an existing "Report" link
+        const reportAnchor = [...reportLinkBody.querySelectorAll('a')]
+        .find(a => a.textContent.trim() === 'Report');
+
+        if (reportAnchor && reportAnchor.parentNode === reportLinkBody) {
+            // Insert immediately after "Report"
+            reportLinkBody.insertBefore(link, reportAnchor.nextSibling);
+        } else {
+            // Fallback: append to the end
             reportLinkBody.appendChild(link);
-
-            updateReportWayspotLinkVisibility();
-
-            link.addEventListener('click', (ev) => {
-                ev.preventDefault();
-                handleReportWayspotClick();
-            });
         }
+
+        updateReportWayspotLinkVisibility();
+
+        link.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            handleReportWayspotClick();
+        });
     }
 
     function insertReportingSettingsLinkIfReady() {
@@ -691,6 +1039,38 @@
         ? userSettings.reporting
         : {};
 
+        // Defaults
+        const defaultPropertyOwner = false; // No
+        const defaultPreferredLanguage = "English";
+
+        // Normalise existing values safely
+        const savedPropertyOwner =
+              typeof reporting.propertyOwner === "boolean"
+        ? reporting.propertyOwner
+        : defaultPropertyOwner;
+
+        const LANGUAGE_OPTIONS = [
+            "English",
+            "日本語",
+            "한국어",
+            "繁體中文",
+            "Español",
+            "Français",
+            "Deutsch",
+            "Italiano",
+            "Português do Brasil",
+            "Thai",
+            "русский",
+            "Türkçe",
+            "Indonesian",
+            "Hindi",
+        ];
+
+        const savedPreferredLanguage =
+              (typeof reporting.preferredLanguage === "string" && LANGUAGE_OPTIONS.includes(reporting.preferredLanguage))
+        ? reporting.preferredLanguage
+        : defaultPreferredLanguage;
+
         // --- Backdrop ---
         const backdrop = document.createElement("div");
         backdrop.id = "wfmapmods-reporting-modal-backdrop";
@@ -707,8 +1087,6 @@
             paddingBottom: "12px"
         });
 
-        // We'll assign this after we create saveBtn, but we need
-        // a reference here so closeModal can remove it.
         let escHandler;
 
         function closeModal() {
@@ -724,7 +1102,7 @@
             background: "#ffffff",
             borderRadius: "8px",
             boxShadow: "0 10px 25px rgba(0,0,0,0.35)",
-            width: "260px",
+            width: "320px",
             maxWidth: "calc(100% - 32px)",
             padding: "10px 12px 8px",
             boxSizing: "border-box",
@@ -762,13 +1140,13 @@
                 display: "flex",
                 alignItems: "center",
                 marginBottom: "6px",
-                gap: "4px"
+                gap: "6px"
             });
 
             const label = document.createElement("label");
             label.textContent = labelText;
             Object.assign(label.style, {
-                flex: "0 0 80px",
+                flex: "0 0 120px",
                 fontSize: "11px",
                 color: "#374151"
             });
@@ -799,13 +1177,37 @@
         emailInput.value = reporting.email || "";
         dialog.appendChild(makeRow("Email:", emailInput));
 
+        // --- Property Owner (Yes/No dropdown) ---
+        const propertyOwnerSelect = document.createElement("select");
+        const poNo = document.createElement("option");
+        poNo.value = "no";
+        poNo.textContent = "No";
+        const poYes = document.createElement("option");
+        poYes.value = "yes";
+        poYes.textContent = "Yes";
+        propertyOwnerSelect.appendChild(poNo);
+        propertyOwnerSelect.appendChild(poYes);
+        propertyOwnerSelect.value = savedPropertyOwner ? "yes" : "no";
+        dialog.appendChild(makeRow("Property Owner:", propertyOwnerSelect));
+
+        // --- Preferred Language dropdown ---
+        const languageSelect = document.createElement("select");
+        for (const lang of LANGUAGE_OPTIONS) {
+            const opt = document.createElement("option");
+            opt.value = lang;
+            opt.textContent = lang;
+            languageSelect.appendChild(opt);
+        }
+        languageSelect.value = savedPreferredLanguage;
+        dialog.appendChild(makeRow("Preferred Language:", languageSelect));
+
         // --- Buttons row ---
         const buttonsRow = document.createElement("div");
         Object.assign(buttonsRow.style, {
             display: "flex",
             justifyContent: "flex-end",
             gap: "8px",
-            marginTop: "8px"
+            marginTop: "10px"
         });
 
         const cancelBtn = document.createElement("button");
@@ -837,7 +1239,6 @@
         buttonsRow.appendChild(saveBtn);
         dialog.appendChild(buttonsRow);
 
-        // --- Button handlers ---
         cancelBtn.addEventListener("click", () => {
             closeModal();
         });
@@ -849,6 +1250,10 @@
 
             userSettings.reporting.name = nameInput.value.trim();
             userSettings.reporting.email = emailInput.value.trim();
+
+            // NEW: save extra settings
+            userSettings.reporting.propertyOwner = (propertyOwnerSelect.value === "yes");
+            userSettings.reporting.preferredLanguage = languageSelect.value || defaultPreferredLanguage;
 
             saveSettings();
             closeModal();
@@ -864,7 +1269,6 @@
                 saveBtn.click();
             }
         };
-
         document.addEventListener("keydown", escHandler);
 
         // Click on backdrop (but not dialog) closes
@@ -941,7 +1345,6 @@
 
         if (source === 'wfmm-s2' && status !== 'MISSING' && status !== 'MANUAL IMPORT') {
             // Condition 2: Gym/Pokestop custom marker from s2 plug-in
-            // Code may need to be adjusted for manually placed markers
             return true;
         }
 
@@ -954,14 +1357,58 @@
         return false;
     }
 
-    function updateReportWayspotLinkVisibility() {
+    async function updateReportWayspotLinkVisibility() {
         const link = document.getElementById('wfmapmods-settings-report-wayspot');
         if (!link) return;
 
         const info = getCurrentWayspotBridgeData();
         const visible = shouldShowReportLink(info, livePois);
 
-        link.style.display = visible ? '' : 'none';
+        if (!visible) {
+            link.style.display = "none";
+            stopRateLimitCountdown();
+            return;
+        }
+
+        link.style.display = "";
+
+        // Apply rate limiting state
+        const rl = await getHelpshiftRateLimitStateCached(3000);
+
+        applyRateLimitToReportLink(link, rl);
+    }
+
+    function applyRateLimitToReportLink(link, rlState) {
+        const now = Date.now();
+
+        const count = rlState?.countLastHour || 0;
+        const blocked = !!rlState?.blocked;
+
+        // Always show usage in tooltip (helpful even when unblocked)
+        if (!blocked) {
+            link.dataset.disabled = "";
+            link.style.pointerEvents = "";
+            link.style.opacity = "";
+            link.style.cursor = "pointer";
+
+            link.title = `Reports in last hour: ${count}/${MAX_HELPSHIFT_TICKETS_PER_HOUR}`;
+            stopRateLimitCountdown();
+            return;
+        }
+
+        const nextAt = rlState?.nextAllowedAtMs || (now + 30 * 1000);
+        const waitMs = Math.max(0, nextAt - now);
+
+        link.dataset.disabled = "1";
+        link.style.pointerEvents = "auto";
+        link.style.opacity = "0.45";
+        link.style.cursor = "not-allowed";
+
+        link.title =
+            `Rate limit reached: ${count}/${MAX_HELPSHIFT_TICKETS_PER_HOUR} reports in the last hour.\n` +
+            `Next report available in ${formatWaitMs(waitMs)} (at ${formatTimeLocal(nextAt)}).`;
+
+        startRateLimitCountdown(link, nextAt);
     }
 
     // ======================================================================
@@ -977,7 +1424,11 @@
         const basePayload = {
             ...wayspotData,
             name: reporting.name || null,
-            email: reporting.email || null
+            email: reporting.email || null,
+            propertyOwner: (typeof reporting.propertyOwner === "boolean") ? reporting.propertyOwner : false,
+            preferredLanguage: (typeof reporting.preferredLanguage === "string" && reporting.preferredLanguage.trim())
+            ? reporting.preferredLanguage.trim()
+            : "English"
         };
 
         const needsAddress =
@@ -1015,6 +1466,7 @@
     }
 
     function collectCurrentWayspotData() {
+        let guid = null;
         let title = null;
         let lat = null;
         let lng = null;
@@ -1043,6 +1495,9 @@
                     const payload = JSON.parse(jsonStr);
 
                     if (payload && typeof payload === 'object') {
+                        if (typeof payload.guid === "string") {
+                            guid = payload.guid;
+                        }
                         if (typeof payload.title === 'string') {
                             title = payload.title;
                         }
@@ -1099,6 +1554,7 @@
             postcode: postcode || null,
 
             // from POI bridge
+            guid: guid || null,
             title: title || null,
             lat: latNum,
             lng: lngNum,
@@ -1344,6 +1800,7 @@
             const data = event.data || {};
             if (data.executor !== MSG_EXECUTOR) return;
 
+            // Send POI data to Helpshift form
             if (data.type === MSG_GET_DATA) {
                 if (lastReportPayload) {
                     event.source.postMessage({
@@ -1352,6 +1809,33 @@
                         payload: lastReportPayload
                     }, ORIGIN_HELPSHIFT);
                 }
+                return;
+            }
+
+            // Store submitted tickets in the indexed db
+            if (data.type === MSG_TICKET && data.payload) {
+                const rec = data.payload;
+                if (!rec.id) return;
+
+                saveReportedWayspotToIDB(rec).then(ok => {
+                    if (!ok) return;
+
+                    // Update cache cheaply without querying IDB
+                    try {
+                        const ts = rec.timestampMs;
+                        if (typeof ts === "number" && rec.reportMechanism === RATE_LIMIT_REPORT_MECHANISM) {
+                            // Bust cache so next UI check is fresh
+                            rateLimitCache.checkedAtMs = 0;
+                        }
+                    } catch {}
+
+                    // Re-evaluate link state (in case we just hit the cap)
+                    updateReportWayspotLinkVisibility();
+
+                    console.log("[Report Wayspot] Saved report ticket:", rec);
+                }).catch(e => {
+                    console.warn("[Report Wayspot] Failed to save report ticket:", e);
+                });
             }
         }, false);
     }
@@ -1365,7 +1849,7 @@
             if (data.executor !== MSG_EXECUTOR) return;
 
             if (data.type === MSG_DATA && data.payload) {
-                // We got the wayspot payload: wait for form, then fill
+                helpshiftCurrentWayspotPayload = data.payload;
                 waitForHelpshiftFormAndFill(data.payload);
             }
         }, false);
@@ -1392,6 +1876,7 @@
     // ======================================================================
 
     function initHelpshift() {
+        hookHelpshiftReportIssueXHR();
         setupHelpshiftMessaging();
         requestWayspotDataFromOpener();
     }
@@ -1457,7 +1942,9 @@
 
             if (hasAnyField) {
                 clearInterval(intervalId);
-                fillHelpshiftForm(wayspotData);
+                Promise.resolve(fillHelpshiftForm(wayspotData)).catch(e => {
+                    console.warn("[Report Wayspot] fillHelpshiftForm error:", e);
+                });
             } else if (attempts >= maxAttempts) {
                 console.warn("[Report Wayspot] Failed to find Helpshift contact form inputs after max attempts.");
                 clearInterval(intervalId);
@@ -1474,7 +1961,7 @@
         el.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
-    function fillHelpshiftForm(wayspot) {
+    async function fillHelpshiftForm(wayspot) {
         const nameInput = findField('name');
         setFormValue(nameInput, wayspot.name);
 
@@ -1486,114 +1973,151 @@
 
         const latLonInput = findField('latlon');
         if (latLonInput && wayspot.lat != null && wayspot.lng != null) {
-            const latLonStr = `${wayspot.lat}, ${wayspot.lng}`;
-            setFormValue(latLonInput, latLonStr);
+            setFormValue(latLonInput, `${wayspot.lat}, ${wayspot.lng}`);
         }
 
-        const addrInput = findField('address');
-        setFormValue(addrInput, wayspot.address);
+        setFormValue(findField('address'), wayspot.address);
+        setFormValue(findField('city'), wayspot.city);
+        setFormValue(findField('state'), wayspot.state);
+        setFormValue(findField('postcode'), wayspot.postcode);
 
-        const cityInput = findField('city');
-        setFormValue(cityInput, wayspot.city);
+        // ---- Dropdowns: run sequentially to avoid focus/popover fights ----
+        await setPropertyOwnerDropdownYesNoAsync(wayspot.propertyOwner);
 
-        const stateInput = findField('state');
-        setFormValue(stateInput, wayspot.state);
+        await setPreferredLanguageDropdownAsync(wayspot.preferredLanguage);
 
-        const postcodeInput = findField('postcode');
-        setFormValue(postcodeInput, wayspot.postcode);
-
-        const helpshiftCountries = HELPSHIFT_COUNTRIES; // array of the titles from your list
+        const helpshiftCountries = HELPSHIFT_COUNTRIES;
         const resolved = resolveHelpshiftCountryName(wayspot.country, helpshiftCountries);
+        await setCountryInStaticDropdownAsync(resolved || wayspot.country);
 
-        if (resolved) {
-            setCountryInStaticDropdown(resolved);
-        } else {
-            // fallback: try raw value anyway
-            setCountryInStaticDropdown(wayspot.country);
-        }
+        // Optional final scroll reset
+        scrollHelpshiftToTop();
     }
 
     // ======================================================================
     // Helpshift: country dropdown + scroll
     // ======================================================================
 
-    function findCountryDropdownHost() {
-        // Your confirmed slot
-        return querySelectorDeep(
-            'static-dropdown[slot="niantic_form_field_20190926192331730-5f5841a93bbe40b"]'
-        );
+    function findStaticDropdownHostBySlot(slotName) {
+        return slotName ? querySelectorDeep(`static-dropdown[slot="${slotName}"]`) : null;
     }
 
     function clickReal(el) {
         const w = getPageWin();
         if (!el) return;
-        // Some components require mousedown rather than click
         el.dispatchEvent(new w.MouseEvent("mousedown", { bubbles: true, cancelable: true }));
         el.dispatchEvent(new w.MouseEvent("mouseup",   { bubbles: true, cancelable: true }));
         el.click?.();
     }
 
     function setInputValue(inputEl, value) {
-        const w = (typeof unsafeWindow !== "undefined") ? unsafeWindow : window;
+        const w = getPageWin();
         if (!inputEl) return;
-
         inputEl.value = value;
         inputEl.dispatchEvent(new w.Event("input", { bubbles: true }));
         inputEl.dispatchEvent(new w.Event("change", { bubbles: true }));
     }
 
-    function setCountryInStaticDropdown(countryName) {
-        const host = findCountryDropdownHost();
-        if (!host?.shadowRoot) return false;
-
-        const sr = host.shadowRoot;
-
-        // 1) Open it: click the title container (this matches your HTML)
-        const opener =
-              sr.querySelector(".hc-static-dropdown__search-input-title-container") ||
+    function getStaticDropdownSelectedTitle(sr) {
+        const el =
               sr.querySelector(".hc-static-dropdown__search-input-title") ||
+              sr.querySelector(".hc-static-dropdown__search-input-title-container") ||
               sr.querySelector(".hc-static-dropdown");
 
-        if (!opener) return false;
-        clickReal(opener);
+        return el?.textContent?.trim() || null;
+    }
 
-        // 2) Wait until modal exists inside shadow root, then fill search and click option
-        const t0 = Date.now();
-        const timeoutMs = 5000;
+    function setStaticDropdownByTitleAsync(slotName, desiredTitle, opts = {}) {
+        const o = { ...HS_DROPDOWN_DEFAULTS, ...(opts || {}) };
 
-        const timer = setInterval(() => {
-            const modal = sr.querySelector(".hc-static-dropdown__popover-modal");
-            if (!modal) {
-                if (Date.now() - t0 > timeoutMs) {
+        return new Promise((resolve) => {
+            const title = String(desiredTitle || "").trim();
+            if (!title) return resolve(false);
+
+            const host = findStaticDropdownHostBySlot(slotName);
+            if (!host?.shadowRoot) return resolve(false);
+
+            const sr = host.shadowRoot;
+
+            // Open dropdown
+            const opener =
+                  sr.querySelector(".hc-static-dropdown__search-input-title-container") ||
+                  sr.querySelector(".hc-static-dropdown__search-input-title") ||
+                  sr.querySelector(".hc-static-dropdown");
+
+            if (!opener) return resolve(false);
+            clickReal(opener);
+
+            const t0 = Date.now();
+            let clicked = false;
+
+            const timer = setInterval(() => {
+                if (Date.now() - t0 > o.timeoutMs) {
                     clearInterval(timer);
+                    return resolve(false);
                 }
-                return;
-            }
 
-            // Search input is inside <hc-input> shadow root (as your HTML shows)
-            const hcInputHost = sr.querySelector("hc-input.hc-static-dropdown__search-input");
-            const searchInput = hcInputHost?.shadowRoot?.querySelector("input.static-dropdown-input");
+                const modal = sr.querySelector(".hc-static-dropdown__popover-modal");
+                if (!modal) {
+                    if (!clicked) return; // still waiting to open
 
-            if (searchInput) {
-                setInputValue(searchInput, countryName);
-            }
+                    // modal closed after click → optionally verify
+                    clearInterval(timer);
 
-            // Find a matching <li> by its <p title="...">
-            const items = Array.from(sr.querySelectorAll("li.hc-static-dropdown__popover-item"));
-            const match = items.find(li => {
-                const p = li.querySelector("p.hc-static-dropdown__item-title");
-                const title = p?.getAttribute("title") || p?.textContent?.trim();
-                return title === countryName;
-            });
+                    if (!o.verify) {
+                        return resolve(true);
+                    }
 
-            if (match) {
-                clickReal(match);
-                clearInterval(timer);
-                scrollHelpshiftToTop();
-            }
-        }, 100);
+                    setTimeout(() => {
+                        const selected = getStaticDropdownSelectedTitle(sr);
+                        const ok = !!(selected && selected.includes(title));
+                        resolve(ok);
+                    }, o.verifyDelayMs);
 
-        return true;
+                    return;
+                }
+
+                // Optional search
+                if (o.useSearch) {
+                    const hcInputHost = sr.querySelector("hc-input.hc-static-dropdown__search-input");
+                    const searchInput = hcInputHost?.shadowRoot?.querySelector("input.static-dropdown-input");
+                    if (searchInput) setInputValue(searchInput, title);
+                }
+
+                // Find & click match
+                const items = Array.from(sr.querySelectorAll("li.hc-static-dropdown__popover-item"));
+                const match = items.find(li => {
+                    const p = li.querySelector("p.hc-static-dropdown__item-title");
+                    const itemTitle = p?.getAttribute("title") || p?.textContent?.trim();
+                    return itemTitle === title;
+                });
+
+                if (match) {
+                    clicked = true;
+                    clickReal(match);
+                }
+            }, o.pollMs);
+        });
+    }
+
+    function setCountryInStaticDropdownAsync(countryName) {
+        return setStaticDropdownByTitleAsync(HS_DROPDOWN_SLOTS.country, countryName, {
+            useSearch: true
+        });
+    }
+
+    function setPropertyOwnerDropdownYesNoAsync(isOwner) {
+        const ownerBool = (typeof isOwner === "boolean") ? isOwner : false;
+        return setStaticDropdownByTitleAsync(HS_DROPDOWN_SLOTS.propertyOwner, ownerBool ? "Yes" : "No", {
+            useSearch: false
+        });
+    }
+
+    function setPreferredLanguageDropdownAsync(language) {
+        const lang = String(language || "").trim() || "English";
+        return setStaticDropdownByTitleAsync(HS_DROPDOWN_SLOTS.preferredLanguage, lang, {
+            useSearch: true
+        });
     }
 
     function getHelpshiftScroller() {
@@ -1680,6 +2204,205 @@
         if (candidates.length === 1) return candidates[0];
 
         return null; // give up safely
+    }
+
+    function isHelpshiftReportIssueUrl(url) {
+        try {
+            const u = new URL(url, location.origin);
+            return u.origin === ORIGIN_HELPSHIFT && u.pathname === "/xhr/support/report-issue/";
+        } catch {
+            return String(url || "").includes("/xhr/support/report-issue/");
+        }
+    }
+
+    // Parse XHR request body (FormData or URLSearchParams-string)
+    function parseHelpshiftReportIssueBody(body) {
+        const out = {
+            message: null,
+            metaJson: null,
+            meta: null,
+        };
+
+        try {
+            if (!body) return out;
+
+            // FormData
+            if (typeof FormData !== "undefined" && body instanceof FormData) {
+                out.message = body.get("message") || null;
+                out.metaJson = body.get("meta") || null;
+            } else if (typeof body === "string") {
+                // x-www-form-urlencoded
+                const params = new URLSearchParams(body);
+                out.message = params.get("message");
+                out.metaJson = params.get("meta");
+            } else if (body instanceof URLSearchParams) {
+                out.message = body.get("message");
+                out.metaJson = body.get("meta");
+            }
+        } catch {}
+
+        if (out.metaJson) {
+            try {
+                out.meta = JSON.parse(out.metaJson);
+            } catch {}
+        }
+
+        return out;
+    }
+
+    // ======================================================================
+    // Parse Helpshift ticket data and return to Wayfarer
+    // ======================================================================
+
+
+    function extractRemovalReasonCode(metaObj) {
+        // Your capture: meta.cifs.removals_reason holds a niantic_form_text_* id
+        const cifs = metaObj?.cifs;
+        const v = cifs?.removals_reason;
+        return (typeof v === "string" && v.trim()) ? v.trim() : null;
+    }
+
+    function resolveRemovalReasonText(code) {
+        if (!code) return null;
+        return REMOVAL_REASON_TEXT_BY_CODE[code] || null;
+    }
+
+    function postTicketToOpener(ticketRecord) {
+        if (!window.opener) return;
+
+        const msg = {
+            executor: MSG_EXECUTOR,
+            type: MSG_TICKET,
+            payload: ticketRecord
+        };
+
+        try { window.opener.postMessage(msg, ORIGIN_WAYFARER); } catch {}
+    }
+
+    // Helpshift-only: hook XHR to capture report-issue request + response
+    function hookHelpshiftReportIssueXHR() {
+        const XHR = window.XMLHttpRequest || XMLHttpRequest;
+        if (!XHR || XHR.__wfReportIssueHooked) return;
+        XHR.__wfReportIssueHooked = true;
+
+        const origOpen = XHR.prototype.open;
+        const origSend = XHR.prototype.send;
+
+        XHR.prototype.open = function (method, url, ...rest) {
+            this._wf_hs_method = method;
+            this._wf_hs_url = url;
+            return origOpen.call(this, method, url, ...rest);
+        };
+
+        XHR.prototype.send = function (body) {
+            const isTarget = (String(this._wf_hs_method || "").toUpperCase() === "POST") && isHelpshiftReportIssueUrl(this._wf_hs_url);
+
+            if (isTarget) {
+                this._wf_hs_body = body;
+
+                this.addEventListener("load", () => {
+                    let resp = null;
+                    try { resp = JSON.parse(this.responseText); } catch {}
+
+                    const parsedReq = parseHelpshiftReportIssueBody(this._wf_hs_body);
+
+                    const ticketRecord = buildTicketRecordFromHelpshift(
+                        parsedReq,
+                        resp,
+                        helpshiftCurrentWayspotPayload
+                    );
+
+                    // Sometimes the Helpshift form fails to upload properly
+                    // When whether the response included a ticket number.
+                    if (!ticketRecord || !ticketRecord.ticket) {
+                        console.warn("[Report Wayspot] Helpshift report-issue did not return publish_id; not sending to opener.", {
+                            status: this.status,
+                            url: this._wf_hs_url,
+                            responseSnippet: String(this.responseText || "").slice(0, 200)
+                        });
+                        return;
+                    }
+
+                    postTicketToOpener(ticketRecord);
+                });
+            }
+
+            return origSend.call(this, body);
+        };
+    }
+
+    function buildTicketRecordFromHelpshift(reqParsed, respJson, wayspotPayload) {
+        const ticket = respJson?.publish_id ? String(respJson.publish_id) : null;
+
+        const timestampMs = (typeof respJson?.created_at_epoch === "number" && Number.isFinite(respJson.created_at_epoch))
+        ? respJson.created_at_epoch
+        : Date.now();
+
+        const wp = wayspotPayload || {};
+        const guid = (typeof wp.guid === "string" && wp.guid.trim()) ? wp.guid.trim() : null;
+        const title = (typeof wp.title === "string" && wp.title.trim()) ? wp.title.trim() : null;
+        const lat = (typeof wp.lat === "number") ? wp.lat : null;
+        const lng = (typeof wp.lng === "number") ? wp.lng : null;
+
+        const removalReasonCode = extractRemovalReasonCode(reqParsed?.meta);
+        const removalReasonText = resolveRemovalReasonText(removalReasonCode);
+
+        const supportingText =
+              (typeof reqParsed?.message === "string" && reqParsed.message.trim())
+        ? reqParsed.message.trim()
+        : null;
+
+        return {
+            // Primary Key - Unique ID
+            id: makeReportId(timestampMs),
+
+            // Wayspot being reported
+            guid,
+            title,
+            lat,
+            lng,
+
+            // Report metadata
+            ticket,
+            timestampMs,
+            reportMechanism: "pgo-locations-web",
+
+            removalReasonCode,
+            removalReasonText,
+            supportingText
+        };
+    }
+
+    // ======================================================================
+    // Css styles
+    // ======================================================================
+
+    function injectReportWayspotsCSS() {
+        if (!document.documentElement.classList.contains("wf-ios")) return;
+
+        const style = document.createElement("style");
+        style.textContent = `
+    /* ======================================================
+       Report Wayspots – iOS Safari input zoom prevention
+       ====================================================== */
+
+    /* Force computed font-size >=16px to stop iOS auto-zoom */
+    html.wf-ios #wfmapmods-reporting-modal-backdrop input,
+    html.wf-ios #wfmapmods-reporting-modal-backdrop select,
+    html.wf-ios #wfmapmods-reporting-modal-backdrop textarea {
+      font-size: 16px !important; /* override inline 11px */
+    }
+
+    /* Restore original small appearance (11px look) */
+    html.wf-ios #wfmapmods-reporting-modal-backdrop input,
+    html.wf-ios #wfmapmods-reporting-modal-backdrop select,
+    html.wf-ios #wfmapmods-reporting-modal-backdrop textarea {
+      transform: scale(0.6875); /* 11 / 16 */
+      transform-origin: left center;
+      width: calc(100% / 0.6875);
+    }
+  `;
+        document.head.appendChild(style);
     }
 
     // ======================================================================
