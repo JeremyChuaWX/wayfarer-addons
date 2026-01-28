@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.0.3
+// @version      3.0.4
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -4566,6 +4566,22 @@
     // Info Window (Mobile Only)
     // ==================================
 
+    function getPoiImageUrlsForInfoWindow(poi) {
+        const raw = (poi?.imageUrl || "").trim();
+        if (!raw) {
+            return {
+                iwImgUrl: NIANTIC_PLACEHOLDER_IMAGE_URL,
+                fullImgUrl: NIANTIC_PLACEHOLDER_IMAGE_URL,
+                isPlaceholder: true
+            };
+        }
+        return {
+            iwImgUrl: raw + "=w240",
+            fullImgUrl: raw + "=s0",
+            isPlaceholder: false
+        };
+    }
+
     function showPoiInfoWindowForSelection(poi, latLng) {
         if (!wfMap || !poi) return;
         if (currentMapMode !== MAP_MODE.MOBILE) {
@@ -4602,53 +4618,44 @@
         const latStr = poi.lat.toFixed(6);
         const lngStr = poi.lng.toFixed(6);
 
-        const iwImgUrl   = poi.imageUrl + "=w240";
-        const fullImgUrl = poi.imageUrl + "=s0";
+        const { iwImgUrl, fullImgUrl, isPlaceholder } = getPoiImageUrlsForInfoWindow(poi);
 
         return `
 <div class="agm-info-window-content wfmapmods-iw-root wf-nearby-iw-content">
+  <div class="wfmapmods-iw-content">
 
-    <div class="wfmapmods-iw-content">
-
-        <!-- Header -->
-        <div class="wfmapmods-iw-header">
-            <div class="wfmapmods-iw-title" title="${title}">
-                <span
-                    class="wfmapmods-iw-copy-title"
-                    data-copy="${title.replace(/"/g, '&quot;')}"
-                    title="Click to copy title"
-                >${title}</span>
-            </div>
-
-            <button class="wfmapmods-iw-close" title="Close">×</button>
-        </div>
-
-        <!-- Coordinates -->
-        <div class="wfmapmods-iw-coords">
-            <span
-                class="wfmapmods-iw-copy-coords"
-                data-lat="${latStr}"
-                data-lng="${lngStr}"
-                title="Click to copy coordinates of selected Wayspot"
-            >
-                ${latStr},${lngStr}
-            </span>
-        </div>
-
-        <!-- Image -->
-        <div class="wfmapmods-iw-img-wrapper">
-            <a href="${fullImgUrl}" target="_blank" rel="noopener noreferrer" class="wfmapmods-iw-img-link">
-                <img src="${iwImgUrl}" alt="${title}" class="wfmapmods-iw-img"/>
-            </a>
-        </div>
-
-        <!-- Description -->
-        <div class="wfmapmods-iw-desc">${desc}</div>
-
+    <div class="wfmapmods-iw-header">
+      <div class="wfmapmods-iw-title" title="${title}">
+        <span class="wfmapmods-iw-copy-title"
+              data-copy="${title.replace(/"/g, '&quot;')}"
+              title="Click to copy title">${title}</span>
+      </div>
+      <button class="wfmapmods-iw-close" title="Close">×</button>
     </div>
+
+    <div class="wfmapmods-iw-coords">
+      <span class="wfmapmods-iw-copy-coords"
+            data-lat="${latStr}"
+            data-lng="${lngStr}"
+            title="Click to copy coordinates of selected Wayspot">
+        ${latStr},${lngStr}
+      </span>
+    </div>
+
+    <div class="wfmapmods-iw-img-wrapper">
+      ${isPlaceholder
+            ? `<img src="${iwImgUrl}" alt="" class="wfmapmods-iw-img wfmapmods-iw-img--placeholder"/>`
+        : `<a href="${fullImgUrl}" target="_blank" rel="noopener noreferrer" class="wfmapmods-iw-img-link">
+             <img src="${iwImgUrl}" alt="${title}" class="wfmapmods-iw-img"/>
+           </a>`
+    }
+    </div>
+
+    <div class="wfmapmods-iw-desc">${desc}</div>
+
+  </div>
 </div>`;
     }
-
 
     function attachInfoWindowDomHandlers() {
         // ---- Copy Coordinates ----
