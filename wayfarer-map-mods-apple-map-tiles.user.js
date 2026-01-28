@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Apple Maps Tiles
-// @version      0.1.0
+// @version      3.0.0
 // @description  Adds Apple Maps as an extra base map provider in Wayfarer, using a token fetched via satellites.pro
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-apple-map-tiles.user.js
@@ -133,10 +133,11 @@
         return;
     }
 
-    let submitMap = null;
+    let wfMap = null;
     let mapAttached = false;
 
-    const MAP_PATH = "/new/submit/new";
+    const SUBMIT_ROUTE = "/new/submit/new";
+    const MAPVIEW_ROUTE = "/new/mapview";
 
     let mapPanelObserver = null;
     let mapPanelMutationScheduled = false;
@@ -251,9 +252,9 @@
         helperFrame = null;
 
         // If the map is ready, ensure Apple basemap exists and switch to it
-        if (submitMap) {
-            ensureAppleBasemap(submitMap);
-            submitMap.setMapTypeId('Apple');
+        if (wfMap) {
+            ensureAppleBasemap(wfMap);
+            wfMap.setMapTypeId('Apple');
         }
     }
 
@@ -264,12 +265,13 @@
     // Map lifecycle + DOM watchers
     // -----------------------------
 
-    function isOnMapPage() {
-        return window.location.pathname.startsWith(MAP_PATH);
+    function isOnMapCapableRoute() {
+        const p = window.location.pathname;
+        return p.startsWith(SUBMIT_ROUTE) || p.startsWith(MAPVIEW_ROUTE);
     }
 
     function onMapRouteChange() {
-        if (isOnMapPage()) {
+        if (isOnMapCapableRoute()) {
             startMapPanelWatcher();
         } else {
             stopMapPanelWatcher();
@@ -350,45 +352,40 @@
     }
 
 
+    function looksLikeGoogleMap(obj) {
+        return !!(obj &&
+                  typeof obj.getCenter === "function" &&
+                  typeof obj.addListener === "function" &&
+                  typeof obj.getDiv === "function");
+    }
 
-    function getSubmitMap() {
-        return new Promise(resolve => {
-            let attempts = 40;
+    function extractMapFromCtxEntry(entry) {
+        if (!entry) return null;
+        if (looksLikeGoogleMap(entry)) return entry; // mapview
+        const m = entry?.componentRef?.map;          // submit
+        return looksLikeGoogleMap(m) ? m : null;
+    }
+
+    function getWfMap() {
+        return new Promise((resolve) => {
+            let attempts = 80;
 
             function tryFindMap() {
-                const candidates = document.querySelectorAll('app-submit-wayspot-map nia-map');
-                let foundMap = null;
+                const candidates = document.querySelectorAll("app-submit-wayspot-map nia-map, app-wf-base-map");
 
-                candidates.forEach(el => {
-                    if (foundMap || !el.__ngContext__) return;
-
-                    const ctx = el.__ngContext__;
+                for (const el of candidates) {
+                    const ctx = el && el.__ngContext__;
+                    if (!ctx) continue;
 
                     for (const entry of ctx) {
-                        if (!entry) continue;
-
                         try {
-                            if (entry.componentRef && entry.componentRef.map) {
-                                foundMap = entry.componentRef.map;
-                                break;
-                            }
-                        } catch {
-                            /* ignore invalid entries */
-                        }
+                            const map = extractMapFromCtxEntry(entry);
+                            if (map) return resolve(map);
+                        } catch { /* ignore */ }
                     }
-                });
-
-                if (foundMap) {
-                    resolve(foundMap);
-                    return;
                 }
 
-                if (attempts-- <= 0) {
-                    console.warn('[WF AppleMaps] Failed to find submit map after several attempts');
-                    resolve(null);
-                    return;
-                }
-
+                if (attempts-- <= 0) return resolve(null);
                 setTimeout(tryFindMap, 250);
             }
 
@@ -399,21 +396,41 @@
     function teardownBaseMapsForMap() {
         if (!mapAttached) return;
 
-        submitMap = null;
+        wfMap = null;
         mapAttached = false;
     }
 
+    function isMapStale(map) {
+        try {
+            const div = map && map.getDiv && map.getDiv();
+            return !div || !div.isConnected;
+        } catch {
+            return true;
+        }
+    }
+
     async function attachBasemapsToMapIfNeeded() {
-        if (mapAttached) return;
+        // If we think we're attached but the underlying map is gone, reset and reattach
+        if (mapAttached) {
+            if (wfMap && !isMapStale(wfMap)) return;
 
-        const map = await getSubmitMap();
+            // stale / missing
+            wfMap = null;
+            mapAttached = false;
+        }
 
+        const map = await getWfMap();
         if (!map) {
-            console.warn('[WF AppleMaps] Map not found – cannot attach');
+            console.warn("[BaseMaps] Map not found – cannot attach");
             return;
         }
 
-        submitMap = map;
+        wfMap = map;
+
+        // Important: new map instance => allow init on this new object
+        wfMap._wfmapmodsBasemapsInitialised = false;
+        wfMap._wfmapmodsLastUsedListenerAttached = false;
+
         initAppleBaseMap();
         mapAttached = true;
     }
@@ -423,18 +440,18 @@
     // -----------------------------
 
     function initAppleBaseMap() {
-        if (!submitMap) return;
-        if (submitMap._wfAppleBasemapInitialised) return;
-        submitMap._wfAppleBasemapInitialised = true;
+        if (!wfMap) return;
+        if (wfMap._wfAppleBasemapInitialised) return;
+        wfMap._wfAppleBasemapInitialised = true;
 
         // Remember the current map type as the "fallback" (non-Apple)
-        lastNonAppleMapType = submitMap.getMapTypeId() || 'roadmap';
+        lastNonAppleMapType = wfMap.getMapTypeId() || 'roadmap';
 
         // 1) Ensure the Apple map type exists in mapTypes
-        ensureAppleBasemap(submitMap);
+        ensureAppleBasemap(wfMap);
 
         // 2) Read any existing mapTypeControlOptions so we don't clobber other plugins
-        const existingOptions = submitMap.get('mapTypeControlOptions') || {};
+        const existingOptions = wfMap.get('mapTypeControlOptions') || {};
 
         // Start with the existing mapTypeIds if present, otherwise default to the common ones
         let mapTypeIds;
@@ -454,7 +471,9 @@
             mapTypeIds
         });
 
-        submitMap.setOptions({
+        console.log(newOptions);
+
+        wfMap.setOptions({
             mapTypeControl: true,
             mapTypeControlOptions: newOptions
         });
@@ -465,9 +484,7 @@
 
     function ensureAppleBasemap(map) {
         if (!map.mapTypes) return;
-
         if (map.mapTypes.get('Apple')) return;
-
         const appleMapType = new google.maps.ImageMapType({
             getTileUrl: function (coord, zoom) {
                 const normalizedCoord = getNormalizedCoord(coord, zoom);
@@ -494,15 +511,15 @@
     }
 
     function attachMapTypeChangeListener() {
-        if (!submitMap) return;
-        if (submitMap._wfAppleMapTypeListenerAttached) return;
-        submitMap._wfAppleMapTypeListenerAttached = true;
+        if (!wfMap) return;
+        if (wfMap._wfAppleMapTypeListenerAttached) return;
+        wfMap._wfAppleMapTypeListenerAttached = true;
 
         if (google.maps && google.maps.event) {
-            google.maps.event.addListener(submitMap, 'maptypeid_changed', () => {
+            google.maps.event.addListener(wfMap, 'maptypeid_changed', () => {
                 if (suppressAppleChange) return;
 
-                const current = submitMap.getMapTypeId();
+                const current = wfMap.getMapTypeId();
                 if (!current) return;
 
                 if (current === 'Apple') {
@@ -511,7 +528,7 @@
                         console.info('[WF AppleMaps] No valid Apple config; opening satellites.pro helper tab.');
 
                         suppressAppleChange = true;
-                        submitMap.setMapTypeId(lastNonAppleMapType || 'roadmap');
+                        wfMap.setMapTypeId(lastNonAppleMapType || 'roadmap');
                         suppressAppleChange = false;
 
                         openHelperFrame();
