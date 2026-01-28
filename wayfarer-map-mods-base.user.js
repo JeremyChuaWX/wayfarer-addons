@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.0.8
+// @version      3.0.9
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -88,10 +88,6 @@
     // ----- Cross-script toggle group -----
     const WF_TOGGLE_GROUP = "wf-lefttop-controls";
     const WF_TOGGLE_ACTIVE_CLASS = "wf-toggle-active";
-
-    // ----- API checking ------
-    let poiImagesApiLive = false;
-    let reportApiLive = false;
 
     // ----- Available quotas -----
     let availableQuotas = {
@@ -431,63 +427,6 @@
             /iPad|iPhone|iPod/.test(navigator.userAgent) ||
             (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
         );
-    }
-
-    // ==================================
-    // API Checks
-    // ==================================
-
-    async function checkWhichApisAreLive() {
-        // kick both off in parallel and wait for both
-        await Promise.all([
-            isPoiImagesApiLive(),
-            isReportApiLive(),
-        ]);
-    }
-
-    async function isPoiImagesApiLive() {
-        try {
-            const r = await fetch("/api/v1/vault/mapview/poi-images", {
-                credentials: "include"
-            });
-            poiImagesApiLive = (r.status === 200);
-        } catch {
-            poiImagesApiLive = false;
-        }
-    }
-
-    async function isReportApiLive() {
-        try {
-            const res = await fetch("/api/v1/vault/mapview/poi-report", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "x-angular": "true",
-                    "x-csrf-token": decodeURIComponent(
-                        document.cookie
-                        .split("; ")
-                        .find(c => c.startsWith("XSRF-TOKEN="))
-                        ?.split("=")[1] || ""
-                    )
-                },
-                // Intentionally invalid payload — should not consume a report token
-                body: JSON.stringify({ comment: "" })
-            });
-
-            const contentType = res.headers.get("content-type") || "";
-            if (!contentType.includes("application/json")) {
-                reportApiLive = false;
-                return;
-            }
-
-            // If JSON parses, the API exists
-            await res.json();
-            reportApiLive = true;
-
-        } catch {
-            reportApiLive = false;
-        }
     }
 
     // ==================================
@@ -1630,9 +1569,7 @@
 
             poiFunctionLinks.appendChild(deepLinkA);
 
-            if (reportApiLive) {
-                poiFunctionLinks.appendChild(reportA);
-            }
+            poiFunctionLinks.appendChild(reportA);
             poiFunctionsRow.appendChild(wayspotSvg);
             poiFunctionsRow.appendChild(poiFunctionLinks);
             poiFunctionsSection.appendChild(poiFunctionsRow);
@@ -6865,7 +6802,6 @@
     function shouldFetchAdditionalImages(poi) {
         // Your rule: fetch if hasAdditionalImages is NOT false (true/null/undefined allowed)
         if (!poi) return false;
-        if (!poiImagesApiLive) return false;
         if (poi.hasAdditionalImages === false) return false;
         if (!poi.guid) return false;
         return true;
