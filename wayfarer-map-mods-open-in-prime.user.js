@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Open In Prime
-// @version      0.1.1
+// @version      3.0.0
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-open-in-prime.user.js
@@ -34,8 +34,10 @@
     const POI_BRIDGE_ID = "wfmapmods-poi-bridge";
     const LINK_CONTAINER_SELECTOR = ".wfmapmods-poi-function-links";
     const OPEN_PRIME_LINK_ID = "wfmapmods-open-prime-link";
-    const MAP_PATH = "/new/submit/new";
     const ALLOWED_PRIME_STATUSES = new Set(["LIVE", "ACCEPTED"]);
+
+    const SUBMIT_ROUTE = "/new/submit/new";
+    const MAPVIEW_ROUTE = "/new/mapview";
 
     let currentGuid = null;
     let lastPayload = null;
@@ -52,12 +54,13 @@
         setupMapRouteWatcher();
     }
 
-    function isOnMapPage() {
-        return window.location.pathname.startsWith(MAP_PATH);
+    function isOnMapCapableRoute() {
+        const p = window.location.pathname;
+        return p.startsWith(SUBMIT_ROUTE) || p.startsWith(MAPVIEW_ROUTE);
     }
 
     function onMapRouteChange() {
-        if (isOnMapPage()) {
+        if (isOnMapCapableRoute()) {
             startMapPanelWatcher();
         } else {
             stopMapPanelWatcher();
