@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Planner
-// @version      0.1.10
+// @version      3.0.0
 // @description  Load and edit planner POIs from a Google Sheet and show them as pins on the Wayfarer submission map.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-planner.user.js
@@ -36,10 +36,15 @@
 
     const SETTINGS_KEY = "wfmap_planner_settings";
 
-    const MAP_PATH = "/new/submit/new";
+    const SUBMIT_ROUTE = "/new/submit/new";
+    const MAPVIEW_ROUTE = "/new/mapview";
 
     const POI_BRIDGE_SOURCE = "wfmapmods-planner";
     const SUBMISSION_BRIDGE_ID = "wfmapmods-submit-bridge";
+
+    const WF_TOGGLE_GROUP = "wf-lefttop-controls";
+    const WF_TOGGLE_ACTIVE_CLASS = "wf-toggle-active";
+    let plannerClassObserver = null;
 
     const PERFORMANCE_MAX_VISIBLE_MARKERS = 500;
 
@@ -121,7 +126,7 @@
     // Runtime state
     // -----------------------------
 
-    let submitMap = null;
+    let wfMap = null;
     let mapAttached = false;
     let mapPanelObserver = null;
     let mapPanelMutationScheduled = false;
@@ -400,16 +405,17 @@
     // Map lifecycle + route watcher
     // -----------------------------
 
-    function isOnMapPage() {
-        return window.location.pathname.startsWith(MAP_PATH);
+    function isOnMapCapableRoute() {
+        const p = window.location.pathname;
+        return p.startsWith(SUBMIT_ROUTE) || p.startsWith(MAPVIEW_ROUTE);
     }
 
     function onMapRouteChange() {
-        if (isOnMapPage()) {
+        if (isOnMapCapableRoute()) {
             startMapPanelWatcher();
         } else {
             stopMapPanelWatcher();
-            teardownPlannerForMap();
+            teardownMap();
         }
     }
 
@@ -486,43 +492,40 @@
         }
     }
 
+    function looksLikeGoogleMap(obj) {
+        return !!(obj &&
+                  typeof obj.getCenter === "function" &&
+                  typeof obj.addListener === "function" &&
+                  typeof obj.getDiv === "function");
+    }
 
-    function getSubmitMap() {
-        return new Promise(resolve => {
-            let attempts = 40;
+    function extractMapFromCtxEntry(entry) {
+        if (!entry) return null;
+        if (looksLikeGoogleMap(entry)) return entry; // mapview
+        const m = entry?.componentRef?.map;          // submit
+        return looksLikeGoogleMap(m) ? m : null;
+    }
+
+    function getWfMap() {
+        return new Promise((resolve) => {
+            let attempts = 80;
 
             function tryFindMap() {
-                const candidates = document.querySelectorAll("app-submit-wayspot-map nia-map");
-                let foundMap = null;
+                const candidates = document.querySelectorAll("app-submit-wayspot-map nia-map, app-wf-base-map");
 
-                candidates.forEach(el => {
-                    if (foundMap || !el.__ngContext__) return;
+                for (const el of candidates) {
+                    const ctx = el && el.__ngContext__;
+                    if (!ctx) continue;
 
-                    const ctx = el.__ngContext__;
                     for (const entry of ctx) {
-                        if (!entry) continue;
                         try {
-                            if (entry.componentRef && entry.componentRef.map) {
-                                foundMap = entry.componentRef.map;
-                                break;
-                            }
-                        } catch {
-                            // ignore invalid entries
-                        }
+                            const map = extractMapFromCtxEntry(entry);
+                            if (map) return resolve(map);
+                        } catch { /* ignore */ }
                     }
-                });
-
-                if (foundMap) {
-                    resolve(foundMap);
-                    return;
                 }
 
-                if (attempts-- <= 0) {
-                    console.warn("[Planner] Failed to find submit map after several attempts");
-                    resolve(null);
-                    return;
-                }
-
+                if (attempts-- <= 0) return resolve(null);
                 setTimeout(tryFindMap, 250);
             }
 
@@ -530,10 +533,10 @@
         });
     }
 
-    function teardownPlannerForMap() {
+    function teardownMap() {
         if (!mapAttached) return;
         clearPlannerMarkers();
-        submitMap = null;
+        wfMap = null;
         mapAttached = false;
     }
 
@@ -699,7 +702,7 @@
             this.marker = marker;
             this.text = text || "";
             this.div = null;
-            this.setMap(submitMap);
+            this.setMap(wfMap);
         };
 
         PlannerLabelOverlay.prototype = new google.maps.OverlayView();
@@ -707,20 +710,7 @@
         PlannerLabelOverlay.prototype.onAdd = function () {
             const pane = this.getPanes().overlayImage;
             const div = document.createElement("div");
-
-            div.style.position = "absolute";
-            div.style.whiteSpace = "nowrap";
-            div.style.fontSize = "14px";
-            div.style.fontWeight = "bold";
-            div.style.color = "rgba(255, 241, 0, 0.9)";
-            div.style.textShadow = [
-                "0 0 2px #000000",
-                "0 0 4px #000000",
-                "-1px -1px 2px #000000",
-                "1px 1px 2px #000000"
-            ].join(", ");
-            div.style.pointerEvents = "none";
-            div.style.transform = "translate(-50%, 0)";
+            div.className = "wfmap-planner-marker-label";
 
             div.textContent = this.text || "";
             pane.appendChild(div);
@@ -735,6 +725,7 @@
             const pos = projection.fromLatLngToDivPixel(this.marker.getPosition());
             if (!pos) return;
 
+            // Keep dynamic positioning inline
             this.div.style.left = pos.x + "px";
             this.div.style.top = (pos.y + 4) + "px";
         };
@@ -793,7 +784,7 @@
         }
 
         if (!marker._plannerLabelVisible) {
-            marker._plannerLabelOverlay.setMap(submitMap);
+            marker._plannerLabelOverlay.setMap(wfMap);
             marker._plannerLabelVisible = true;
         }
     }
@@ -831,81 +822,146 @@
 
         const controlDiv = document.createElement("div");
         const controlUI = document.createElement("div");
+        controlUI.dataset.wfToggleGroup = WF_TOGGLE_GROUP;
 
-        Object.assign(controlUI.style, {
-            backgroundColor: "#ffffff",
-            border: "2px solid #ffffff",
-            borderRadius: "3px",
-            boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
-            cursor: "pointer",
-            marginTop: "10px",
-            marginLeft: "10px",
-            textAlign: "center",
-            width: "32px",
-            height: "32px",
-            lineHeight: "30px",
-            fontSize: "16px",
-            fontWeight: "bold",
-            color: "#000",
-            userSelect: "none"
-        });
+        // Classes instead of inline styling
+        controlDiv.className = "wfmap-planner-add-control";
+        controlUI.className = "wfmap-planner-add-control-btn";
 
         controlUI.textContent = "P+";
         controlDiv.appendChild(controlUI);
 
-        controlUI.addEventListener("click", () => {
-            addModeEnabled = !addModeEnabled;
+        observePlannerToggleClass(controlUI);
 
-            if (addModeEnabled) {
-                controlUI.style.backgroundColor = "#ffce04";
-                controlUI.style.borderColor = "#ffce04";
-                // optional: darker text for contrast
-                controlUI.style.color = "#000000";
-            } else {
-                controlUI.style.backgroundColor = "#ffffff";
-                controlUI.style.borderColor = "#ffffff";
-                controlUI.style.color = "#000000"; // or whatever you prefer
-            }
+        controlUI.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const enabled = wfExclusiveToggle(controlUI, WF_TOGGLE_GROUP);
+
+            addModeEnabled = enabled;
 
             // Turning OFF add mode: cancel any unsaved edit & close window
             if (!addModeEnabled) {
                 revertActiveEditIfNeeded();
-                if (plannerInfoWindow) {
-                    plannerInfoWindow.close();
-                }
+                if (plannerInfoWindow) plannerInfoWindow.close();
             }
+
+            // addModeEnabled ? enablePlannerAddMode() : disablePlannerAddMode();
         });
 
         // Place with other default controls (left top)
         map.controls[google.maps.ControlPosition.LEFT_TOP].push(controlDiv);
     }
 
-    async function attachPlannerToMapIfNeeded() {
-        if (mapAttached) {
-            refreshPlannerMarkers();
-            return;
+    function wfExclusiveToggle(buttonEl, group = WF_TOGGLE_GROUP) {
+        if (!buttonEl) return false;
+
+        // Mark it as part of the group so other scripts can find it
+        buttonEl.dataset.wfToggleGroup = group;
+
+        const isActive = buttonEl.classList.contains(WF_TOGGLE_ACTIVE_CLASS);
+
+        if (isActive) {
+            // Clicking an active button turns it off
+            buttonEl.classList.remove(WF_TOGGLE_ACTIVE_CLASS);
+            return false;
         }
 
-        const map = await getSubmitMap();
+        // Turn off all other toggles in this group
+        document
+            .querySelectorAll(`[data-wf-toggle-group="${group}"].${WF_TOGGLE_ACTIVE_CLASS}`)
+            .forEach((el) => {
+            if (el !== buttonEl) el.classList.remove(WF_TOGGLE_ACTIVE_CLASS);
+        });
+
+        // Turn this one on
+        buttonEl.classList.add(WF_TOGGLE_ACTIVE_CLASS);
+        return true;
+    }
+
+    function syncPlannerEnabledFromDom(controlUI) {
+        const enabled = controlUI.classList.contains(WF_TOGGLE_ACTIVE_CLASS);
+
+        // Change map cursor depending on mode
+        setMapCursorForSubmissionPin(enabled);
+
+        if (enabled === addModeEnabled) return;
+
+        addModeEnabled = enabled;
+
+        if (!addModeEnabled) {
+            revertActiveEditIfNeeded();
+            if (plannerInfoWindow) plannerInfoWindow.close();
+        }
+    }
+
+    function setMapCursorForSubmissionPin(enabled) {
+        if (!wfMap) return;
+
+        wfMap.setOptions({
+            draggableCursor: enabled ? "default" : null
+        });
+    }
+
+    function observePlannerToggleClass(controlUI) {
+        if (!controlUI) return;
+        if (plannerClassObserver) plannerClassObserver.disconnect();
+
+        plannerClassObserver = new MutationObserver(() => {
+            syncPlannerEnabledFromDom(controlUI);
+        });
+
+        plannerClassObserver.observe(controlUI, {
+            attributes: true,
+            attributeFilter: ["class"],
+        });
+    }
+
+    function isMapStale(map) {
+        try {
+            const div = map && map.getDiv && map.getDiv();
+            return !div || !div.isConnected;
+        } catch {
+            return true;
+        }
+    }
+
+    async function attachPlannerToMapIfNeeded() {
+        // 1) If we think we're attached, verify the map is still alive.
+        if (mapAttached) {
+            const hasLiveMap = wfMap && !isMapStale(wfMap);
+
+            if (hasLiveMap) {
+                refreshPlannerMarkers();
+                return;
+            }
+
+            // We thought we were attached, but the underlying map is gone/stale.
+            teardownMap();
+            // fall through to reattach
+        }
+
+        const map = await getWfMap();
         if (!map) {
             console.warn("[Planner] Map not found – cannot attach");
             return;
         }
 
-        submitMap = map;
+        wfMap = map;
         mapAttached = true;
 
-        if (!submitMap._plannerOverlayBoundsListenerAdded) {
-            submitMap.addListener("idle", scheduleRefreshPlannerMarkers);
-            submitMap._plannerOverlayBoundsListenerAdded = true;
+        if (!wfMap._plannerOverlayBoundsListenerAdded) {
+            wfMap.addListener("idle", scheduleRefreshPlannerMarkers);
+            wfMap._plannerOverlayBoundsListenerAdded = true;
         }
 
         // Add the P+ button
-        createPlannerAddControl(submitMap);
+        createPlannerAddControl(wfMap);
 
         // One map-click handler for both normal clicks and add mode
-        if (!submitMap._plannerMapClickHandlerAdded) {
-            submitMap.addListener("click", (ev) => {
+        if (!wfMap._plannerMapClickHandlerAdded) {
+            wfMap.addListener("click", (ev) => {
                 const latLng = ev && ev.latLng ? ev.latLng : null;
 
                 if (addModeEnabled && latLng) {
@@ -921,14 +977,14 @@
                 }
             });
 
-            submitMap._plannerMapClickHandlerAdded = true;
+            wfMap._plannerMapClickHandlerAdded = true;
         }
 
         refreshPlannerMarkers();
     }
 
     function handleAddModeClick(latLng) {
-        if (!submitMap || !latLng) return;
+        if (!wfMap || !latLng) return;
 
         // Drop any current unsaved edit (existing or new)
         revertActiveEditIfNeeded();
@@ -957,7 +1013,7 @@
 
         // Temporary marker (NOT in plannerMarkers / plannerPois yet)
         const marker = new google.maps.Marker({
-            map: submitMap,
+            map: wfMap,
             position: { lat, lng },
             title: "",
             icon,
@@ -976,7 +1032,7 @@
 
 
     function refreshPlannerMarkers() {
-        if (!submitMap || !Array.isArray(plannerPois)) {
+        if (!wfMap || !Array.isArray(plannerPois)) {
             return;
         }
 
@@ -986,7 +1042,7 @@
             return;
         }
 
-        const bounds = submitMap.getBounds();
+        const bounds = wfMap.getBounds();
         if (!bounds) {
             return;
         }
@@ -1061,7 +1117,7 @@
             const titleText = `${poi.title || "(untitled)"} (${titleStatus})`;
 
             // Titles only shown at/above zoom threshold
-            const zoom = submitMap.getZoom ? submitMap.getZoom() : null;
+            const zoom = wfMap.getZoom ? wfMap.getZoom() : null;
             const showTitles =
                   !!(plannerCfg.showTitles) &&
                   (zoom == null || zoom >= PLANNER_LABEL_MIN_ZOOM);
@@ -1097,7 +1153,7 @@
 
             // Put marker on map if needed
             if (!marker.getMap()) {
-                marker.setMap(submitMap);
+                marker.setMap(wfMap);
             }
         });
 
@@ -1125,7 +1181,7 @@
         options = options || {};
         const isNew = !!options.isNew;
 
-        if (!submitMap || !marker || !poi) return;
+        if (!wfMap || !marker || !poi) return;
 
         // If there is an active edit on a different marker and it wasn't saved, revert it
         if (activeEditContext && activeEditContext.marker !== marker && !activeEditContext.committed) {
@@ -1170,17 +1226,13 @@
         };
 
         const container = document.createElement("div");
-        container.className = "wfmapmods-planner-popup wf-nearby-iw-content";
-        container.style.maxWidth = "260px";
-        container.style.fontSize = "12px";
-        container.style.color = "#111827";
+        // keep your existing classes, add wfmap-planner- styling class
+        container.className = "wfmapmods-planner-popup wfmap-planner-popup wf-nearby-iw-content";
 
         function labelEl(text) {
             const el = document.createElement("div");
             el.textContent = text;
-            el.style.fontSize = "11px";
-            el.style.fontWeight = "bold";
-            el.style.marginTop = "4px";
+            el.className = "wfmap-planner-field-label";
             return el;
         }
 
@@ -1188,13 +1240,7 @@
             const el = document.createElement("input");
             el.type = "text";
             el.value = initial;
-            el.style.width = "100%";
-            el.style.boxSizing = "border-box";
-            el.style.fontSize = "12px";
-            el.style.padding = "2px 4px";
-            el.style.marginTop = "2px";
-            el.style.border = "1px solid #d1d5db";
-            el.style.borderRadius = "3px";
+            el.className = "wfmap-planner-field";
             return el;
         }
 
@@ -1202,13 +1248,7 @@
             const el = document.createElement("textarea");
             el.value = initial;
             el.rows = 3;
-            el.style.width = "100%";
-            el.style.boxSizing = "border-box";
-            el.style.fontSize = "12px";
-            el.style.padding = "2px 4px";
-            el.style.marginTop = "2px";
-            el.style.border = "1px solid #d1d5db";
-            el.style.borderRadius = "3px";
+            el.className = "wfmap-planner-field wfmap-planner-textarea";
             return el;
         }
 
@@ -1225,13 +1265,7 @@
 
         container.appendChild(labelEl("Status"));
         const statusSelect = document.createElement("select");
-        statusSelect.style.width = "100%";
-        statusSelect.style.boxSizing = "border-box";
-        statusSelect.style.fontSize = "12px";
-        statusSelect.style.padding = "2px 4px";
-        statusSelect.style.marginTop = "2px";
-        statusSelect.style.border = "1px solid #d1d5db";
-        statusSelect.style.borderRadius = "3px";
+        statusSelect.className = "wfmap-planner-select";
 
         const currentStatus = poi.status || "potential";
 
@@ -1270,11 +1304,7 @@
             previewContainer.className = "wfmapmods-imagePreviewContainer";
 
             previewImg = document.createElement("img");
-            previewImg.className = "wfmapmods-imagePreview";
-            previewImg.style.maxWidth = "100%";
-            previewImg.style.maxHeight = "150px";
-            previewImg.style.display = "none";
-            previewImg.style.marginTop = "4px";
+            previewImg.className = "wfmapmods-imagePreview wfmap-planner-image-preview";
 
             previewContainer.appendChild(previewImg);
             container.appendChild(previewContainer);
@@ -1282,7 +1312,7 @@
             function updatePreview(url) {
                 const trimmed = (url || "").trim();
                 if (!trimmed) {
-                    previewImg.style.display = "none";
+                    previewImg.classList.remove("wfmap-planner-image-preview--shown");
                     previewImg.removeAttribute("src");
                     previewContainer.removeAttribute("href");
                     return;
@@ -1298,7 +1328,7 @@
                 }
 
                 previewImg.src = thumb;
-                previewImg.style.display = "block";
+                previewImg.classList.add("wfmap-planner-image-preview--shown");
                 previewContainer.href = full;
             }
 
@@ -1316,27 +1346,20 @@
         const expander = document.createElement("div");
         expander.textContent = "»";
         expander.title = "Click to expand additional fields";
-        expander.style.cursor = "pointer";
-        expander.style.display = "inline-block";
-        expander.style.marginTop = "4px";
-        expander.style.fontSize = "14px";
-        expander.style.transform = "rotate(90deg)"; // downwards (collapsed)
+        expander.className = "wfmap-planner-expander";
         container.appendChild(expander);
 
         const extraData = document.createElement("div");
-        extraData.className = "wfmapmods-extraData";
-        extraData.style.display = "none";
-        extraData.style.marginTop = "4px";
-        extraData.style.borderTop = "1px solid #e5e7eb";
-        extraData.style.paddingTop = "4px";
+        extraData.className = "wfmapmods-extraData wfmap-planner-extra";
         container.appendChild(extraData);
 
         let expanded = false;
         expander.addEventListener("click", () => {
             expanded = !expanded;
-            extraData.style.display = expanded ? "block" : "none";
-            // mimic Leaflet chevron: rotate down when closed, up when open
-            expander.style.transform = expanded ? "rotate(-90deg)" : "rotate(90deg)";
+
+            extraData.classList.toggle("wfmap-planner-extra--shown", expanded);
+            expander.classList.toggle("wfmap-planner-expander--expanded", expanded);
+
             expander.title = expanded ? "Hide additional fields" : "Click to expand additional fields";
         });
 
@@ -1359,7 +1382,6 @@
         );
         lngInput.name = "lng";
         extraData.appendChild(lngInput);
-
 
         // Submitter (from nickname/submitter, read-only)
         extraData.appendChild(labelEl("Submitter"));
@@ -1424,27 +1446,20 @@
         // Bottom Text Actions: Delete | Submit | Save
         // ------------------------------------
         const actions = document.createElement("div");
-        actions.style.display = "flex";
-        actions.style.justifyContent = "space-between";
-        actions.style.alignItems = "center";
-        actions.style.marginTop = "6px";
-        actions.style.fontSize = "12px";
+        actions.className = "wfmap-planner-actions";
 
         // helper: creates a text-style link
-        function makeLink(text) {
+        function makeLink(text, extraClass = "") {
             const link = document.createElement("span");
             link.textContent = text;
-            link.style.cursor = "pointer";
-            link.style.color = "#2563eb"; // Tailwind-style blue-600
-            link.style.textDecoration = "underline";
+            link.className = `wfmap-planner-link${extraClass ? " " + extraClass : ""}`;
             return link;
         }
 
         // LEFT: DELETE
         const leftBox = document.createElement("div");
         if (poi.id) {
-            const del = makeLink("Delete");
-            del.style.color = "#dc2626";
+            const del = makeLink("Delete", "wfmap-planner-link--danger");
             del.addEventListener("click", (ev) => {
                 ev.preventDefault();
                 openPlannerDeleteConfirm(poi.id);
@@ -1455,9 +1470,7 @@
 
         // CENTER: SUBMIT
         const centerBox = document.createElement("div");
-        centerBox.style.flex = "1";
-        centerBox.style.display = "flex";
-        centerBox.style.justifyContent = "center";
+        centerBox.className = "wfmap-planner-actions-center";
 
         const submit = makeLink("Submit");
         submit.addEventListener("click", (ev) => {
@@ -1505,7 +1518,6 @@
         });
 
         rightBox.appendChild(save);
-
         actions.appendChild(rightBox);
 
         container.appendChild(actions);
@@ -1515,14 +1527,7 @@
         // --- Close (X) button ---
         const closeX = document.createElement("div");
         closeX.textContent = "×";
-        closeX.style.position = "absolute";
-        closeX.style.top = "4px";
-        closeX.style.right = "6px";
-        closeX.style.cursor = "pointer";
-        closeX.style.fontSize = "18px";
-        closeX.style.fontWeight = "bold";
-        closeX.style.lineHeight = "12px";
-        closeX.style.color = "#555";
+        closeX.className = "wfmap-planner-close";
 
         closeX.addEventListener("click", () => {
             revertActiveEditIfNeeded();
@@ -1532,11 +1537,9 @@
         });
         container.appendChild(closeX);
 
-        container.style.position = "relative";
-        container.style.paddingTop = "4px";
-
-        plannerInfoWindow.open(submitMap, marker);
+        plannerInfoWindow.open(wfMap, marker);
     }
+
 
     // -----------------------------
     // Planner editing UI
@@ -1572,7 +1575,7 @@
             const link = document.createElement("a");
             link.id = "wfmapmods-settings-planner";
             link.textContent = "Planner";
-            link.style.cursor = "pointer";
+            link.className = "wfmap-planner-settings-link";
 
             settingsBody.appendChild(link);
 
@@ -1588,25 +1591,18 @@
             title: "Planner settings",
             buildContent(body, okBtn) {
                 const section = document.createElement("div");
-                section.className = "wfmapmods-modal-section";
-                section.style.display = "flex";
-                section.style.flexDirection = "column";
-                section.style.gap = "8px";
+                section.className = "wfmapmods-modal-section wfmap-planner-settings-section";
 
                 function label(text) {
                     const el = document.createElement("label");
                     el.textContent = text;
-                    el.style.fontSize = "11px";
-                    el.style.fontWeight = "bold";
+                    el.className = "wfmap-planner-settings-label";
                     return el;
                 }
 
                 function checkboxRow(text, checked) {
                     const row = document.createElement("label");
-                    row.style.display = "flex";
-                    row.style.alignItems = "center";
-                    row.style.gap = "6px";
-                    row.style.fontSize = "11px";
+                    row.className = "wfmap-planner-settings-checkbox-row";
 
                     const cb = document.createElement("input");
                     cb.type = "checkbox";
@@ -1625,31 +1621,17 @@
                 urlInput.type = "url";
                 urlInput.placeholder = "https://script.google.com/macros/***/exec";
                 urlInput.value = getScriptURL();
-                Object.assign(urlInput.style, {
-                    width: "100%",
-                    boxSizing: "border-box",
-                    fontSize: "12px",
-                    padding: "4px 6px",
-                    border: "1px solid #d1d5db",
-                    borderRadius: "4px",
-                    backgroundColor: "#ffffff"
-                });
+                urlInput.className = "wfmap-planner-settings-url-input";
 
                 const urlHint = document.createElement("div");
-                urlHint.style.fontSize = "10px";
-                urlHint.style.color = "#6b7280";
+                urlHint.className = "wfmap-planner-settings-hint";
                 urlHint.textContent =
                     "Paste the Apps Script web app URL (short 'exec' URL).";
 
                 const refreshBtn = document.createElement("button");
                 refreshBtn.type = "button";
                 refreshBtn.textContent = "Update planner data";
-                Object.assign(refreshBtn.style, {
-                    padding: "4px 8px",
-                    fontSize: "11px",
-                    cursor: "pointer",
-                    alignSelf: "flex-start"
-                });
+                refreshBtn.className = "wfmap-planner-settings-refresh-btn";
 
                 const showTitlesRow = checkboxRow(
                     "Show titles",
@@ -1672,9 +1654,7 @@
                 const customMarkersLink = document.createElement("a");
                 customMarkersLink.href = "#";
                 customMarkersLink.textContent = "Customise pin colours per status";
-                customMarkersLink.style.fontSize = "11px";
-                customMarkersLink.style.textDecoration = "underline";
-                customMarkersLink.style.alignSelf = "flex-start";
+                customMarkersLink.className = "wfmap-planner-settings-link";
 
                 customMarkersLink.addEventListener("click", (ev) => {
                     ev.preventDefault();
@@ -1787,38 +1767,30 @@
                 container.className = "wfmapmods-modal-section";
 
                 const hint = document.createElement("div");
-                hint.style.fontSize = "11px";
-                hint.style.marginBottom = "6px";
+                hint.className = "wfmap-planner-markerstyles-hint";
                 hint.textContent = "Choose which planner statuses to show and adjust their pin colour.";
                 container.appendChild(hint);
 
                 const table = document.createElement("table");
-                table.style.width = "100%";
-                table.style.borderCollapse = "collapse";
-                table.style.fontSize = "11px";
+                table.className = "wfmap-planner-markerstyles-table";
 
-                function makeTH(text) {
+                function makeTH(text, extraClass = "") {
                     const th = document.createElement("th");
                     th.textContent = text;
-                    th.style.padding = "2px 4px";
-                    th.style.textAlign = "left";
+                    th.className = `wfmap-planner-markerstyles-th${extraClass ? " " + extraClass : ""}`;
                     return th;
                 }
 
-                function makeTD() {
+                function makeTD(extraClass = "") {
                     const td = document.createElement("td");
-                    td.style.padding = "2px 4px";
-                    td.style.verticalAlign = "middle";
+                    td.className = `wfmap-planner-markerstyles-td${extraClass ? " " + extraClass : ""}`;
                     return td;
                 }
 
                 const header = document.createElement("tr");
                 const thStatus = makeTH("Status");
-                const thShow = makeTH("Show");
-                const thColor = makeTH("Colour");
-
-                thShow.style.textAlign = "center";
-                thColor.style.textAlign = "center";
+                const thShow = makeTH("Show", "wfmap-planner-markerstyles-center");
+                const thColor = makeTH("Colour", "wfmap-planner-markerstyles-center");
 
                 header.appendChild(thStatus);
                 header.appendChild(thShow);
@@ -1834,21 +1806,18 @@
                     tdLabel.textContent = getStatusLabel(statusKey);
                     row.appendChild(tdLabel);
 
-                    const tdShow = makeTD();
-                    tdShow.style.textAlign = "center";
+                    const tdShow = makeTD("wfmap-planner-markerstyles-center");
                     const cb = document.createElement("input");
                     cb.type = "checkbox";
                     cb.checked = cfg.enabled !== false;
                     tdShow.appendChild(cb);
                     row.appendChild(tdShow);
 
-                    const tdColor = makeTD();
-                    tdColor.style.textAlign = "center";
+                    const tdColor = makeTD("wfmap-planner-markerstyles-center");
                     const colorInput = document.createElement("input");
                     colorInput.type = "color";
                     colorInput.value = cfg.color || "#a855f7";
-                    colorInput.style.width = "40px";
-                    colorInput.style.height = "20px";
+                    colorInput.className = "wfmap-planner-markerstyles-color";
                     tdColor.appendChild(colorInput);
                     row.appendChild(tdColor);
 
@@ -1876,8 +1845,13 @@
         });
     }
 
+
     // -----------------------------
-    // Generic modal helper (copied from Contributions style)
+    // Generic modal helper
+    // -----------------------------
+
+    // -----------------------------
+    // Generic modal helper
     // -----------------------------
 
     function openSettingsModal(options) {
@@ -1895,43 +1869,13 @@
 
         const backdrop = document.createElement("div");
         backdrop.id = id;
-        backdrop.className = "wfmapmods-modal-backdrop";
-        Object.assign(backdrop.style, {
-            position: "fixed",
-            inset: "0",
-            background: "rgba(0,0,0,0.4)",
-            zIndex: "9999",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center"
-        });
+        backdrop.className = "wfmapmods-modal-backdrop wfmap-planner-modal-backdrop";
 
         const dialog = document.createElement("div");
-        dialog.className = "wfmapmods-modal-dialog";
-        Object.assign(dialog.style, {
-            background: "#fff",
-            color: "#000",
-            minWidth: "350px",
-            maxWidth: "500px",
-            maxHeight: "80vh",
-            borderRadius: "4px",
-            boxShadow: "0 2px 12px rgba(0,0,0,0.4)",
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-            fontSize: "13px"
-        });
+        dialog.className = "wfmapmods-modal-dialog wfmap-planner-modal-dialog";
 
         const header = document.createElement("div");
-        header.className = "wfmapmods-modal-header";
-        Object.assign(header.style, {
-            padding: "8px 12px",
-            borderBottom: "1px solid #ddd",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            fontWeight: "bold"
-        });
+        header.className = "wfmapmods-modal-header wfmap-planner-modal-header";
 
         const titleEl = document.createElement("div");
         titleEl.textContent = title || "Settings";
@@ -1939,51 +1883,26 @@
         const closeBtn = document.createElement("button");
         closeBtn.type = "button";
         closeBtn.textContent = "×";
-        Object.assign(closeBtn.style, {
-            border: "none",
-            background: "transparent",
-            cursor: "pointer",
-            fontSize: "16px",
-            lineHeight: "1"
-        });
+        closeBtn.className = "wfmap-planner-modal-close";
 
         header.appendChild(titleEl);
         header.appendChild(closeBtn);
 
         const body = document.createElement("div");
-        body.className = "wfmapmods-modal-body";
-        Object.assign(body.style, {
-            padding: "8px 12px",
-            overflowY: "auto",
-            flex: "1 1 auto"
-        });
+        body.className = "wfmapmods-modal-body wfmap-planner-modal-body";
 
         const footer = document.createElement("div");
-        footer.className = "wfmapmods-modal-footer";
-        Object.assign(footer.style, {
-            padding: "8px 12px",
-            borderTop: "1px solid #ddd",
-            textAlign: "right",
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: "8px"
-        });
+        footer.className = "wfmapmods-modal-footer wfmap-planner-modal-footer";
 
         const cancelBtn = document.createElement("button");
         cancelBtn.type = "button";
         cancelBtn.textContent = "Cancel";
-        Object.assign(cancelBtn.style, {
-            padding: "4px 10px",
-            cursor: "pointer"
-        });
+        cancelBtn.className = "wfmap-planner-modal-btn";
 
         const okBtn = document.createElement("button");
         okBtn.type = "button";
         okBtn.textContent = "OK";
-        Object.assign(okBtn.style, {
-            padding: "4px 10px",
-            cursor: "pointer"
-        });
+        okBtn.className = "wfmap-planner-modal-btn";
 
         footer.appendChild(cancelBtn);
         footer.appendChild(okBtn);
@@ -2034,11 +1953,389 @@
     }
 
     // -----------------------------
+    // css styling
+    // -----------------------------
+
+    function injectCSS() {
+        if (document.getElementById("wfmapmods-planner-css")) return;
+
+        const css = document.createElement("style");
+        css.id = "wfmapmods-planner-css";
+        css.textContent = `
+/* =====================
+   Planner marker label overlay
+   ===================== */
+.wfmap-planner-marker-label {
+  position: absolute;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: bold;
+  color: rgba(255, 241, 0, 0.9);
+  text-shadow:
+    0 0 2px #000000,
+    0 0 4px #000000,
+    -1px -1px 2px #000000,
+    1px 1px 2px #000000;
+  pointer-events: none;
+  transform: translate(-50%, 0);
+}
+
+/* =====================
+   Planner add control (P+)
+   ===================== */
+.wfmap-planner-add-control {
+  margin-top: 10px;
+  margin-left: 10px;
+}
+
+.wfmap-planner-add-control-btn {
+  background-color: #ffffff;
+  border: 2px solid #ffffff;
+  border-radius: 3px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  cursor: pointer;
+  text-align: center;
+  width: 32px;
+  height: 32px;
+  line-height: 30px;
+  font-size: 16px;
+  font-weight: bold;
+  color: #000;
+  user-select: none;
+}
+
+.wf-toggle-active {
+  background-color: #ffce04 !important;
+  border-color: #ffce04 !important;
+  color: #000000 !important;
+}
+
+/* =====================
+   Planner info window container
+   ===================== */
+.wfmap-planner-popup {
+  max-width: 260px;
+  font-size: 12px;
+  color: #111827;
+  position: relative;
+  padding-top: 4px;
+}
+
+/* =====================
+   Info window field labels
+   ===================== */
+.wfmap-planner-field-label {
+  font-size: 11px;
+  font-weight: bold;
+  margin-top: 4px;
+}
+
+/* =====================
+   Inputs (text, textarea, select)
+   ===================== */
+.wfmap-planner-field,
+.wfmap-planner-select {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 12px;
+  padding: 2px 4px;
+  margin-top: 2px;
+  border: 1px solid #d1d5db;
+  border-radius: 3px;
+}
+
+.wfmap-planner-textarea {
+  resize: vertical; /* optional but nice */
+}
+
+/* =====================
+   Image preview
+   ===================== */
+.wfmap-planner-image-preview {
+  max-width: 100%;
+  max-height: 150px;
+  margin-top: 4px;
+  display: none;
+}
+
+.wfmap-planner-image-preview.wfmap-planner-image-preview--shown {
+  display: block;
+}
+
+/* =====================
+   Expander + extra fields
+   ===================== */
+.wfmap-planner-expander {
+  cursor: pointer;
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 14px;
+  transform: rotate(90deg); /* downwards (collapsed) */
+}
+
+.wfmap-planner-expander.wfmap-planner-expander--expanded {
+  transform: rotate(-90deg);
+}
+
+.wfmap-planner-extra {
+  display: none;
+  margin-top: 4px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 4px;
+}
+
+.wfmap-planner-extra.wfmap-planner-extra--shown {
+  display: block;
+}
+
+/* =====================
+   Bottom actions row
+   ===================== */
+.wfmap-planner-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.wfmap-planner-actions-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+/* =====================
+   Text links (Delete / Submit / Save)
+   ===================== */
+.wfmap-planner-link {
+  cursor: pointer;
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+.wfmap-planner-link--danger {
+  color: #dc2626;
+}
+
+/* =====================
+   Close (X)
+   ===================== */
+.wfmap-planner-close {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: bold;
+  line-height: 12px;
+  color: #555;
+}
+
+/* =====================
+   Planner settings modal
+   ===================== */
+.wfmap-planner-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wfmap-planner-settings-label {
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.wfmap-planner-settings-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.wfmap-planner-settings-url-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background-color: #ffffff;
+}
+
+.wfmap-planner-settings-hint {
+  font-size: 10px;
+  color: #6b7280;
+}
+
+.wfmap-planner-settings-refresh-btn {
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.wfmap-planner-settings-link {
+  font-size: 11px;
+  text-decoration: underline;
+  align-self: flex-start;
+  cursor: pointer;
+}
+
+/* =====================
+   Planner marker styles modal
+   ===================== */
+.wfmap-planner-markerstyles-hint {
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.wfmap-planner-markerstyles-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.wfmap-planner-markerstyles-th {
+  padding: 2px 4px;
+  text-align: left;
+}
+
+.wfmap-planner-markerstyles-td {
+  padding: 2px 4px;
+  vertical-align: middle;
+}
+
+.wfmap-planner-markerstyles-center {
+  text-align: center;
+}
+
+.wfmap-planner-markerstyles-color {
+  width: 40px;
+  height: 20px;
+}
+
+/* =====================
+   Backdrop (modal overlay)
+   ===================== */
+.wfmap-planner-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* =====================
+   Modal dialog shell
+   ===================== */
+.wfmap-planner-modal-dialog {
+  background: #fff;
+  color: #000;
+  min-width: 350px;
+  max-width: 500px;
+  max-height: 80vh;
+  border-radius: 4px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-size: 13px;
+}
+
+/* =====================
+   Header
+   ===================== */
+.wfmap-planner-modal-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid #ddd;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: bold;
+}
+
+/* =====================
+   Close button
+   ===================== */
+.wfmap-planner-modal-close {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* =====================
+   Body
+   ===================== */
+.wfmap-planner-modal-body {
+  padding: 8px 12px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+
+/* =====================
+   Footer + action buttons
+   ===================== */
+.wfmap-planner-modal-footer {
+  padding: 8px 12px;
+  border-top: 1px solid #ddd;
+  text-align: right;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.wfmap-planner-modal-btn {
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+/* ======================================================
+   Planner – iOS Safari input zoom prevention
+   Computed font-size >=16px, visual size restored
+   ====================================================== */
+
+/* 1) Force computed font-size to 16px (prevents iOS zoom) */
+html.wf-ios .wfmap-planner-popup input,
+html.wf-ios .wfmap-planner-popup textarea,
+html.wf-ios .wfmap-planner-popup select,
+html.wf-ios .wfmap-planner-modal-dialog input,
+html.wf-ios .wfmap-planner-modal-dialog textarea,
+html.wf-ios .wfmap-planner-modal-dialog select {
+  font-size: 16px !important;
+}
+
+/* 2) Restore original small appearance (12px look → 12/16 = 0.75) */
+
+/* InfoWindow fields */
+html.wf-ios .wfmap-planner-field,
+html.wf-ios .wfmap-planner-select {
+  transform: scale(0.75);
+  transform-origin: left center;
+  width: calc(100% / 0.75);
+}
+
+/* Settings modal URL input */
+html.wf-ios .wfmap-planner-settings-url-input {
+  transform: scale(0.75);
+  transform-origin: left center;
+  width: calc(100% / 0.75);
+}
+`;
+        document.head.appendChild(css);
+    }
+
+    // -----------------------------
     // Bootstrap
     // -----------------------------
 
     function bootstrap() {
         loadSettings();
+        injectCSS();
         setupMapRouteWatcher();
 
         // If a script URL already exists, load data immediately.
