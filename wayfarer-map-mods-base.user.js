@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.0.2
+// @version      3.0.3
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -10675,9 +10675,6 @@ canvas#deckgl-overlay {
             localStorage.setItem('wf_map_nav', '1');
             formatPageForMapMode();
         }
-
-        // Fix for zoom issues on iOS Safari with font size <16
-        if (isIOS()) document.documentElement.classList.add("wf-ios");
 
         loadSettings();
         injectCss();
