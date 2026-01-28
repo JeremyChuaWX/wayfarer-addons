@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Planner
-// @version      3.0.0
+// @version      3.0.1
 // @description  Load and edit planner POIs from a Google Sheet and show them as pins on the Wayfarer submission map.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-planner.user.js
@@ -2292,38 +2292,6 @@
 .wfmap-planner-modal-btn {
   padding: 4px 10px;
   cursor: pointer;
-}
-
-/* ======================================================
-   Planner – iOS Safari input zoom prevention
-   Computed font-size >=16px, visual size restored
-   ====================================================== */
-
-/* 1) Force computed font-size to 16px (prevents iOS zoom) */
-html.wf-ios .wfmap-planner-popup input,
-html.wf-ios .wfmap-planner-popup textarea,
-html.wf-ios .wfmap-planner-popup select,
-html.wf-ios .wfmap-planner-modal-dialog input,
-html.wf-ios .wfmap-planner-modal-dialog textarea,
-html.wf-ios .wfmap-planner-modal-dialog select {
-  font-size: 16px !important;
-}
-
-/* 2) Restore original small appearance (12px look → 12/16 = 0.75) */
-
-/* InfoWindow fields */
-html.wf-ios .wfmap-planner-field,
-html.wf-ios .wfmap-planner-select {
-  transform: scale(0.75);
-  transform-origin: left center;
-  width: calc(100% / 0.75);
-}
-
-/* Settings modal URL input */
-html.wf-ios .wfmap-planner-settings-url-input {
-  transform: scale(0.75);
-  transform-origin: left center;
-  width: calc(100% / 0.75);
 }
 `;
         document.head.appendChild(css);
