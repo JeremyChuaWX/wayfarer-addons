@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.0.7
+// @version      3.0.8
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -1992,7 +1992,9 @@
             }
 
             // Show report link if we have a guid and >00 submissions
-            if (!poi.guid) {
+            if (!reportA) {
+                // Report link element not present in this panel/template
+            } else if (!poi.guid) {
                 reportA.classList.add("wfmapmods-is-hidden");
                 delete reportA.dataset.poiId;
             } else {
@@ -2000,8 +2002,8 @@
                 reportA.classList.remove("wfmapmods-is-hidden");
 
                 const available = getQuota("POI_TAKEDOWN_REQUEST")?.submissionsLeft ?? 0;
-
                 const disabled = available <= 0;
+
                 reportA.classList.toggle("wfmapmods-link-disabled", disabled);
                 reportA.setAttribute("aria-disabled", disabled ? "true" : "false");
             }
@@ -2022,7 +2024,7 @@
                 const img = document.createElement("img");
                 img.className = "wfmapmods-detail-image";
                 img.src = poi.imageUrl;
-                // if you want, you can move these to CSS later
+                console.log(`img.src: ${img.src}`);
                 Object.assign(img.style, { width: "100%", height: "100%", objectFit: "cover", display: "block" });
                 imgBox.appendChild(img);
             } else {
