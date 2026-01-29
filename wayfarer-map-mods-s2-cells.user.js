@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - s2 Cells
-// @version      3.0.0
+// @version      3.0.2
 // @description  Feature enhancement for the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-s2-cells.user.js
@@ -4617,7 +4617,7 @@
             openManualImportDialog({ mode: "edit", poi });
         });
 
-        host.appendChild(linkf);
+        host.appendChild(link);
     }
 
     // -----------------------------
