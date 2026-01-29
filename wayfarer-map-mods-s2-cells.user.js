@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - s2 Cells
-// @version      3.0.2
-// @description  Feature enhancement for the submission map
+// @version      3.0.3
+// @description  Adds s2 cell grids and shading to the Wayfarer Map, and allows manual addition of PokéStops and Gyms
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-s2-cells.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
