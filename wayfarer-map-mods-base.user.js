@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.0.10
+// @version      3.0.11
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -79,7 +79,6 @@
         gym: `<svg version="1.1" viewBox="0 0 654.32 696.7" xmlns="http://www.w3.org/2000/svg"><g transform="translate(-155.17 -129.6)" fill="#ff0202"><path d="m474.15 825.81c-1.6812-5.2991-19.54-71.464-25.052-92.813-2.7688-10.725-12.779-48.075-22.245-83l-17.211-63.5-26.069-0.0232c-27.672-0.0246-33.369-0.64919-54.77-6.0044-28.239-7.0662-59.671-21.947-82.102-38.869-10.248-7.7317-24.918-21.31-33.948-31.423-8.4062-9.4144-19.299-23.964-18.522-24.74 0.57377-0.57377 28.362-15.482 56.273-30.191 11-5.7969 29.139-15.438 40.308-21.425l20.308-10.885 6.1915 5.6366c26.757 24.359 62.321 32.391 96.168 21.72 14.961-4.7167 24.796-10.595 36.361-21.73 23.599-22.722 34.392-53.022 29.748-83.512-0.87528-5.7458-1.2525-10.754-0.83831-11.129 0.4142-0.3751 9.7531-5.3938 20.753-11.153 19.806-10.369 55.473-29.315 112.5-59.758 16.225-8.6616 34.45-18.353 40.5-21.536s22.925-12.185 37.5-20.004 35.725-19.067 47-24.997c11.275-5.9295 32.134-17.041 46.354-24.692 14.22-7.6508 25.98-13.77 26.134-13.598 0.27904 0.31187-39.844 80.897-232.58 467.13-98.304 196.99-101.74 203.7-102.76 200.5z"/><path d="m376 426.43c-13.74-2.3692-21.701-5.4347-31.639-12.183-11.065-7.5143-20.23-19.67-24.901-33.027-3.561-10.183-4.4975-28.09-2.0248-38.718 4.944-21.25 20.879-39.567 41.564-47.779 17.943-7.1225 39.48-5.845 57.202 3.3929 8.2599 4.3057 23.139 19.137 27.475 27.386 6.2429 11.878 7.8285 18.605 7.778 33-0.0399 11.395-0.38012 14.004-2.7558 21.131-7.081 21.243-26.356 39.571-47.199 44.881-6.1542 1.5677-21.038 2.6869-25.5 1.9175zm20.369-18.937c25.519-6.6468 42.248-32.192 37.652-57.492-6.1338-33.767-42.008-52.047-72.642-37.016-30.462 14.947-37.711 54.882-14.545 80.121 12.111 13.194 31.969 18.962 49.535 14.387z" stroke="#f00" stroke-width="5"/><path d="m167.62 433.75c-7.9115-22.511-11.425-41.875-12.293-67.75-1.6732-49.863 10.689-93.275 38.443-135 22.561-33.917 51.907-59.565 88.735-77.55 37.152-18.144 75.012-25.888 114.37-23.393 58.398 3.7012 111.4 28.197 151.63 70.074 8.7851 9.1457 24.5 28.443 24.5 30.085 0 0.32594-11.362 6.6531-25.25 14.06-59.054 31.498-77.685 41.411-84.924 45.186l-7.6736 4.0015-6.3559-6.1032c-10.452-10.037-23.512-17.491-38.5-21.973-11.914-3.5632-32.913-4.4567-45.379-1.9308-17.615 3.5692-33.758 11.98-47.342 24.666-17.829 16.651-28.514 39.41-30.222 64.378-0.53883 7.8769 0.74469 23.988 2.2167 27.824 0.28936 0.75404-1.058 2.0088-3.2904 3.0643-2.0792 0.98304-20.88 10.907-41.78 22.053-49.614 26.46-72.498 38.559-72.932 38.559-0.19298 0-1.972-4.6125-3.9533-10.25z"/></g></svg>`,
         powerspot: `<svg width="264.47mm" height="253.69mm" version="1.1" viewBox="0 0 264.47 253.69" xml:space="preserve" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><defs><linearGradient id="c" x1="61.207" x2="449.01" y1="103.22" y2="103.22" gradientTransform="translate(-2,-37.5)" gradientUnits="userSpaceOnUse"><stop stop-color="#a260c3" offset="0"/><stop stop-color="#9a6fb4" offset=".5"/><stop stop-color="#a678ca" offset="1"/></linearGradient><linearGradient id="b" x1="58.189" x2="449.44" y1="26.182" y2="26.182" gradientTransform="translate(1,23.5)" gradientUnits="userSpaceOnUse"><stop stop-color="#a271c0" stop-opacity=".99608" offset="0"/><stop stop-color="#a885bd" offset=".25"/><stop stop-color="#a68dbc" offset=".49845"/><stop stop-color="#ad98bf" offset=".75"/><stop stop-color="#b2a2ca" offset=".96478"/><stop stop-color="#ebe7fc" offset="1"/></linearGradient><filter id="f" x="-.045401" y="-.026893" width="1.0908" height="1.0538" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="4.7619707"/></filter><filter id="l" x="-.080472" y="-.065628" width="1.1609" height="1.1313" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="7.9663468"/></filter><filter id="e" x="-.082663" y="-.043292" width="1.1653" height="1.0866" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="4.1877723"/></filter><linearGradient id="a" x1="256.37" x2="255.61" y1="358.89" y2="323.89" gradientUnits="userSpaceOnUse"><stop stop-color="#e8429d" offset="0"/><stop stop-color="#e8429d" stop-opacity="0" offset="1"/></linearGradient><filter id="d" x="-.50929" y="-.1014" width="2.0186" height="1.2028" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="7.1606199"/></filter><filter id="k" x="-1.0421" y="-.0073109" width="3.0843" height="1.0146" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="1.2281692"/></filter><filter id="j" x="-.69224" y="-.12867" width="2.3845" height="1.2573" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="2.5494275"/></filter><filter id="i" x="-.2729" y="-.064634" width="1.5458" height="1.1293" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="1.4472579"/></filter><filter id="h" x="-.2729" y="-.064634" width="1.5458" height="1.1293" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="1.4472579"/></filter><filter id="g" x="-.2729" y="-.064634" width="1.5458" height="1.1293" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="1.4472579"/></filter></defs><g transform="translate(26.603 -30.162)"><path transform="matrix(.91985 0 0 .40137 -124.58 58.711)" d="m252.08 490.73s-8.4853-10.253-7.0711-13.081 8.1317-6.7175 3.8891-13.789-8.1317-14.849-4.2426-22.981c3.8891-8.1317 7.4246-15.91 2.4749-22.274-4.9498-6.364-6.364-8.4853-2.1213-16.263 4.2426-7.7782 10.607-11.667 6.0104-27.577-4.5962-15.91-5.3033-32.173-10.253-38.537-4.9498-6.364-4.9498-4.9497-7.7782-19.445-2.8284-14.496 1.4142-20.153-6.0104-27.931s-29.345-33.234-28.638-50.205c0.70711-16.971-73.893-167.94-73.893-167.94l251.73-3.5355-87.681 197.28s-6.7175 8.1317-6.364 15.556c0.35355 7.4246 0.35355 10.96-3.182 16.617-3.5355 5.6569-10.607 19.799-8.4853 24.042 2.1213 4.2426-8.8388 25.809-8.8388 31.113s-3.8891 39.244-1.4142 41.719c2.4749 2.4749 7.4246 3.8891 6.0104 7.4246-1.4142 3.5355-8.1317 11.314-7.7782 12.374s10.607 9.8995 8.1317 14.849c-2.4749 4.9497-8.8388 19.799-6.7175 22.627 2.1213 2.8284 8.1317 17.678 5.6569 22.274-2.4749 4.5962-7.7782 19.092-7.7782 19.092z" fill="#d14e9e" filter="url(#f)" opacity=".84552"/><path transform="matrix(.71076 0 0 .26289 -74.586 77.669)" d="m132.23 73.539 237.59 0.70711-113.84 290.62z" fill="#ed61e2" filter="url(#l)" stroke-linejoin="round" stroke-miterlimit="20" stroke-width="3.954" style="mix-blend-mode:normal"/><path transform="matrix(.91298 0 0 .37461 -124.86 68.513)" d="m188.09 82.024c6.4328 10.613 15.349 19.707 18.819 31.933 9.6899 20.348 15.989 42.191 18.678 64.555 2.0983 13.108 7.1957 25.398 11.885 37.698 3.4875 10.673 3.6002 21.985 2.8226 33.045 1.1596 13.044 10 23.731 12.268 36.515 2.8673 6.8333 7.8417 19.825 9.0545 23.3 4.4958-12.021 10.609-23.762 10.759-36.927 2.0724-23.824-6.6382-48.321 1.9312-71.516 3.402-11.987 7.5436-23.729 9.5663-36.041 3.3059-11.552 4.747-23.457 5.9936-35.365 2.368-10.427 9.766-18.772 12.953-29.022 1.6534-6.7536 13.918-19.255 1.02-21.44-15.322 0.71665-30.71 1.0726-46.001-0.30055-18.384 0.38057-36.752-0.31045-55.088-1.546-1.8242-0.01585-3.6495 0.02954-5.4692 0.16241" fill="#faf9fb" filter="url(#e)" opacity=".34053"/><path transform="matrix(.91298 0 0 .55196 -124.86 3.8505)" d="m253.14 491.09s-5.3033-7.4246-5.3033-12.021c0-4.5962 5.6568-7.7782 1.7678-13.789-3.8891-6.0104-13.435-15.556-8.4853-24.042 4.9498-8.4853 9.5459-19.092 5.3033-24.749-4.2426-5.6568-2.1213-3.182 0.35356-13.435 2.4749-10.253 8.1317-23.335 3.8891-33.941s-11.314-45.608-14.142-47.023 33.588 1.0607 33.588 1.0607-6.7175 21.92-6.0104 30.406c0.70711 8.4853 3.182 19.799-1.0607 28.638-0.97963 2.0409-1.7678 8.1317 0.35356 10.607 2.1213 2.4749 8.8388 13.435 4.9497 19.445-3.8891 6.0104-3.182 10.253-2.8284 14.496 0.35355 4.2426 5.3033 8.1317 3.5355 12.374s-8.4853 8.4853-6.364 15.556 8.4853 14.849 4.9498 19.092c-3.5355 4.2426-4.5962 10.253-4.5962 14.142s-9.8995 3.182-9.8995 3.182z" fill="url(#a)" filter="url(#d)"/><ellipse cx="109.32" cy="274.87" rx="13.923" ry="5.9119" fill="#a16b96" stroke="#e564eb" stroke-linejoin="round" stroke-miterlimit="20" stroke-width="2.3011"/><g transform="matrix(.92339 0 0 .39875 -127.54 80.122)" fill="#fff"><rect x="254.91" y="85.143" width="2.8284" height="403.18" filter="url(#k)" style="mix-blend-mode:normal"/><ellipse transform="matrix(.96441 0 0 1 9.2465 -14.506)" cx="256.33" cy="306.8" rx="4.4194" ry="23.776" filter="url(#j)" opacity=".73256" style="mix-blend-mode:normal"/><ellipse transform="matrix(.82784 0 0 1 44.635 -22.317)" cx="255.64" cy="252.95" rx="6.364" ry="26.87" filter="url(#i)" opacity=".74917" style="mix-blend-mode:normal"/><ellipse transform="matrix(.82784 0 0 1 44.098 -153.97)" cx="255.64" cy="252.95" rx="6.364" ry="26.87" filter="url(#h)" opacity=".74917" style="mix-blend-mode:normal"/><ellipse transform="matrix(.82784 0 0 1 44.617 -88.223)" cx="255.64" cy="252.95" rx="6.364" ry="26.87" filter="url(#g)" opacity=".74917" style="mix-blend-mode:normal"/></g><g transform="matrix(.66856 0 0 1.0507 -66.765 23.778)"><path d="m109.96 41.012c131.86 21.042 260.18 16.679 298.4 1.0607l25.102-12.374-12.374-10.96s-64.225-7.8817-91.803-9.6495c-27.577-1.7678-99.47-0.95711-121.39-0.60355s-102.18 5.3033-111.37 8.8388c-9.1924 3.5355-23.688 9.1924-23.688 9.1924l8.8388 14.142z" fill="#9e7da1"/><ellipse cx="251.97" cy="42.28" rx="141.83" ry="15.458" fill="#779953"/><path d="m60.268 44.416 13.689 19.268s22.25 20.5 149.75 21.5c127.5 1 161.08-8.3092 178.4-10.784 17.324-2.4749 28.284-7.6014 28.284-7.6014s6.9827-4.6846 10.872-9.6343c3.8891-4.9497 9.0156-11.49 9.0156-11.49l-148.58 13.347-172.53-3.5355z" fill="url(#c)"/><path d="m60.104 32.173s-0.17678-4.2426 1.2374-5.1265c1.4142-0.88388 3.2991-1.7615 14.672-6.0104 11.667-4.3588 20.663-6.0239 26.663-6.7739 6-0.75 9.6768-0.11612 9.6768-0.11612s-20.783 5.6525-24.319 8.1274-6.364 3.5355-1.0607 7.0711 31.969 11.255 67.175 13.435c35.355 2.1893 98.288 3.182 131.88 2.4749 33.588-0.70711 96.874-3.8891 110.66-6.7175s24.395-6.0104 26.87-8.8388 1.3244-5.6861-2.1213-7.7782c-4.9498-3.0052-34.471-7.7782-34.471-7.7782s13.45-1.4541 28.284 0.17678c18.686 2.0543 28.365 8.0198 32.704 10.43s2.8284 6.364 2.8284 6.364l-4.2426 9.8995-123.74 15.203-211.42-4.9497-47.023-12.728z" fill="#dfbceb"/><path d="m60.427 32.342-0.35355 11.857s20.966 14.844 67.689 17.6c46.625 2.75 78.177 6.7197 133.43 5.9697s141.5-7.25 161-12.25 27.912-9.9393 27.912-9.9393l0.33839-14.061s-6 6.25-27.5 10-105.18 10.174-160.5 10.75-144.5-0.98598-174.11-9.6771c-21.897-6.426-27.901-10.25-27.901-10.25z" fill="url(#b)"/><path d="m101.16 17.78s46.083-9.4178 169.09-9.2803c90.54 0.10116 148.25 11.375 148.25 11.375l9.4528-2.2108s-24.54-10.831-157.58-11.539c-165.31-0.8803-177.77 10.643-177.77 10.643z" fill="#dfbceb"/></g></g></svg>`
     };
-    const MAP_MENU_ICON_SVG = '<svg viewBox="0 0 75 75" width="24" height="24" fill="currentColor" class="sidebar-link__icon"><path d="M 8.755372e-7,11.25 26.250001,0 l 22.5,11.25 23.6362,-10.1287 c 0.2854,-0.1224 0.5966,-0.1719 0.9058,-0.1443 0.3092,0.0277 0.6067,0.1317 0.8658,0.3027 0.2591,0.171 0.4717,0.4036 0.6187,0.677 0.147,0.2735 0.2238,0.5791 0.2235,0.8896 V 63.75 l -26.25,11.25 -22.5,-11.25 -23.6362001,10.1288 c -0.2854,0.1223 -0.5966,0.1718 -0.9058,0.1442 -0.3092,-0.0277 -0.6067,-0.1317 -0.86580002,-0.3027 -0.2591,-0.171 -0.4717,-0.4036 -0.6187,-0.677 C 0.07650088,72.7698 -2.9912446e-4,72.4642 8.755372e-7,72.1537 Z M 52.500001,65.2313 l 15,-6.4276 v -47.43 l -15,6.4276 z m -7.5,-0.4913 V 17.76 l -15,-7.5 v 46.98 z m -22.5,-7.5412 V 9.7688 L 7.5000009,16.1962 v 47.43 z"/></svg>'
 
     const NIANTIC_PLACEHOLDER_IMAGE_URL = 'https://lh3.googleusercontent.com/fs2mYM4r9Qq93ejdOP_2lwefRNLVa9tqmJW7XXwqNhMCMXNKwoJoFuMboBpXwnKUf7fJGImbajM9mHAOMlndt5A-Ts9Qh9f_t6YoaQ6u';
     const NIANTIC_PLACEHOLDER_IMAGE_SVG = '<svg version="1.1" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg"><g><rect x="19.525" y="73.763" width="471.86" height="381.83" fill="#fff"/><path d="m0 256v-256h512v512h-512zm428 132.49c0-1.1628-15.686-31.755-21.273-41.488-13.063-22.758-28.877-43.934-39.302-52.629-8.4886-7.0799-14.865-9.8079-22.925-9.8079-5.6554 0-7.9929 0.5175-12.169 2.6941-6.9797 3.6378-15.887 11.197-21.795 18.494l-4.872 6.0188-5.3031-8.4468c-27.388-43.625-50.763-68.948-72.361-78.396-4.5315-1.9821-7.1729-2.4077-15-2.417-8.6645-0.0102-10.106 0.27589-16.393 3.2534-23.475 11.117-47.467 38.663-78.03 89.587-9.956 16.589-38.577 70.789-38.577 73.053 0 0.32698 78.3 0.59452 174 0.59452s174-0.23062 174-0.5125zm-57.087-142.03c8.7149-2.0542 15.448-5.8767 22.213-12.611 18.155-18.073 18.11-47.611-0.10065-65.822-27.047-27.047-72.692-12.169-79.206 25.818-3.9486 23.027 11.287 46.359 34.18 52.342 8.1463 2.1293 14.707 2.2075 22.913 0.273z" fill="#d1cdc4"/></g></svg>'
@@ -140,8 +139,6 @@
     let latLngObserver = null;
     let latLngBodyObserver = null;
     let latLngTargetEl = null;
-    let sidebarObserver = null;
-    let pinnedWarningObserver = null;
     let poiBridgeObserver = null;
     let lastBridgePayload = null;
     let zoomHintObserver = null;
@@ -427,441 +424,6 @@
             /iPad|iPhone|iPod/.test(navigator.userAgent) ||
             (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
         );
-    }
-
-    // ==================================
-    // Navigation state & sidebar integration
-    // ==================================
-
-    function sidebarAlreadyHasNativeMapLink(sidebar) {
-        const links = Array.from(sidebar.querySelectorAll('app-sidebar-link a.sidebar-link')).filter(Boolean);
-
-        return links.some(a => {
-            const href = a.getAttribute('href') || '';
-            if (href === MAPVIEW_ROUTE) return true;
-
-            const img = a.querySelector('img.sidebar-link__icon');
-            const src = img?.getAttribute('src') || '';
-            if (src === '/img/map-outlined-24px.svg') return true;
-
-            return false;
-        });
-    }
-
-    function setupSidebarTracking(sidebar) {
-        if (window._wfmapmodsSidebarTrackingSetup) return;
-        window._wfmapmodsSidebarTrackingSetup = true;
-
-        sidebar.addEventListener('click', (e) => {
-            const a = e.target.closest('a.sidebar-link');
-            if (!a) return;
-
-            // Identify Map link robustly (order-independent)
-            const mapLink = sidebar.querySelector('a.sidebar-link.sidebar-wayfarermap');
-
-            const clickedIsMap = mapLink && a === mapLink;
-
-            // If it's the Map button, let its own click handler manage state/highlight
-            if (clickedIsMap) {
-                return;
-            }
-
-            // Any other sidebar link → we're not "from Map" anymore
-            localStorage.setItem('wf_map_nav', '0');
-
-            // Remove Map's active state if present
-            if (mapLink) {
-                mapLink.classList.remove('sidebar-link--active');
-            }
-
-            // Ensure ONLY the clicked link has sidebar-link--active
-            sidebar
-                .querySelectorAll('a.sidebar-link.sidebar-link--active')
-                .forEach((el) => el.classList.remove('sidebar-link--active'));
-
-            a.classList.add('sidebar-link--active');
-        });
-    }
-
-    function addMapSidebarLink() {
-        return;
-        const sidebar = document.querySelector('app-sidebar');
-        if (!sidebar) return;
-
-        if (sidebarAlreadyHasNativeMapLink(sidebar)) {
-            if (sidebarObserver) sidebarObserver.disconnect();
-            return;
-        }
-
-        if (document.querySelector('app-sidebar-link a.sidebar-link.sidebar-wayfarermap')) {
-            if (sidebarObserver) sidebarObserver.disconnect();
-            return;
-        }
-
-        // Use the order of links to detect submit button
-        //  - 0: first nav item (Showcase)
-        //  - 1: second nav item (Submit)
-        //  - 2: where we want to insert our Map entry
-        const wrappers = sidebar.querySelectorAll('app-sidebar-link');
-        if (wrappers.length < 2) {
-            // Sidebar not fully built yet; wait for more nodes
-            return;
-        }
-
-        const submitWrapper = wrappers[1]; // 2nd item in the list
-        const submitAnchor = submitWrapper.querySelector('a.sidebar-link');
-        if (!submitAnchor || !submitWrapper.parentNode) return;
-
-        // Clone the whole app-sidebar-link node so it keeps styling/structure
-        const mapWrapper = submitWrapper.cloneNode(true);
-        const mapAnchor = mapWrapper.querySelector('a.sidebar-link');
-        if (!mapAnchor) return;
-
-        // Adjust attributes for the new Map entry
-        mapAnchor.classList.remove('sidebar-link--active');
-        mapAnchor.classList.add('sidebar-link--map');
-        mapAnchor.classList.add('sidebar-wayfarermap');
-        mapAnchor.title = 'Map';
-        mapAnchor.setAttribute('data-wfmapmods-role', 'map');
-
-        const span = mapAnchor.querySelector('span');
-        if (span) {
-            span.textContent = 'Map';
-        }
-
-        // Intercept click and mark that we came from the Map button
-        mapAnchor.addEventListener('click', function(e) {
-            e.preventDefault();
-
-            const url = SUBMIT_ROUTE;
-
-            // Mark that this navigation came from the Map button
-            localStorage.setItem('wf_map_nav', '1');
-
-            // Try SPA-style navigation first
-            if (window.history && typeof window.history.pushState === 'function') {
-                window.history.pushState({}, '', url);
-
-                // Nudge Angular's router by emitting a popstate event
-                try {
-                    window.dispatchEvent(new PopStateEvent('popstate', {
-                        state: {}
-                    }));
-                } catch (err) {
-                    const evt = document.createEvent('PopStateEvent');
-                    evt.initPopStateEvent('popstate', true, true, {});
-                    window.dispatchEvent(evt);
-                }
-            } else {
-                // Fallback: full reload
-                window.location.href = url;
-            }
-        });
-
-        // Remove old icon
-        const oldIcon = mapAnchor.querySelector('img.sidebar-link__icon');
-        if (oldIcon) oldIcon.remove();
-
-        // Insert icon from server (no inline SVG)
-        const mapIcon = document.createElement('img');
-        mapIcon.className = 'sidebar-link__icon';
-        mapIcon.src = '/img/map-outlined-24px.svg';
-        mapIcon.alt = 'Map';
-
-        mapAnchor.insertAdjacentElement('afterbegin', mapIcon);
-
-        // Insert right after the second nav item (Submit),
-        // which makes us the 3rd <app-sidebar-link>
-        submitWrapper.parentNode.insertBefore(mapWrapper, submitWrapper);
-
-        // Once added, we can stop observing
-        if (sidebarObserver) sidebarObserver.disconnect();
-    }
-
-    function setupSidebarObserver() {
-        if (sidebarObserver) return;
-
-        // Observe DOM changes until the sidebar appears
-        sidebarObserver = new MutationObserver(() => {
-            const sidebar = document.querySelector('app-sidebar');
-            if (sidebar) {
-                addMapSidebarLink();
-                setupSidebarTracking(sidebar);
-            }
-        });
-
-        sidebarObserver.observe(document.body, {
-            childList: true,
-            subtree: true,
-        });
-
-        // Also try immediately in case the sidebar is already there
-        addMapSidebarLink();
-    }
-
-    // ==================================
-    // Format page for map view
-    // ==================================
-
-    let wfMapResizeListenerAttached = false;
-    let wfMapModeInterval = null;
-
-    function formatPageForMapMode() {
-        if (localStorage.getItem('wf_map_nav') !== '1') return;
-        if (location.pathname !== SUBMIT_ROUTE) return;
-
-        startMapSidebarActiveEnforcement();
-
-        if (wfMapModeInterval) clearInterval(wfMapModeInterval);
-
-        wfMapModeInterval = setInterval(() => {
-            if (localStorage.getItem('wf_map_nav') !== '1' || location.pathname !== SUBMIT_ROUTE) {
-                clearInterval(wfMapModeInterval);
-                wfMapModeInterval = null;
-                return;
-            }
-
-            const root = document.querySelector('app-submit-wayspot.ng-star-inserted');
-            if (!root) return;
-
-            const mapComp = root.querySelector('app-submit-wayspot-map');
-            if (!mapComp) return;
-
-            const container = root.querySelector(':scope > div');
-            if (!container) return;
-
-            // stop polling once we can apply
-            clearInterval(wfMapModeInterval);
-            wfMapModeInterval = null;
-
-            // Find the direct child that contains the map component once
-            const mapSection = Array.from(container.children).find(child => child.contains(mapComp));
-            if (!mapSection) return;
-
-            // Mark the container + body as map mode (CSS handles padding/scrolling/width)
-            container.classList.add('wfmapmods-mapmode');
-            setMapModeEnabled(true);
-
-            mapSection.classList.add('wfmapmods-mapsection');
-
-            const mapKeep = Array.from(mapSection.children).find(ch => ch.contains(mapComp));
-            if (mapKeep) mapKeep.classList.add('wfmapmods-mapkeep');
-
-            // Optional: compute top offset once so height = 100vh - offset
-            // (prevents map going under any fixed header)
-            resizeWfMapToViewport();
-
-            if (!wfMapResizeListenerAttached) {
-                window.addEventListener('resize', resizeWfMapToViewport);
-                wfMapResizeListenerAttached = true;
-            }
-        }, 150);
-    }
-
-    function setSidebarActiveForMapMode() {
-        const sidebar = document.querySelector('app-sidebar');
-        if (!sidebar) return;
-
-        const wrappers = sidebar.querySelectorAll('app-sidebar-link');
-        if (wrappers.length < 3) return;
-
-        const submitLink = wrappers[1].querySelector('a.sidebar-link');
-        const mapLink = wrappers[2].querySelector('a.sidebar-link');
-
-        if (!submitLink || !mapLink) return;
-
-        submitLink.classList.remove('sidebar-link--active');
-        mapLink.classList.add('sidebar-link--active');
-    }
-
-    function clearSidebarActiveForMapMode() {
-        const sidebar = document.querySelector('app-sidebar');
-        if (!sidebar) return;
-
-        const wrappers = sidebar.querySelectorAll('app-sidebar-link');
-        if (wrappers.length < 3) return;
-
-        const mapLink = wrappers[2].querySelector('a.sidebar-link');
-        if (mapLink) mapLink.classList.remove('sidebar-link--active');
-    }
-
-    function enforceMapAsOnlyActiveSidebarLink() {
-        const sidebar = document.querySelector('app-sidebar');
-        if (!sidebar) return;
-
-        // Find Map link
-        const mapLink = sidebar.querySelector('a.sidebar-link.sidebar-wayfarermap');
-
-        if (!mapLink) return;
-
-        // Remove active from ALL sidebar links first (this clears Submit)
-        sidebar
-            .querySelectorAll('a.sidebar-link.sidebar-link--active')
-            .forEach((el) => el.classList.remove('sidebar-link--active'));
-
-        // Then force Map active
-        mapLink.classList.add('sidebar-link--active');
-    }
-
-    function startMapSidebarActiveEnforcement(durationMs = 1200) {
-        const start = performance.now();
-
-        // Initial assert
-        enforceMapAsOnlyActiveSidebarLink();
-
-        if (wfMapActiveEnforcerTimer) {
-            clearInterval(wfMapActiveEnforcerTimer);
-        }
-
-        wfMapActiveEnforcerTimer = setInterval(() => {
-            // Stop if we left map mode or route
-            if (
-                localStorage.getItem('wf_map_nav') !== '1' ||
-                location.pathname !== SUBMIT_ROUTE
-            ) {
-                clearInterval(wfMapActiveEnforcerTimer);
-                wfMapActiveEnforcerTimer = null;
-                return;
-            }
-
-            enforceMapAsOnlyActiveSidebarLink();
-
-            // Stop after bounded window
-            if (performance.now() - start > durationMs) {
-                clearInterval(wfMapActiveEnforcerTimer);
-                wfMapActiveEnforcerTimer = null;
-            }
-        }, 100);
-    }
-
-    function setMapModeEnabled(enabled) {
-        document.body.classList.toggle('wfmapmods-mapmode-body', !!enabled);
-
-        if (!enabled) {
-            document.documentElement.style.removeProperty('--wfmapmods-map-top-offset');
-        }
-    }
-
-    function removeSidenavPaddingForMapPage() {
-        return;
-        const sidenavContent = document.querySelector('mat-sidenav-content');
-        if (sidenavContent) {
-            sidenavContent.classList.remove('p-4');
-        }
-    }
-
-    function restoreSidenavPadding() {
-        return;
-        const sidenavContent = document.querySelector('mat-sidenav-content');
-        if (sidenavContent && !sidenavContent.classList.contains('p-4')) {
-            sidenavContent.classList.add('p-4');
-        }
-    }
-
-    function restoreScrolling() {
-        return;
-        let node = document.querySelector('mat-sidenav-content');
-        while (node && node !== document.body) {
-            if (node instanceof HTMLElement) {
-                if (node.style.overflowY === 'hidden') {
-                    node.style.overflowY = ''; // remove inline override
-                }
-            }
-            node = node.parentElement;
-        }
-    }
-
-    function restoreWidthLimiter() {
-        return;
-        const limiter = document.querySelector('[data-wf-removed-max-width="1"]');
-        if (limiter) {
-            limiter.classList.add('max-w-7xl');
-            delete limiter.dataset.wfRemovedMaxWidth;
-        }
-    }
-
-    function applySidenavPaddingForCurrentRoute() {
-        const fromMap = localStorage.getItem('wf_map_nav') === '1';
-        const onMapPage = location.pathname === SUBMIT_ROUTE;
-
-        const enable = fromMap && onMapPage;
-
-        // Toggle body mode (CSS does the rest)
-        setMapModeEnabled(enable);
-
-        if (!enable) {
-            // Leaving map mode: clear your nav flag and sidebar enforcement
-            if (fromMap && !onMapPage) {
-                localStorage.setItem('wf_map_nav', '0');
-
-                if (wfMapActiveEnforcerTimer) {
-                    clearInterval(wfMapActiveEnforcerTimer);
-                    wfMapActiveEnforcerTimer = null;
-                }
-                clearSidebarActiveForMapMode();
-            }
-
-            // Remove container markers (so your CSS no longer hides content)
-            const root = document.querySelector('app-submit-wayspot.ng-star-inserted');
-            const container = root && root.querySelector(':scope > div');
-            if (container) {
-                container.classList.remove('wfmapmods-mapmode');
-                const mapSection = container.querySelector('.wfmapmods-mapsection');
-                if (mapSection) mapSection.classList.remove('wfmapmods-mapsection');
-                const mapKeep = container.querySelector('.wfmapmods-mapkeep');
-                if (mapKeep) mapKeep.classList.remove('wfmapmods-mapkeep');
-            }
-
-            if (wfMapResizeListenerAttached) {
-                window.removeEventListener('resize', resizeWfMapToViewport);
-                wfMapResizeListenerAttached = false;
-            }
-        }
-    }
-
-    async function resizeWfMapToViewport() {
-        let mapContainer;
-
-        try {
-            mapContainer = await awaitElement(() =>
-                                              document.querySelector('.submit-wayspot-map-container')
-                                             );
-        } catch (err) {
-            console.warn("Wayfarer Map: Map container not found:", err);
-            return;
-        }
-
-        const rect = mapContainer.getBoundingClientRect();
-        const offsetTop = Math.max(0, Math.round(rect.top));
-
-        // Let CSS do: height: calc(100vh - var(--wfmapmods-map-top-offset))
-        document.documentElement.style.setProperty('--wfmapmods-map-top-offset', offsetTop + 'px');
-    }
-
-    function initSidenavPaddingRouteWatcher() {
-        if (window._wfmapmodsSidenavPaddingWatcherInitialised) return;
-        window._wfmapmodsSidenavPaddingWatcherInitialised = true;
-
-        // React to back/forward and any manual popstate dispatches
-        window.addEventListener('popstate', () => {
-            applySidenavPaddingForCurrentRoute();
-            handleRouteChangeForGeoKick();
-        });
-
-        // Wrap history.pushState so any SPA navigation is noticed too
-        const origPushState = history.pushState;
-        history.pushState = function (...args) {
-            const ret = origPushState.apply(this, args);
-            setTimeout(() => {
-                applySidenavPaddingForCurrentRoute();
-                handleRouteChangeForGeoKick();
-            }, 0);
-            return ret;
-        };
-
-        // Initial pass for the current route
-        applySidenavPaddingForCurrentRoute();
-        handleRouteChangeForGeoKick();
     }
 
     // ==================================
@@ -6746,7 +6308,7 @@
 
         // If on the Mapview route, stop after clearing gcs data
         // Mapview will do its own calls to gcs api
-        if (isOnMapviewRoute()) return;
+        if (!isOnMapviewRoute()) return;
 
         // If on Submit route, call gcs api manually
         const bounds = map.getBounds?.();
@@ -7201,7 +6763,6 @@
         }
 
         updateAvailability();
-        checkWhichApisAreLive();
     }
 
     function setGoogleMapControls() {
@@ -9032,23 +8593,29 @@
         } = userSettings.poi?.thumbnail || {};
         const thumbBorderRGBA = borderColor ? hexToRgba(borderColor, borderOpacity) : "rgba(0,0,0,0.5)";
 
-        const cssText = `
+const cssText = `
 /* =============================================================================
    WAYFARER MAP MOD (wfmm)
+   Re-organised into logical sections + duplication removed
    ============================================================================= */
 
 /* =============================================================================
-   01) Sidebar Icon & Link
+   01) Common helpers / utilities
    ============================================================================= */
 
-.sidebar-wayfarermap svg {
-    width: 24px;
-    height: 24px;
-    filter: none;
-    fill: currentColor; }
+.wfmapmods-is-hidden,
+.wfmapmods-hidden {
+  display: none !important;
+}
+
+/* Replaces setOkButtonState opacity/cursor inline styles */
+.wfmapmods-btn-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 
 /* =============================================================================
-   02) Modal: Backdrop + Dialog
+   02) Modal: Backdrop + Dialog (generic)
    ============================================================================= */
 
 .wfmapmods-modal-backdrop {
@@ -9069,19 +8636,26 @@
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
   width: 280px;
   max-width: calc(100% - 32px);
+  max-height: 90vh;
+  overflow-y: auto;
   padding: 12px 14px 10px;
   box-sizing: border-box;
   font-family: Roboto, Arial, sans-serif;
   font-size: 12px;
   color: #111827;
-  max-height: 90vh;
-  overflow-y: auto;
 }
 
 .wfmapmods-modal-title {
   font-size: 15px;
   font-weight: 600;
   margin-bottom: 10px;
+}
+
+.wfmapmods-modal-intro {
+  font-size: 11px;
+  margin-bottom: 6px;
+  line-height: 1.4;
+  color: #374151;
 }
 
 .wfmapmods-modal-section {
@@ -9144,7 +8718,19 @@
   font-size: 11px;
 }
 
-.wfmapmods-modal-footer {
+.wfmapmods-modal-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 11px;
+  padding: 4px 6px;
+  min-height: 140px;
+  resize: vertical;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+}
+
+.wfmapmods-modal-footer,
+.wfmapmods-modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
@@ -9166,31 +8752,7 @@
   color: #ffffff;
 }
 
-.wfmapmods-modal-intro {
-  font-size: 11px;
-  margin-bottom: 6px;
-  line-height: 1.4;
-  color: #374151;
-}
-
-.wfmapmods-modal-textarea {
-  width: 100%;
-  box-sizing: border-box;
-  font-size: 11px;
-  padding: 4px 6px;
-  min-height: 140px;
-  resize: vertical;
-  border: 1px solid #d1d5db;
-  border-radius: 4px;
-}
-
-.wfmapmods-modal-actions {
-  margin-top: 6px;
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
+/* Clickable “row with checkbox” helper */
 .wfmapmods-clickrow {
   display: flex;
   align-items: center;
@@ -9206,6 +8768,7 @@
   flex: 1 1 auto;
 }
 
+/* Settings marker table + preview */
 .wfmapmods-modal-hint {
   margin-top: 8px;
   font-size: 13px;
@@ -9246,6 +8809,8 @@
 
 .wfmapmods-thumbframe {
   position: relative;
+  width: var(--wfmapmods-thumb-size, 36px);
+  height: var(--wfmapmods-thumb-size, 36px);
   border-radius: 50%;
   overflow: hidden;
   box-sizing: border-box;
@@ -9267,13 +8832,8 @@
   pointer-events: none;
 }
 
-.wfmapmods-thumbframe {
-  width: var(--wfmapmods-thumb-size, 36px);
-  height: var(--wfmapmods-thumb-size, 36px);
-}
-
 /* =============================================================================
-   03) Search Input Placeholder
+   03) Inputs / placeholder styling
    ============================================================================= */
 
 #wfmapmods-search-input::placeholder,
@@ -9283,7 +8843,7 @@
 }
 
 /* =============================================================================
-   04) Link Blocks (Settings & POI Function Links)
+   04) Link blocks (Settings & POI function links)
    ============================================================================= */
 
 .wfmapmods-link-block {
@@ -9291,6 +8851,10 @@
   flex-wrap: wrap;
   gap: 0 4px;
   padding: 4px 0;
+}
+
+.wfmapmods-link-block.wfmapmods-link-block--spaced {
+  gap: 0 8px; /* preserves wrap, increases horizontal gap */
 }
 
 .wfmapmods-link-block a {
@@ -9315,7 +8879,7 @@
 }
 
 /* =============================================================================
-   05) Wayspot Detail Overlay (Dialog)
+   05) Wayspot detail overlay (dialog)
    ============================================================================= */
 
 .wfmapmods-wayspot-overlay-backdrop {
@@ -9413,7 +8977,7 @@
   padding-right: 2px;
 }
 
-/* Overlay: Carousel thumbnails */
+/* Overlay: carousel thumbnails */
 .wfmapmods-wayspot-overlay-carousel {
   display: flex;
   gap: 8px;
@@ -9439,8 +9003,12 @@
 }
 
 /* =============================================================================
-   06) Side Panel
+   06) Side panel (container + search + details)
    ============================================================================= */
+
+.wfmapmods-map-host {
+  position: relative;
+}
 
 .wfmapmods-sidepanel-root {
   transition: transform 0.25s ease-out;
@@ -9560,7 +9128,7 @@
   justify-content: center;
 }
 
-/* Input */
+/* Search input */
 #wfmapmods-search-input {
   flex: 1 1 auto;
   font-size: 12px;
@@ -9624,32 +9192,6 @@
   align-items: center;
 }
 
-.wfmapmods-detail-status-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.wfmapmods-detail-poi-source,
-.wfmapmods-detail-pgo-entity-logo,
-.wfmapmods-detail-community-logo {
-  align-items: center;
-  justify-content: center;
-  height: 20px;
-  width: auto;
-  box-sizing: content-box;
-  display: none;
-}
-
-.wfmapmods-detail-poi-source,
-.wfmapmods-detail-pgo-entity-logo {
-  margin-right: 10px;
-}
-
-.wfmapmods-detail-community-logo {
-  margin-left: 10px;
-}
-
 .wfmapmods-detail-status-tag-container {
   display: flex;
   align-items: center;
@@ -9666,45 +9208,32 @@
   color: #374151;
 }
 
-/* Link block spacing override (instead of setting style.gap inline) */
-.wfmapmods-link-block.wfmapmods-link-block--spaced {
-  gap: 0 8px; /* preserves wrap, increases horizontal gap */
-}
-
-/* Simple visibility helper (instead of style.display = "none") */
-.wfmapmods-is-hidden {
-  display: none !important;
-}
-
-.wfmapmods-map-host {
-  position: relative;
-}
-
-/* ===============================
-   Safari-safe status icon sizing
-   =============================== */
-
-/* Keep the row horizontal, no wrapping surprises */
+/* Safari-safe status icon sizing + consistent spacing */
 .wfmapmods-detail-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-wrap: nowrap;
+  gap: 10px;
 }
 
-/* Each visible icon reserves exactly 20×20px */
 .wfmapmods-detail-poi-source,
 .wfmapmods-detail-pgo-entity-logo,
 .wfmapmods-detail-community-logo {
   width: 20px;
   height: 20px;
 
-  /* critical for Safari */
+  /* Safari stability */
   min-width: 20px;
   min-height: 20px;
   flex: 0 0 20px;
 
-  display: flex;          /* only applies when you toggle it visible */
+  /* toggled visible via JS */
+  display: none;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  box-sizing: content-box;
 }
 
 /* Kill intrinsic SVG sizing (Safari bug source) */
@@ -9718,23 +9247,8 @@
   display: block;
 }
 
-/* Replace margin-based spacing with predictable spacing */
-.wfmapmods-detail-poi-source,
-.wfmapmods-detail-pgo-entity-logo {
-  margin-right: 0;
-}
-
-.wfmapmods-detail-community-logo {
-  margin-left: 0;
-}
-
-/* Centralised spacing that Safari can’t miscompute */
-.wfmapmods-detail-status-row {
-  gap: 10px;
-}
-
 /* =============================================================================
-   07) Status Tags
+   07) Status tags
    ============================================================================= */
 
 .wfmapmods-status-tag {
@@ -9764,7 +9278,7 @@
 }
 
 /* =============================================================================
-   08) Info Window (Wayfarer Map)
+   08) Info window (Wayfarer map)
    ============================================================================= */
 
 .wfmapmods-iw-root {
@@ -9857,7 +9371,7 @@
   font-size: 14px;
 }
 
-/* Info window: hide Google Maps default close button + chrome */
+/* Hide Google Maps default close button + chrome */
 .gm-style-iw-chr .gm-ui-hover-effect {
   display: none !important;
 }
@@ -9869,7 +9383,7 @@
 }
 
 /* =============================================================================
-   09) Icon Menu Controls (Filters/Layers/etc.)
+   09) Icon menu controls (filters/layers/etc.)
    ============================================================================= */
 
 .wfmapmods-iconmenu {
@@ -9985,23 +9499,7 @@
 }
 
 /* option rows */
-.wfmapmods-filters-option {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-}
-
-.wfmapmods-filters-label {
-  font-size: 11px;
-  color: #111827;
-}
-
-.wfmapmods-filters-checkbox {
-  width: 14px;
-  height: 14px;
-}
-
+.wfmapmods-filters-option,
 .wfmapmods-layers-option {
   display: flex;
   align-items: center;
@@ -10009,18 +9507,20 @@
   cursor: pointer;
 }
 
-.wfmapmods-layers-checkbox {
-  width: 14px;
-  height: 14px;
-}
-
+.wfmapmods-filters-label,
 .wfmapmods-layers-label {
   font-size: 11px;
   color: #111827;
 }
 
+.wfmapmods-filters-checkbox,
+.wfmapmods-layers-checkbox {
+  width: 14px;
+  height: 14px;
+}
+
 /* =============================================================================
-   10) Spinner (Loading)
+   10) Spinner (loading)
    ============================================================================= */
 
 @keyframes wfmapmods-spin {
@@ -10038,7 +9538,7 @@
 }
 
 /* =============================================================================
-   11) Submit UI (Images + Fields + Table)
+   11) Submit UI (images + fields + tables)
    ============================================================================= */
 
 /* Settings modal: circle table */
@@ -10100,6 +9600,38 @@
   font-weight: 700;
 }
 
+/* New “tile” approach (placeholder | pending | ready) */
+.wfmapmods-submit-tile {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wfmapmods-submit-tile--placeholder {
+  border: 1px dashed rgb(209, 213, 219);
+  background: #fff;
+  font-size: 24px;
+  color: #9ca3af;
+  cursor: pointer;
+}
+
+.wfmapmods-submit-tile--pending {
+  border: 1px dashed rgb(209, 213, 219);
+  background: #f9fafb;
+}
+
+.wfmapmods-submit-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Keep existing thumb class (used elsewhere) */
 .wfmapmods-submit-thumbwrap {
   position: relative;
 }
@@ -10110,6 +9642,10 @@
   object-fit: cover;
   border-radius: 4px;
   border: 1px solid rgb(209, 213, 219);
+}
+
+.wfmapmods-submit-thumb.is-clickable {
+  cursor: pointer;
 }
 
 .wfmapmods-submit-remove {
@@ -10128,6 +9664,7 @@
   padding: 0;
 }
 
+/* Legacy add box (kept, but grouped) */
 .wfmapmods-submit-box {
   width: 80px;
   height: 80px;
@@ -10221,62 +9758,12 @@
   display: none;
 }
 
-.wfmapmods-hidden {
-  display: none !important;
-}
-
-/* Replaces setOkButtonState opacity/cursor inline styles */
-.wfmapmods-btn-disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* Make thumbs clickable */
-.wfmapmods-submit-thumb.is-clickable {
-  cursor: pointer;
-}
-
-/* One image “tile” that can be: placeholder | pending | ready */
-.wfmapmods-submit-tile {
-  position: relative;
-  width: 80px;
-  height: 80px;
-  border-radius: 4px;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* placeholder look */
-.wfmapmods-submit-tile--placeholder {
-  border: 1px dashed rgb(209, 213, 219);
-  background: #fff;
-  font-size: 24px;
-  color: #9ca3af;
-  cursor: pointer;
-}
-
-/* pending look */
-.wfmapmods-submit-tile--pending {
-  border: 1px dashed rgb(209, 213, 219);
-  background: #f9fafb;
-}
-
-/* ready image */
-.wfmapmods-submit-tile img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-/* Warning show/hide via class instead of inline */
 .wfmapmods-submit-warning.is-visible {
   display: block;
 }
 
 /* =============================================================================
-   12) Mobile Confirm Location Bar
+   12) Mobile confirm location bar
    ============================================================================= */
 
 .wfmapmods-confirmbar {
@@ -10322,73 +9809,16 @@
 }
 
 /* =============================================================================
-   13) Layout / Map Mode Tweaks + Visibility Utilities
+   13) Zoom hint (default UI tweak)
    ============================================================================= */
 
-/* Remove map padding (Wayfarer submit container) */
-.submit-wayspot-container {
-  padding: 0 !important;
-}
-
-/* Hide helper */
-.wfmapmods-hidden,
-.wfmapmods-hidden * {
-  display: none !important;
-}
-
-/* Map mode: hide everything by default, then opt-in what you need */
-.wfmapmods-mapmode > * {
-  display: none !important;
-}
-
-.wfmapmods-mapmode > .wfmapmods-mapsection {
-  display: block !important;
-}
-
-.wfmapmods-mapmode > .wfmapmods-mapsection > * {
-  display: none !important;
-}
-
-.wfmapmods-mapmode > .wfmapmods-mapsection > .wfmapmods-mapkeep {
-  display: block !important;
-}
-
-/* Map mode: remove Niantic width limiter (container-scoped) */
-body.wfmapmods-mapmode-body .max-w-7xl {
-  max-width: none !important;
-}
-
-/* Map mode: remove padding */
-body.wfmapmods-mapmode-body mat-sidenav-content.p-4 {
-  padding: 0 !important;
-}
-
-/* Map mode: kill vertical scrolling */
-body.wfmapmods-mapmode-body,
-body.wfmapmods-mapmode-body mat-sidenav-content,
-body.wfmapmods-mapmode-body app-submit-wayspot,
-body.wfmapmods-mapmode-body app-submit-wayspot > div {
-  overflow-y: hidden !important;
-}
-
-/* Map mode: let the map fill viewport */
-body.wfmapmods-mapmode-body .submit-wayspot-map-container {
-  height: calc(100vh - var(--wfmapmods-map-top-offset, 0px)) !important;
-  max-height: 100vh !important;
-}
-
-/* =============================================================================
-   14) Modify the default zoom hint
-   ============================================================================= */
-
-/* Zoom hint: make clickable */
 .zoom-hint-pill {
   pointer-events: auto !important;
   cursor: pointer !important;
 }
 
 /* =============================================================================
-   15) PGO: Inactive Gym/Pokestop Slash Overlay
+   14) PGO: inactive gym/pokestop slash overlay
    ============================================================================= */
 
 .wfmapmods-pgo-inactive-slash {
@@ -10405,10 +9835,11 @@ body.wfmapmods-mapmode-body .submit-wayspot-map-container {
 }
 
 /* =============================================================================
-   16) Submit Progress Bar (Map Overlay)
+   15) Progress bars (submit + report)
    ============================================================================= */
 
-#wfmapmods-submit-progress {
+#wfmapmods-submit-progress,
+#wfmapmods-report-progress {
   position: absolute;
   top: 8px;
   left: 50%;
@@ -10421,7 +9852,8 @@ body.wfmapmods-mapmode-body .submit-wayspot-map-container {
   font-size: 12px;
 }
 
-#wfmapmods-submit-progress.is-hidden {
+#wfmapmods-submit-progress.is-hidden,
+#wfmapmods-report-progress.is-hidden {
   display: none;
 }
 
@@ -10453,7 +9885,7 @@ body.wfmapmods-mapmode-body .submit-wayspot-map-container {
 }
 
 /* =============================================================================
-   17) Map Context Menu (Right-click copy coords)
+   16) Map context menu (right-click copy coords)
    ============================================================================= */
 
 .wfmapmods-map-context-menu {
@@ -10495,81 +9927,59 @@ body.wfmapmods-mapmode-body .submit-wayspot-map-container {
 }
 
 /* =============================================================================
-   17) Submission Pin button and toggle
+   17) Submission pin button + active toggle
    ============================================================================= */
 
-    .wf-submission-pin-control {
-      background-color: #ffffff;
-      border: 2px solid #ffffff;
-      border-radius: 3px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-      cursor: pointer;
-      margin-top: 10px;
-      margin-left: 10px;
-      width: 32px;
-      height: 32px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      user-select: none;
-    }
+.wf-submission-pin-control {
+  background-color: #ffffff;
+  border: 2px solid #ffffff;
+  border-radius: 3px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  cursor: pointer;
+  margin-top: 10px;
+  margin-left: 10px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
 
-    /* Icon wrapper sizing */
-    .wf-submission-pin-control .wf-icon-wrapper {
-      width: 16px;
-      height: 16px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
+/* Icon wrapper sizing */
+.wf-submission-pin-control .wf-icon-wrapper {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 
-      /* CRITICAL: let clicks pass through the SVG/wrapper */
-      pointer-events: none;
-    }
+  /* Let clicks pass through the SVG/wrapper */
+  pointer-events: none;
+}
 
-    /* Make SVG smaller and blocky */
-    .wf-submission-pin-control svg {
-      width: 14px;
-      height: auto;
-      display: block;
+/* SVG sizing */
+.wf-submission-pin-control svg {
+  width: 14px;
+  height: auto;
+  display: block;
+  pointer-events: none;
+}
 
-      /* extra safety: SVG itself shouldn't intercept clicks */
-      pointer-events: none;
-    }
-
-    /* Force icon to black */
-    .wf-submission-pin-control svg,
-    .wf-submission-pin-control svg * {
-      fill: #000000 !important;
-      stroke: #000000 !important;
-    }
+/* Force icon to black */
+.wf-submission-pin-control svg,
+.wf-submission-pin-control svg * {
+  fill: #000000 !important;
+  stroke: #000000 !important;
+}
 
 .wf-toggle-active {
   background-color: #ffce04 !important;
   border-color: #ffce04 !important;
   color: #000000 !important;
 }
+`;
 
-/* =============================================================================
-   Report Progress Bar (Map Overlay)
-   ============================================================================= */
-
-#wfmapmods-report-progress {
-  position: absolute;
-  top: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 9999;
-  max-width: 420px;
-  width: 70%;
-  pointer-events: none;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 12px;
-}
-
-#wfmapmods-report-progress.is-hidden {
-  display: none;
-}
-  `
 
         let style = document.getElementById("wfmapmods-all-css");
         if (!style) {
@@ -10656,36 +10066,18 @@ canvas#deckgl-overlay {
     // Bootstrap & event wiring
     // ==================================
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', setupSidebarObserver);
-    } else {
-        setupSidebarObserver();
-    }
-
-    // Initial map-mode layout on load
-    formatPageForMapMode();
-
-    // Keep behaviour in sync with SPA navigation
-    window.addEventListener('popstate', () => {
-        formatPageForMapMode();
-        // updateSidebarActiveForMapMode();
-    });
-
-
     function init() {
         const coordsFromUrl = parseDeepLinkFromLocation();
         if (coordsFromUrl) {
             deepLinkTarget = coordsFromUrl;
             skipRestoreMapViewForThisLoad = true;
             localStorage.setItem('wf_map_nav', '1');
-            formatPageForMapMode();
         }
 
         loadSettings();
         injectCss();
         applyCssForCurrentRoute();
         initMapModeWatcher();
-        initSidenavPaddingRouteWatcher();
         createBridges();
         setupMapRouteWatcher();
     }
