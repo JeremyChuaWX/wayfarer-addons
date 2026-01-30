@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Exif Auto-Center
-// @version      0.2.0
+// @version      0.2.1
 // @description  Read EXIF GPS from the main photo upload and auto-center the submit map.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-exif-auto-center.user.js
@@ -51,7 +51,6 @@
                 for (const node of m.addedNodes) {
                     if (!(node instanceof HTMLElement)) continue;
 
-                    // Keep your existing behavior: rescan when nodes are added
                     if (node.matches && node.matches("app-submit-wayspot, app-wayspot-image-entry, form, div")) {
                         scanForMainPhotoInputs(node);
                     } else if (node.querySelector) {
@@ -94,7 +93,6 @@
         else leaveSubmitRoute();
     }
 
-    // Patch history methods so we detect SPA navigation
     (function patchHistoryForRouteChange() {
         const _pushState = history.pushState;
         const _replaceState = history.replaceState;
@@ -260,7 +258,14 @@
                 }
 
                 const { latitude, longitude } = gps;
+
                 if (typeof latitude === 'number' && typeof longitude === 'number') {
+                    // Ignore "Null Island" (0,0) — usually bad/missing GPS data
+                    if (latitude === 0 && longitude === 0) {
+                        console.log('[Exif Auto-Center] Ignoring EXIF GPS 0,0 (likely bad data)');
+                        return;
+                    }
+
                     console.log('[Exif Auto-Center] Found GPS', latitude, longitude);
                     centerMapOn(latitude, longitude);
                 } else {
