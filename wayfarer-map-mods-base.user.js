@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.0.12
+// @version      3.0.13
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -6922,16 +6922,6 @@
 
         controlUI.appendChild(iconWrapper);
         controlDiv.appendChild(controlUI);
-
-        // IMPORTANT: stop map gestures in CAPTURE phase, before Google Maps handles them
-        const swallow = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-        };
-
-        ["pointerdown", "mousedown", "touchstart", "dblclick"].forEach((type) => {
-            controlUI.addEventListener(type, swallow, { capture: true, passive: false });
-        });
 
         controlUI.addEventListener("click", (e) => {
             e.preventDefault();
