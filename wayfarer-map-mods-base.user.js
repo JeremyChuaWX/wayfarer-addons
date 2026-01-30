@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.0.13
+// @version      3.0.14
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -6790,6 +6790,7 @@
     }
 
     function applyMapViewHiddenUi() {
+        return;
         if (!window.location.pathname.startsWith(MAPVIEW_ROUTE)) return;
 
         // Hide the top controls bar
@@ -10021,10 +10022,30 @@ const cssText = `
         // Will be removed upon leaving via Teardown
         const cssText = `
 /* =============================================================================
-   Google Maps Marker Overrides (Mapview Route)
+   Mapview UI Overrides
    ============================================================================= */
 
-/* Hide default Wayspots on Mapview route */
+/* Hide top controls bar */
+.top-controls {
+  display: none !important;
+}
+
+/* Hide map legend */
+app-map-legend {
+  display: none !important;
+}
+
+/* Hide map controls */
+app-map-controls {
+  display: none !important;
+}
+
+/* Hide POI detail panel */
+app-poi-detail-panel {
+  display: none !important;
+}
+
+/* Hide default Wayspots canvas */
 canvas#deckgl-overlay {
   display: none !important;
 }
