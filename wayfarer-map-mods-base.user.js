@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.0.15
+// @version      3.0.16
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -129,6 +129,10 @@
 
     let lastFetchLat = null;
     let lastFetchLng = null;
+
+    // ----- Draft submissions -----
+    let draftSubmissions = [];
+    let draftMarkers = [];
 
     // ----- Deep link state -----
     let deepLinkTarget = null;
@@ -1522,7 +1526,6 @@
                 const img = document.createElement("img");
                 img.className = "wfmapmods-detail-image";
                 img.src = poi.imageUrl;
-                console.log(`img.src: ${img.src}`);
                 Object.assign(img.style, { width: "100%", height: "100%", objectFit: "cover", display: "block" });
                 imgBox.appendChild(img);
             } else {
@@ -3295,8 +3298,6 @@
     // ======================================
     // Draft submissions
     // ======================================
-    let draftSubmissions = [];
-    let draftMarkers = [];
 
     // Opens an IDB database connection for wayfarer-tools-db, ensuring DRAFT_STORE_NAME exists.
     function getDraftsIDBInstance(version) {
@@ -3507,11 +3508,9 @@
             marker.setVisible(isDraftLayerEnabled());
 
             marker.addListener("click", () => {
-                if (wfMap) wfMap.setCenter(position);
 
-                if (google?.maps && wfMap) {
-                    google.maps.event.trigger(wfMap, "click", { latLng: position });
-                }
+                console.log(position);
+                flyToLatLngAndPlaceSubmission(position);
 
                 loadDraftByIdFromIDB(draft.id).then(fullDraft => {
                     const images = fullDraft?.images || {};
@@ -6259,8 +6258,6 @@
 
         // Recompute combined POIs only for impacted guids
         recomputeCombinedForGuids(affected);
-
-        console.log(livePoisByGuid);
     }
 
     // ==================================
@@ -6268,7 +6265,6 @@
     // ==================================
 
     function fetchLivePois(lat, lng) {
-        console.log('fetching live pois');
         const url = `/api/v1/vault/live-pois-in-radius?lat=${lat}&lng=${lng}&radius=${radius}`;
 
         const xhr = new XMLHttpRequest();
@@ -6296,8 +6292,6 @@
                 if (norm) normalized.push(norm);
             }
 
-            console.log('normalised...');
-            console.log(normalized);
             applySourcePoisSnapshot("live", normalized);
         };
 
@@ -7507,20 +7501,23 @@
                 const savedMarkerLatLng = new google.maps.LatLng(markerLat, markerLng);
 
                 setTimeout(() => {
-                    // Re-check again right before firing the synthetic click
                     if (mapAtSchedule !== wfMap) return;
                     if (routeKeyAtSchedule !== currentMapRouteKey()) return;
                     if (isMapStale()) return;
 
                     try {
-                        google.maps.event.trigger(mapAtSchedule, "click", { latLng: savedMarkerLatLng });
+                        if (isOnMapviewRoute()) {
+                            placeSubmissionPinOnMapview(savedMarkerLatLng);
+                        } else if (isOnSubmitRoute()) {
+                            placeSubmissionPinOnSubmit(savedMarkerLatLng);
+                        }
                     } catch (e) {
+                        console.warn("Wayfarer Map: restore marker failed:", e);
                     }
                 }, 0);
             }
         });
     }
-
 
     // ==================================
     // Deep links
@@ -7738,7 +7735,7 @@
             autocomplete.addListener("place_changed", () => {
                 const place = autocomplete.getPlace();
                 if (!place || !place.geometry || !place.geometry.location) return;
-                flyToLatLngAndClick(place.geometry.location);
+                flyToLatLngAndPlaceSubmission(place.geometry.location);
             });
         } catch (e) {
             console.warn("[Wayfarer Map] Failed to init Places Autocomplete:", e);
@@ -7920,14 +7917,11 @@
 
     function shouldShowPoi(poi) {
         const f = userSettings?.poi?.filters;
-        console.log(`f: ${f}`);
         if (!f || f.enabled === false) return true;
 
         const src = getPoiSource(poi);
         const obj = getPoiGameObject(poi);
 
-        console.log(`src: ${src}`);
-        console.log(`obj: ${obj}`);
         const srcOk = f.source?.[src] !== false;          // default true
         const objOk = f.gameObject?.[obj] !== false;      // default true
         return srcOk && objOk;
@@ -8472,7 +8466,6 @@
     // ==================================
 
     function createPoiMarker(poi) {
-        console.log('creating poi marker');
         const ap = getResolvedPoiAppearance(poi);
         const { visibleNow, mapForMarker } = getMarkerVisibilityForPoi(poi);
         const zIndex = getPoiMarkerZIndex(poi);
@@ -8482,7 +8475,6 @@
         const optimized =
               !(isOnSubmitRoute() && ap.markerType === "thumbnail");
 
-        console.log(visibleNow);
         const marker = new google.maps.Marker({
             position: { lat: poi.lat, lng: poi.lng },
             map: mapForMarker,
@@ -8513,8 +8505,6 @@
         }
 
         addListenersToPoiMarker(marker, poi);
-        console.log('marker made');
-        console.log(marker);
         return marker;
     }
 
