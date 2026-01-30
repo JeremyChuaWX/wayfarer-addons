@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.0.16
+// @version      3.0.17
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -1613,8 +1613,29 @@
     // Export nearby Wayspots
     // ==================================
 
-    function openNearbyWayspotsModal() {
+    function getExportablePois() {
         const pois = Array.isArray(window.currentPois) ? window.currentPois : [];
+        if (!pois.length) return [];
+
+        const zoom = wfMap?.getZoom?.();
+        const useFilters = typeof zoom === "number" && zoom >= GCS_MIN_ZOOM;
+
+        if (!useFilters) return pois;
+
+        // Only export POIs that are currently "visible" under your filters logic
+        return pois.filter((p) => getMarkerVisibilityForPoi(p).visibleNow);
+    }
+
+    function isExportFilteredByUserSettings() {
+        const zoom = wfMap?.getZoom?.();
+        if (typeof zoom !== "number" || zoom < GCS_MIN_ZOOM) return false;
+
+        const f = userSettings?.poi?.filters;
+        return !!(f && f.enabled !== false);
+    }
+
+    function openNearbyWayspotsModal() {
+        const pois = getExportablePois();
 
         const lines = pois.map((p) => {
             const title = p.title || "";
@@ -1634,9 +1655,13 @@
 
                 const intro = document.createElement("div");
                 intro.className = "wfmapmods-modal-intro";
-                intro.textContent = pois.length
-                    ? "Nearby Wayspots relative to the submission marker:"
-                : "No Wayspots found near the submission marker.";
+                if (!pois.length) {
+                    intro.textContent = "No Wayspots are currently loaded onto the map.";
+                } else if (isExportFilteredByUserSettings()) {
+                    intro.textContent = "Showing only Wayspots that match your current filters.";
+                } else {
+                    intro.textContent = "Nearby Wayspots which are loaded onto the map.";
+                }
                 section.appendChild(intro);
 
                 const textarea = document.createElement("textarea");
@@ -1690,9 +1715,9 @@
     }
 
     function exportNearbyWayspotsCsv() {
-        const pois = Array.isArray(window.currentPois) ? window.currentPois : [];
+        const pois = getExportablePois();
         if (!pois.length) {
-            alert("No nearby Wayspots are currently loaded.");
+            alert("No nearby Wayspots are currently visible with the active filters.");
             return;
         }
 
