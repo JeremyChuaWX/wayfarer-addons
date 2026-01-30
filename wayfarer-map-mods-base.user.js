@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.0.14
+// @version      3.0.15
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -194,8 +194,9 @@
     let geoKickStartedForSubmit = false;
     let lastPathname = location.pathname;
 
-    // ------- Sidebar menu management ------
-    let wfMapActiveEnforcerTimer = null;
+    // ---- Desktop vs Mobile observers ------
+    let mapModeObserver = null;
+    let mapModeRouteKey = null;
 
     // ------- Thumbnail management ---------
     const THUMB_IMAGE_CACHE_MAX = 800;
@@ -1287,6 +1288,7 @@
         }
 
         updateLayersControlPosition();
+        updateTopRightControlsVisibility();
     }
 
     function adjustMapControlsForSidePanel() {
@@ -1304,11 +1306,6 @@
                 position: google.maps.ControlPosition.LEFT_BOTTOM,
             }
         });
-
-        // NOTE: your custom geolocation control is currently added at RIGHT_BOTTOM.
-        // With the side panel on the right, that will be underneath the panel.
-        // If you want it on the left too, you can change addGeolocationControl
-        // to use LEFT_BOTTOM instead of RIGHT_BOTTOM.
     }
 
     function populateSidePanelFromPoi(poi) {
@@ -5503,71 +5500,143 @@
         return fallback;
     }
 
-    // -----------------------------
-    // Desktop vs Mobile Browser Handling
-    // -----------------------------
 
-    function hasMobilePin() {
-        return !!document.querySelector(
-            '.nia-map__center-img-overlay'
-        );
-    }
 
-    function hasDesktopPin() {
-        const desktopImg = document.querySelector(
-            '.gm-style div[style*="z-index: 1000"][style*="width: 36px"][style*="height: 56px"] img[src*="map_selection_pin.svg"]'
-        );
-        return !!desktopImg;
-    }
 
-    function detectMapMode() {
-        if (hasMobilePin()) {
+
+    // ==================================
+    // Desktop vs Mobile Detection
+    // ==================================
+
+    function detectSubmitMapMode() {
+        // Mobile submit page uses Niantic center overlay element
+        if (document.querySelector(".nia-map__center-img-overlay")) {
             return MAP_MODE.MOBILE;
         }
 
-        if (hasDesktopPin()) {
+        // Desktop submit page renders the SVG pin in Google Maps DOM
+        const desktopImg = document.querySelector(
+            '.gm-style div[style*="z-index: 1000"][style*="width: 36px"][style*="height: 56px"] img[src*="map_selection_pin.svg"]'
+        );
+        if (desktopImg) {
             return MAP_MODE.DESKTOP;
         }
 
-        // Unknown / not initialised yet
         return null;
     }
 
-    function applyMobileMapMode() {
-        // Hide native center pin overlay and show custom overlay.
+    function detectMapviewMapMode() {
+        // Mapview page uses a POI panel that gains a "mobile" class in mobile layout
+        const panel = document.querySelector("app-poi-detail-panel .poi-panel");
+        if (!panel) return null;
+        return panel.classList.contains("mobile") ? MAP_MODE.MOBILE : MAP_MODE.DESKTOP;
+    }
+
+    function detectMapModeForCurrentRoute() {
+        if (isOnSubmitRoute()) return detectSubmitMapMode();
+        if (isOnMapviewRoute()) return detectMapviewMapMode();
+        return null;
+    }
+
+    function applyModeForCurrentRoute(mode) {
+        if (isOnSubmitRoute()) {
+            if (mode === MAP_MODE.MOBILE) applySubmitMobileMode();
+            else applySubmitDesktopMode();
+            return;
+        }
+
+        if (isOnMapviewRoute()) {
+            if (mode === MAP_MODE.MOBILE) applyMapviewMobileMode();
+            else applyMapviewDesktopMode();
+        }
+    }
+
+    function stopMapModeWatcher() {
+        if (mapModeObserver) {
+            try { mapModeObserver.disconnect(); } catch {}
+            mapModeObserver = null;
+        }
+        mapModeRouteKey = null;
+    }
+
+    function startMapModeWatcher() {
+        if (!isOnMapCapableRoute()) {
+            stopMapModeWatcher();
+            return;
+        }
+
+        const routeKey = currentMapRouteKey();
+        if (mapModeObserver && mapModeRouteKey === routeKey) {
+            return; // already watching this route instance
+        }
+
+        stopMapModeWatcher();
+        mapModeRouteKey = routeKey;
+
+        const updateMode = () => {
+            if (!isOnMapCapableRoute()) return;
+
+            const newMode = detectMapModeForCurrentRoute();
+            if (!newMode || newMode === currentMapMode) return;
+
+            currentMapMode = newMode;
+            window.wfmapmodsMapMode = newMode;
+
+            applyModeForCurrentRoute(newMode);
+        };
+
+        mapModeObserver = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                if (m.type === "attributes") {
+                    updateMode();
+                    return;
+                }
+                if (m.addedNodes && m.addedNodes.length) {
+                    updateMode();
+                    return;
+                }
+            }
+        });
+
+        mapModeObserver.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ["class"]
+        });
+
+        window.addEventListener("resize", updateMode);
+
+        updateMode();
+    }
+
+    // ==================================
+    // Desktop vs Mobile Handling - Submit Page
+    // ==================================
+
+    function applySubmitMobileMode() {
         hideNativeCenterPin();
         ensureCenterPinOverlay();
-
-        // Hide our custom made desktop pin
         removeDesktopSubmitMarker();
-
-        // Recenter on the current submission coordinates
-        // This is to prevent misalignment between lat,lng and visual pin
         recenterMapOnCurrentSubmission();
 
-        // Collapse sidepanel
         sidePanelCollapsed = true;
         applySidePanelCollapseState();
 
-        // If we already have a selected POI, show its InfoWindow now
         if (lastSelectedPoi) {
             const latLng = new google.maps.LatLng(lastSelectedPoi.lat, lastSelectedPoi.lng);
             showPoiInfoWindowForSelection(lastSelectedPoi, latLng);
         }
     }
 
-    function applyDesktopMapMode() {
-        // Remove our mobile overlay in desktop mode
+    function applySubmitDesktopMode() {
         removeCenterPinOverlay();
 
-        // Ensure desktop submission marker exists
         ensureDesktopSubmitMarker();
 
-        // Side panel: expand in desktop
         sidePanelCollapsed = false;
         applySidePanelCollapseState();
 
-        // Close any open InfoWindow when leaving mobile mode
         if (poiInfoWindow) {
             poiInfoWindow.close();
         }
@@ -5621,55 +5690,6 @@
             desktopSubmitMarker = null;
         }
     }
-
-
-    function initMapModeWatcher() {
-        const updateMode = () => {
-            const newMode = detectMapMode();
-            if (!newMode || newMode === currentMapMode) return;
-
-            const oldMode = currentMapMode;
-            currentMapMode = newMode;
-            window.wfmapmodsMapMode = newMode;
-
-            if (newMode === MAP_MODE.MOBILE) {
-                applyMobileMapMode();
-            } else if (newMode === MAP_MODE.DESKTOP) {
-                applyDesktopMapMode();
-            }
-        };
-
-        const observer = new MutationObserver((mutations) => {
-            let centerPinTouched = false;
-
-            for (const m of mutations) {
-                for (const node of m.addedNodes) {
-                    if (!(node instanceof HTMLElement)) continue;
-
-                    if (node.matches(".center-pin-container") ||
-                        (node.querySelector && node.querySelector(".center-pin-container"))) {
-                        centerPinTouched = true;
-                    }
-                }
-            }
-
-            updateMode();
-        });
-
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
-
-        window.addEventListener("resize", updateMode);
-
-        // Initial pass
-        updateMode();
-    }
-
-    // -----------------------------
-    // Fixes for mobile browser
-    // -----------------------------
 
     function recenterMapOnCurrentSubmission() {
         if (!wfMap || typeof google === "undefined" || !google.maps) {
@@ -5792,6 +5812,40 @@
         };
 
         return true;
+    }
+
+    // ==================================
+    // Desktop vs Mobile Handling - Mapview Page
+    // ==================================
+
+    function applyMapviewMobileMode() {
+        sidePanelCollapsed = true;
+        applySidePanelCollapseState();
+        updateTopRightControlsVisibility();
+    }
+
+    function applyMapviewDesktopMode() {
+        sidePanelCollapsed = false;
+        applySidePanelCollapseState();
+        updateTopRightControlsVisibility();
+
+        if (poiInfoWindow) {
+            poiInfoWindow.close();
+        }
+    }
+
+    function updateTopRightControlsVisibility() {
+        const shouldHide = isOnMapviewRoute() &&
+              currentMapMode === MAP_MODE.MOBILE &&
+              sidePanelCollapsed === false;
+
+        if (filterControlEl) {
+            filterControlEl.classList.toggle("wfmapmods-is-hidden", shouldHide);
+        }
+
+        if (layersControlEl) {
+            layersControlEl.classList.toggle("wfmapmods-is-hidden", shouldHide);
+        }
     }
 
     // ==================================
@@ -6205,6 +6259,8 @@
 
         // Recompute combined POIs only for impacted guids
         recomputeCombinedForGuids(affected);
+
+        console.log(livePoisByGuid);
     }
 
     // ==================================
@@ -6212,6 +6268,7 @@
     // ==================================
 
     function fetchLivePois(lat, lng) {
+        console.log('fetching live pois');
         const url = `/api/v1/vault/live-pois-in-radius?lat=${lat}&lng=${lng}&radius=${radius}`;
 
         const xhr = new XMLHttpRequest();
@@ -6239,6 +6296,8 @@
                 if (norm) normalized.push(norm);
             }
 
+            console.log('normalised...');
+            console.log(normalized);
             applySourcePoisSnapshot("live", normalized);
         };
 
@@ -6565,6 +6624,14 @@
         const onMapRoute = isOnMapCapableRoute();
         const routeKey = currentMapRouteKey();
 
+        // If we already successfully set up this exact page state, don’t redo.
+        if (routeKey === lastSetupRouteKey && wfMap && !isMapStale()) {
+            return;
+        }
+
+        // Tear down old map state now (safe even if wfMap is null)
+        teardownMap();
+
         if (!onMapRoute) {
             lastSetupRouteKey = null;
             teardownMap();
@@ -6573,16 +6640,11 @@
 
         watchForLatLngElement();
 
-        // If we already successfully set up this exact page state, don’t redo.
-        if (routeKey === lastSetupRouteKey && wfMap && !isMapStale()) {
-            return;
-        }
+        // Detect changes between mobile vs. desktop mode
+        startMapModeWatcher();
 
         // Bug fix for geolocation on submit page
         kickstartGeolocationIfOnSubmitPage();
-
-        // Tear down old map state now (safe even if wfMap is null)
-        teardownMap();
 
         // Apply css styles specific for this route
         applyCssForCurrentRoute();
@@ -6758,7 +6820,6 @@
         }
 
         if (isOnMapviewRoute()) {
-            applyMapViewHiddenUi();
             initZoomHintClickToZoom(wfMap);
             createSubmissionPinControl();
         }
@@ -6787,26 +6848,6 @@
         // Override custom map stylers on mapview page
         const styles = [];
         wfMap.setOptions({ styles });
-    }
-
-    function applyMapViewHiddenUi() {
-        return;
-        if (!window.location.pathname.startsWith(MAPVIEW_ROUTE)) return;
-
-        // Hide the top controls bar
-        document.querySelectorAll(".top-controls").forEach(el => {
-            el.classList.add("wfmapmods-hidden");
-        });
-
-        // Hide the map legend
-        document.querySelectorAll("app-map-legend").forEach(el => {
-            el.classList.add("wfmapmods-hidden");
-        });
-
-        // Hide the map controls
-        document.querySelectorAll("app-map-controls").forEach(el => {
-            el.classList.add("wfmapmods-hidden");
-        });
     }
 
     function initUserLocationMarker(map) {
@@ -6869,6 +6910,9 @@
 
         stopGeolocationTracking();
 
+        // Remove observer for mobile vs desktop
+        stopMapModeWatcher();
+
         // Remove POIs
         poisByGuid.clear();
         gcsGuids.clear();
@@ -6896,10 +6940,10 @@
     // ==================================
 
     /**
- * Creates the "submission pin" toggle control on the map (Mapview route only).
- * - Google Maps control in LEFT_TOP
- * - Click toggles submissionPinEnabled
- */
+     * Creates the "submission pin" toggle control on the map (Mapview route only).
+     * - Google Maps control in LEFT_TOP
+     * - Click toggles submissionPinEnabled
+     */
     function createSubmissionPinControl() {
         if (typeof isOnMapviewRoute === "function" && !isOnMapviewRoute()) return;
 
@@ -6934,6 +6978,9 @@
 
         map.controls[google.maps.ControlPosition.LEFT_TOP].push(controlDiv);
         submissionPinButton = controlUI;
+
+        // Initialise as enabled
+        controlUI.classList.add(WF_TOGGLE_ACTIVE_CLASS);
 
         // Start observing so we react when another plugin turns us off
         observeSubmissionPinClass();
@@ -7510,7 +7557,7 @@
 
         const centerLatLng = new google.maps.LatLng(lat, lng);
 
-        flyToLatLngAndClick(centerLatLng);
+        flyToLatLngAndPlaceSubmission(centerLatLng);
 
         // Mark that we still need to auto-select when POIs load
         deepLinkSelectionPending = true;
@@ -7569,7 +7616,7 @@
         // 1) Try to parse "lat,lng"
         const latLng = tryParseLatLng(value);
         if (latLng) {
-            flyToLatLngAndClick(latLng);
+            flyToLatLngAndPlaceSubmission(latLng);
             return;
         }
 
@@ -7581,7 +7628,7 @@
             }, (results, status) => {
                 if (status === "OK" && results && results[0]) {
                     const loc = results[0].geometry.location;
-                    flyToLatLngAndClick(loc);
+                    flyToLatLngAndPlaceSubmission(loc);
                 } else {
                     console.warn("[Wayfarer Map] Geocode failed:", status);
                 }
@@ -7605,7 +7652,7 @@
         return new google.maps.LatLng(lat, lng);
     }
 
-    function flyToLatLngAndClick(latLng) {
+    function flyToLatLngAndPlaceSubmission(latLng) {
         if (!wfMap || !latLng) return;
 
         wfMap.setCenter(latLng);
@@ -7615,10 +7662,65 @@
             wfMap.setZoom(GCS_MIN_ZOOM);
         }
 
-        // Simulate a map click at this location so your existing logic runs
-        google.maps.event.trigger(wfMap, "click", {
-            latLng
-        });
+        if (isOnMapviewRoute()) {
+            placeSubmissionPinOnMapview(latLng);
+            return;
+        }
+
+        if (isOnSubmitRoute()) {
+            placeSubmissionPinOnSubmit(latLng);
+            return;
+        }
+    }
+
+    function placeSubmissionPinOnMapview(latLng) {
+        const map = wfMap;
+        if (!map || !google?.maps || !latLng) return;
+
+        const lat = latLng.lat();
+        const lng = latLng.lng();
+
+        // Ensure placement mode is active so the marker exists/behaves consistently
+        if (submissionPinButton && !submissionPinButton.classList.contains(WF_TOGGLE_ACTIVE_CLASS)) {
+            wfExclusiveToggle(submissionPinButton, WF_TOGGLE_GROUP);
+            syncSubmissionPinEnabledFromDom();
+        }
+
+        if (!submissionPinMarker) {
+            submissionPinMarker = new google.maps.Marker({
+                map,
+                position: latLng,
+                clickable: false,
+                icon: getSubmissionPinIcon(30, 47),
+                zIndex: 999999,
+            });
+        } else {
+            submissionPinMarker.setPosition(latLng);
+            submissionPinMarker.setMap(map);
+        }
+
+        window.currentLat = lat;
+        window.currentLng = lng;
+
+        setLocationFunctionsHidden(false);
+        handleLatLngChange(lat, lng);
+    }
+
+    function placeSubmissionPinOnSubmit(latLng) {
+        if (!latLng) return;
+
+        const lat = latLng.lat();
+        const lng = latLng.lng();
+
+        window.currentLat = lat;
+        window.currentLng = lng;
+
+        // Keep your submit page visuals consistent
+        updateDesktopSubmitMarkerPosition();
+        recenterMapOnCurrentSubmission();
+
+        // If your submit flow needs downstream updates, keep them explicit
+        handleLatLngChange(lat, lng);
     }
 
     function setupSearchAutocomplete(inputEl) {
@@ -7818,11 +7920,14 @@
 
     function shouldShowPoi(poi) {
         const f = userSettings?.poi?.filters;
+        console.log(`f: ${f}`);
         if (!f || f.enabled === false) return true;
 
         const src = getPoiSource(poi);
         const obj = getPoiGameObject(poi);
 
+        console.log(`src: ${src}`);
+        console.log(`obj: ${obj}`);
         const srcOk = f.source?.[src] !== false;          // default true
         const objOk = f.gameObject?.[obj] !== false;      // default true
         return srcOk && objOk;
@@ -8237,8 +8342,16 @@
 
     function getMarkerVisibilityForPoi(poi) {
         const layerOn = isWayspotsLayerEnabled();
-        const visibleNow = layerOn && shouldShowPoi(poi);
-        const mapForMarker = layerOn ? wfMap : null;
+        if (!layerOn) {
+            return { layerOn, visibleNow: false, mapForMarker: null };
+        }
+
+        const zoom = wfMap?.getZoom?.();
+        const useFilter = typeof zoom === "number" && zoom >= GCS_MIN_ZOOM;
+
+        const visibleNow = useFilter ? shouldShowPoi(poi) : true;
+        const mapForMarker = visibleNow ? wfMap : null;
+
         return { layerOn, visibleNow, mapForMarker };
     }
 
@@ -8359,6 +8472,7 @@
     // ==================================
 
     function createPoiMarker(poi) {
+        console.log('creating poi marker');
         const ap = getResolvedPoiAppearance(poi);
         const { visibleNow, mapForMarker } = getMarkerVisibilityForPoi(poi);
         const zIndex = getPoiMarkerZIndex(poi);
@@ -8368,6 +8482,7 @@
         const optimized =
               !(isOnSubmitRoute() && ap.markerType === "thumbnail");
 
+        console.log(visibleNow);
         const marker = new google.maps.Marker({
             position: { lat: poi.lat, lng: poi.lng },
             map: mapForMarker,
@@ -8398,6 +8513,8 @@
         }
 
         addListenersToPoiMarker(marker, poi);
+        console.log('marker made');
+        console.log(marker);
         return marker;
     }
 
@@ -8408,14 +8525,23 @@
 
         applyMarkerZIndex(marker, poi);
 
-        const visibleNow = isWayspotsLayerEnabled() && shouldShowPoi(poi);
+        const { visibleNow, mapForMarker } = getMarkerVisibilityForPoi(poi);
+
         if (marker.__wfmmVisible !== visibleNow) {
             marker.__wfmmVisible = visibleNow;
             marker.setVisible(visibleNow);
         }
 
-        const ap = getResolvedPoiAppearance(poi);
+        // Keep map attachment consistent with visibility decisions
+        if (marker.__wfmmMap !== mapForMarker) {
+            marker.__wfmmMap = mapForMarker;
+            marker.setMap(mapForMarker);
+        }
 
+        // Don't waste work styling markers that aren't shown
+        if (!visibleNow) return;
+
+        const ap = getResolvedPoiAppearance(poi);
         if (ap.markerType === "thumbnail") {
             applyThumbnailVisuals(marker, poi, ap);
         } else {
@@ -8585,7 +8711,7 @@
         } = userSettings.poi?.thumbnail || {};
         const thumbBorderRGBA = borderColor ? hexToRgba(borderColor, borderOpacity) : "rgba(0,0,0,0.5)";
 
-const cssText = `
+        const cssText = `
 /* =============================================================================
    WAYFARER MAP MOD (wfmm)
    Re-organised into logical sections + duplication removed
@@ -10089,7 +10215,6 @@ canvas#deckgl-overlay {
         loadSettings();
         injectCss();
         applyCssForCurrentRoute();
-        initMapModeWatcher();
         createBridges();
         setupMapRouteWatcher();
     }
