@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.0.17
+// @version      3.1.0
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -1124,6 +1124,24 @@
                 setTimeout(() => (deepLinkA.textContent = original), 1200);
             });
 
+            // --- Wayspot focus map ---
+            const focusLinkA = document.createElement("a");
+            focusLinkA.href = "#";
+            focusLinkA.classList.add("wfmapmods-is-hidden", "wfmapmods-poi-focusmap");
+            focusLinkA.textContent = "Focus Map";
+
+            focusLinkA.addEventListener("click", (ev) => {
+                ev.preventDefault();
+                if (!lastSelectedPoi) return;
+                const lat = lastSelectedPoi.lat;
+                const lng = lastSelectedPoi.lng;
+                if (typeof lat !== "number" || typeof lng !== "number" || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+                    return;
+                }
+                const position = new google.maps.LatLng(lat, lng);
+                flyToLatLngAndPlaceSubmission(position)
+            });
+
             // --- Report link ---
             const reportA = document.createElement("a");
             reportA.href = "#";
@@ -1137,7 +1155,7 @@
             });
 
             poiFunctionLinks.appendChild(deepLinkA);
-
+            poiFunctionLinks.appendChild(focusLinkA);
             poiFunctionLinks.appendChild(reportA);
             poiFunctionsRow.appendChild(wayspotSvg);
             poiFunctionsRow.appendChild(poiFunctionLinks);
@@ -1481,9 +1499,15 @@
             };
 
             const deepLinkA = sidePanelEl.querySelector(".wfmapmods-poi-function-links .wfmapmods-poi-deeplink");
+            const focusLinkA = sidePanelEl.querySelector(".wfmapmods-poi-function-links .wfmapmods-poi-focusmap");
             const reportA = sidePanelEl.querySelector(".wfmapmods-poi-function-links .wfmapmods-poi-reportlink");
 
             if (poi.lat && poi.lng) {
+
+                if(focusLinkA) {
+                    focusLinkA.classList.remove("wfmapmods-is-hidden");
+                }
+
                 const url = buildDeepLinkUrl(poi.lat, poi.lng);
 
                 if (deepLinkA) {
@@ -1622,7 +1646,7 @@
 
         if (!useFilters) return pois;
 
-        // Only export POIs that are currently "visible" under your filters logic
+        // Only export POIs that are currently "visible" under your filters/layer logic
         return pois.filter((p) => getMarkerVisibilityForPoi(p).visibleNow);
     }
 
@@ -1717,7 +1741,7 @@
     function exportNearbyWayspotsCsv() {
         const pois = getExportablePois();
         if (!pois.length) {
-            alert("No nearby Wayspots are currently visible with the active filters.");
+            alert("No nearby Wayspots are currently visible with the active filters/layers.");
             return;
         }
 
@@ -3934,7 +3958,7 @@
     }
 
     // ======================================================================
-    // Report history store (Wayfarer-side) - replicated from plugin #2
+    // Report history store (Wayfarer-side)
     // ======================================================================
 
     // Optional but recommended for future queries/sorting by mechanism+timestamp
@@ -3991,9 +4015,6 @@
         });
     }
 
-    /**
-     * Same ID format as plugin #2 for compatibility.
-     */
     function makeReportId(timestampMs = Date.now()) {
         const t = Number(timestampMs || Date.now());
         const timePart = t.toString(36).padStart(10, "0");
@@ -4001,10 +4022,6 @@
         return `rpt_${timePart}_${randPart}`;
     }
 
-    /**
-     * Save a single report record. Uses add() so duplicates won't overwrite.
-     * Returns Promise<boolean> -> true if saved, false if collision/failure.
-     */
     function saveReportedWayspotToIDB(rec) {
         if (!rec || typeof rec.timestampMs !== "number" || !Number.isFinite(rec.timestampMs)) {
             console.warn("[Base] Refusing to save report record: missing/invalid timestampMs", rec);
@@ -4047,10 +4064,6 @@
         });
     }
 
-    /**
-     * Build the record format compatible with plugin #2, using "wayfarer-map".
-     * ticket is null because the API mechanism doesn't return it.
-     */
     function buildTicketRecordFromWayfarerMapApi({ poi, reasonCode, reasonText, supportingText, timestampMs }) {
         const wp = poi || {};
         const guid  = (typeof wp.guid === "string" && wp.guid.trim()) ? wp.guid.trim() : null;
