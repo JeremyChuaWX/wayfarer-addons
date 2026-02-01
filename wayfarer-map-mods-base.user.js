@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.1.0
+// @version      3.2.0
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -87,6 +87,10 @@
     // ----- Cross-script toggle group -----
     const WF_TOGGLE_GROUP = "wf-lefttop-controls";
     const WF_TOGGLE_ACTIVE_CLASS = "wf-toggle-active";
+
+    // Geocoder bridge postMessage types (page-context bridge)
+    const WFMM_GEO_REQ = "wfmm-geocode-req";
+    const WFMM_GEO_RES = "wfmm-geocode-res";
 
     // ----- Available quotas -----
     let availableQuotas = {
@@ -302,6 +306,7 @@
 
         map: {
             rememberLastView: true,
+            hideZoomText: false,
             nearbyRadius: { enabled: true, strokeColor: "#4285F4", strokeOpacity: 0.8, strokeWidth: 2, fillColor: "#4285F4", fillOpacity: 0 },
             submitRadius: { enabled: true, strokeColor: "#e13cff", strokeOpacity: 0.8, strokeWidth: 4, fillColor: "#e13cff", fillOpacity: 0 },
             interactRadius: { enabled: true, strokeColor: "#ffcc33", strokeOpacity: 0.9, strokeWidth: 2, fillColor: "#ffed24", fillOpacity: 0.05 },
@@ -425,7 +430,6 @@
     }
 
     function isIOS() {
-        return;
         return (
             /iPad|iPhone|iPod/.test(navigator.userAgent) ||
             (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
@@ -478,6 +482,102 @@
 
         // If we are ON the submit page, attempt the kick (guarded).
         kickstartGeolocationIfOnSubmitPage();
+    }
+
+    // ==================================
+    // Address reverse geocoder
+    // ==================================
+
+    async function getFormattedAddressString(lat, lng) {
+        if (typeof lat !== "number" || !Number.isFinite(lat)) return null;
+        if (typeof lng !== "number" || !Number.isFinite(lng)) return null;
+
+        try {
+            const results = await pageReverseGeocode(lat, lng);
+            const first = Array.isArray(results) ? results[0] : null;
+            const formatted = first?.formatted_address;
+            return (typeof formatted === "string") ? formatted : null;
+        } catch (e) {
+            console.warn("[Wayfarer Map] Reverse geocode failed:", e);
+            return null;
+        }
+    }
+
+    function pageReverseGeocode(lat, lng, timeoutMs = 10000) {
+        injectPageGeocoderBridge();
+
+        const id = Date.now() + "-" + Math.random().toString(16).slice(2);
+
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                window.removeEventListener("message", onMessage);
+                reject(new Error("Reverse geocode timeout"));
+            }, timeoutMs);
+
+            function onMessage(ev) {
+                const d = ev.data;
+                if (!d || d.type !== WFMM_GEO_RES || d.id !== id) return;
+
+                clearTimeout(timer);
+                window.removeEventListener("message", onMessage);
+
+                if (d.ok) resolve(d.results);
+                else reject(new Error(d.error || "Reverse geocode failed"));
+            }
+
+            window.addEventListener("message", onMessage);
+            window.postMessage({ type: WFMM_GEO_REQ, id, lat, lng }, "*");
+        });
+    }
+
+    function injectPageGeocoderBridge() {
+        // If either plugin already injected it, do nothing
+        if (document.getElementById("wfmm-geocoder-bridge")) return;
+
+        const script = document.createElement("script");
+        script.id = "wfmm-geocoder-bridge";
+        script.textContent = `
+        (function () {
+            const REQ = ${JSON.stringify(WFMM_GEO_REQ)};
+            const RES = ${JSON.stringify(WFMM_GEO_RES)};
+
+            function geocodeAll(lat, lng) {
+                return new Promise((resolve, reject) => {
+                    if (!window.google || !google.maps || !google.maps.Geocoder) {
+                        reject("google.maps.Geocoder not available");
+                        return;
+                    }
+
+                    const geocoder = new google.maps.Geocoder();
+                    geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+                        if (status !== "OK" || !Array.isArray(results) || !results.length) {
+                            reject("Geocoder failed: " + status);
+                            return;
+                        }
+
+                        // Only return what we need for formatted string consumers
+                        resolve(results.slice(0, 6).map(r => ({
+                            formatted_address: r.formatted_address || null
+                        })));
+                    });
+                });
+            }
+
+            window.addEventListener("message", async (ev) => {
+                const d = ev.data;
+                if (!d || d.type !== REQ) return;
+
+                try {
+                    const results = await geocodeAll(d.lat, d.lng);
+                    window.postMessage({ type: RES, id: d.id, ok: true, results }, "*");
+                } catch (e) {
+                    window.postMessage({ type: RES, id: d.id, ok: false, error: String(e) }, "*");
+                }
+            });
+        })();
+    `;
+
+        (document.head || document.documentElement).appendChild(script);
     }
 
     // ==================================
@@ -3558,7 +3658,6 @@
 
             marker.addListener("click", () => {
 
-                console.log(position);
                 flyToLatLngAndPlaceSubmission(position);
 
                 loadDraftByIdFromIDB(draft.id).then(fullDraft => {
@@ -3928,12 +4027,20 @@
             // SUCCESS -> write to reportedWayspots
             const timestampMs = Date.now();
 
+            // Best-effort: add addressString (formatted only)
+            let addressString = null;
+            try {
+                addressString = await getFormattedAddressString(poi?.lat, poi?.lng);
+            } catch {}
+
+            // Build record (now includes description/imageUrl/addressString)
             const rec = buildTicketRecordFromWayfarerMapApi({
                 poi,
                 reasonCode,
                 reasonText,
                 supportingText: comment || "",
-                timestampMs
+                timestampMs,
+                addressString
             });
 
             // Save (best-effort; do not block UX on failure)
@@ -4064,32 +4171,32 @@
         });
     }
 
-    function buildTicketRecordFromWayfarerMapApi({ poi, reasonCode, reasonText, supportingText, timestampMs }) {
+    function buildTicketRecordFromWayfarerMapApi({ poi, reasonCode, reasonText, supportingText, timestampMs, addressString }) {
         const wp = poi || {};
-        const guid  = (typeof wp.guid === "string" && wp.guid.trim()) ? wp.guid.trim() : null;
-        const title = (typeof wp.title === "string" && wp.title.trim()) ? wp.title.trim() : null;
-
-        const lat = (typeof wp.lat === "number" && Number.isFinite(wp.lat)) ? wp.lat : null;
-        const lng = (typeof wp.lng === "number" && Number.isFinite(wp.lng)) ? wp.lng : null;
 
         return {
             // Primary Key - Unique ID
             id: makeReportId(timestampMs),
 
-            // Wayspot being reported
-            guid,
-            title,
-            lat,
-            lng,
+            // Wayspot being reported (raw)
+            guid:        (typeof wp.guid === "string")        ? wp.guid        : null,
+            title:       (typeof wp.title === "string")       ? wp.title       : null,
+            lat:         (typeof wp.lat === "number" && Number.isFinite(wp.lat)) ? wp.lat : null,
+            lng:         (typeof wp.lng === "number" && Number.isFinite(wp.lng)) ? wp.lng : null,
+            description: (typeof wp.description === "string") ? wp.description : null,
+            imageUrl:    (typeof wp.imageUrl === "string")    ? wp.imageUrl    : null,
+            isCommunityContributed:    (typeof wp.isCommunityContributed === "boolean")    ? wp.isCommunityContributed    : null,
+            addressString: (typeof addressString === "string") ? addressString : null,
 
             // Report metadata
             ticket: null,
             timestampMs,
             reportMechanism: "wayfarer-map",
 
-            removalReasonCode: (typeof reasonCode === "string" && reasonCode.trim()) ? reasonCode.trim() : null,
-            removalReasonText: (typeof reasonText === "string" && reasonText.trim()) ? reasonText.trim() : null,
-            supportingText: (typeof supportingText === "string" && supportingText.trim()) ? supportingText.trim() : null
+            // Report details (raw)
+            removalReasonCode: (typeof reasonCode === "string") ? reasonCode : null,
+            removalReasonText: (typeof reasonText === "string") ? reasonText : null,
+            supportingText:    (typeof supportingText === "string") ? supportingText : null
         };
     }
 
@@ -4101,6 +4208,161 @@
         // { result: { success: true }, captcha: false, code: "OK", ... }
         return !!(resp && resp.captcha === false && resp.result && resp.result.success === true);
     }
+
+    // ==================================
+    // Patch old records missing addressString
+    // ==================================
+
+    // Temporary code to add addresses to previously saved reported Wayspots
+    // This code segment can be deleted from March 2026 -- Anyone who cares
+    // enough for this sort of thing would've updated by then.
+
+    const REPORTED_PATCH_THROTTLE_MS = 5000;
+
+    // Basic sleep helper for throttling
+    function sleep(ms) {
+        return new Promise(res => setTimeout(res, ms));
+    }
+
+    function isMissingAddressString(v) {
+        return !(typeof v === "string" && v.trim().length > 0);
+    }
+
+    function isFiniteNumber(n) {
+        return (typeof n === "number" && Number.isFinite(n));
+    }
+
+    /**
+     * Get all reported wayspot records that are missing addressString.
+     */
+    function idbGetAllMissingAddressRecords() {
+        return getReportedWayspotsIDBInstance().then(db => new Promise((resolve, reject) => {
+            const tx = db.transaction(REPORTED_STORE_NAME, "readonly");
+            const store = tx.objectStore(REPORTED_STORE_NAME);
+
+            const req = store.getAll();
+
+            req.onsuccess = () => {
+                const all = Array.isArray(req.result) ? req.result : [];
+                const missing = all.filter(r => {
+                    if (!r || r.reportMechanism !== "wayfarer-map") return false;
+                    if (!isMissingAddressString(r.addressString)) return false;
+                    // Need lat/lng to patch
+                    return isFiniteNumber(r.lat) && isFiniteNumber(r.lng);
+                });
+
+                db.close();
+                resolve(missing);
+            };
+
+            req.onerror = () => {
+                db.close();
+                reject(req.error || new Error("Failed to read records"));
+            };
+
+            tx.onerror = () => {
+                db.close();
+                reject(tx.error || new Error("IDB tx error"));
+            };
+        }));
+    }
+
+    /**
+     * Update a single record in IDB (in-place) by primary key.
+     * Uses put() so it overwrites the existing record with same id.
+     */
+    function idbUpdateReportedWayspotRecord(updatedRec) {
+        return getReportedWayspotsIDBInstance().then(db => new Promise((resolve) => {
+            const tx = db.transaction(REPORTED_STORE_NAME, "readwrite");
+            const store = tx.objectStore(REPORTED_STORE_NAME);
+
+            const req = store.put(updatedRec);
+
+            req.onerror = () => {
+                console.warn("[Base] Failed to update report record:", updatedRec?.id, req.error);
+                // tx will likely abort; resolve on abort below
+            };
+
+            tx.oncomplete = () => { db.close(); resolve(true); };
+            tx.onabort = () => { db.close(); resolve(false); };
+            tx.onerror = () => { db.close(); resolve(false); };
+        })).catch(err => {
+            console.warn("[Base] IndexedDB not available (update reported wayspot):", err);
+            return false;
+        });
+    }
+
+    /**
+     * One-off patch run: find records missing addressString and backfill via geocoder.
+     * Throttles calls (default: 1 per 5 seconds).
+     */
+    async function patchMissingAddressStringsOnLoad({
+        throttleMs = REPORTED_PATCH_THROTTLE_MS,
+        maxToPatch = Infinity
+    } = {}) {
+        let missing = [];
+        try {
+            missing = await idbGetAllMissingAddressRecords();
+        } catch (e) {
+            console.warn("[Base] Address patch: could not load records:", e);
+            return { ok: false, patched: 0, totalMissing: 0 };
+        }
+
+        if (!missing.length) {
+            return { ok: true, patched: 0, totalMissing: 0 };
+        }
+
+        console.log(`[Base] Address patch: ${missing.length} record(s) missing addressString. Starting backfill…`);
+
+        let patched = 0;
+
+        // Sort older -> newer (optional, but nice)
+        missing.sort((a, b) => (a.timestampMs || 0) - (b.timestampMs || 0));
+
+        for (const rec of missing) {
+            if (patched >= maxToPatch) break;
+
+            // If something else patched it in the meantime, skip (defensive)
+            if (!isMissingAddressString(rec.addressString)) continue;
+
+            try {
+                const addr = await getFormattedAddressString(rec.lat, rec.lng);
+
+                if (typeof addr === "string" && addr.trim()) {
+                    const updated = { ...rec, addressString: addr.trim() };
+
+                    const ok = await idbUpdateReportedWayspotRecord(updated);
+                    if (ok) {
+                        patched++;
+                        console.log("[Base] Address patch: updated", updated.id, addr);
+                    } else {
+                        console.warn("[Base] Address patch: failed to write update for", rec.id);
+                    }
+                } else {
+                    console.log("[Base] Address patch: no address returned for", rec.id);
+                }
+            } catch (e) {
+                console.warn("[Base] Address patch: geocode failed for", rec?.id, e);
+            }
+
+            // Throttle between requests so you don't hammer geocoder / hit quota / trigger captcha
+            await sleep(throttleMs);
+        }
+
+        console.log(`[Base] Address patch complete. Patched ${patched}/${missing.length}.`);
+        return { ok: true, patched, totalMissing: missing.length };
+    }
+
+    // One-off consistency patch on load (non-blocking)
+    (() => {
+        try {
+            patchMissingAddressStringsOnLoad({ throttleMs: 5000 }).then((res) => {
+                console.log("[Base] Address patch result:", res);
+            });
+        } catch (e) {
+            console.warn("[Base] Address patch: failed to start:", e);
+        }
+    })();
 
     // ==================================
     // Info Window (Mobile Only)
@@ -4444,7 +4706,17 @@
                 rememberChk.checked = !!mapCfg.rememberLastView;
                 generalSection.appendChild(
                     createSettingsRow("Remember last map location", rememberChk, {
-                        narrowLabel: true
+                        checkboxLeft: true
+                    })
+                );
+
+                const hideZoomTextChk = document.createElement("input");
+                hideZoomTextChk.type = "checkbox";
+                hideZoomTextChk.className = "wfmapmods-modal-checkbox";
+                hideZoomTextChk.checked = !!mapCfg.hideZoomText;
+                generalSection.appendChild(
+                    createSettingsRow("Hide zoom hint text", hideZoomTextChk, {
+                        checkboxLeft: true
                     })
                 );
 
@@ -4819,6 +5091,7 @@
                 // Return references needed by onOk
                 return {
                     rememberChk,
+                    hideZoomTextChk,
                     nr,
                     sr,
                     spr,
@@ -4852,6 +5125,7 @@
             onOk(ctx, closeModal) {
                 const {
                     rememberChk,
+                    hideZoomTextChk,
                     nr,
                     sr,
                     spr,
@@ -4883,6 +5157,7 @@
                 } = ctx;
 
                 mapCfg.rememberLastView = !!rememberChk.checked;
+                mapCfg.hideZoomText = !!hideZoomTextChk.checked;
 
                 // Power Spot (22m)
                 pr.enabled = !!powerSpotEnabledChk.checked;
@@ -4920,6 +5195,7 @@
                 updateNearbyWayspotsRadiusCircle();
                 updateSubmitRadiusCircle();
                 updatePowerSpotRadiusCircle();
+                applyHideZoomTextCss();
 
                 // Refresh selected POI circle if one is active
                 if (typeof selectedPoiGuid === "string" && selectedPoiGuid && markersByGuid[selectedPoiGuid]) {
@@ -5384,17 +5660,37 @@
     function createSettingsRow(labelText, inputEl, opts = {}) {
         const row = document.createElement("div");
         row.className = "wfmapmods-modal-row";
+
         if (opts.narrowLabel) {
             row.classList.add("wfmapmods-modal-row--narrow");
+        }
+        if (opts.checkboxLeft) {
+            row.classList.add("wfmapmods-modal-row--checkbox-left");
         }
 
         const label = document.createElement("label");
         label.textContent = labelText;
 
-        row.appendChild(label);
-        row.appendChild(inputEl);
+        // Make the label toggle the input when possible
+        // (works great for checkboxes, but harmless otherwise)
+        if (!inputEl.id) {
+            inputEl.id = `wfmapmods-input-${Math.random().toString(36).slice(2, 10)}`;
+        }
+        label.htmlFor = inputEl.id;
+
+        if (opts.checkboxLeft) {
+            // Checkbox first, then label (label can take remaining space)
+            row.appendChild(inputEl);
+            row.appendChild(label);
+        } else {
+            // Existing behavior
+            row.appendChild(label);
+            row.appendChild(inputEl);
+        }
+
         return row;
     }
+
 
     function wfmmGetModalStack() {
         const k = "__wfmmModalStack";
@@ -5536,10 +5832,6 @@
         if (/^#[0-9a-fA-F]{3}$/.test(s) || /^#[0-9a-fA-F]{6}$/.test(s)) return s;
         return fallback;
     }
-
-
-
-
 
     // ==================================
     // Desktop vs Mobile Detection
@@ -8493,7 +8785,6 @@
     }
 
     function highlightThumbnailMarker(marker, poi, ap) {
-        // NEW: selection is state; rendering happens in refreshPoiMarkerIcon
         const entry = markersByGuid?.[poi.guid];
         if (!entry || entry.marker !== marker) return;
         refreshPoiMarkerIcon(entry);
@@ -10124,6 +10415,22 @@
   border-color: #ffce04 !important;
   color: #000000 !important;
 }
+
+.wfmapmods-modal-row--checkbox-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.wfmapmods-modal-row--checkbox-left input[type="checkbox"] {
+    flex: 0 0 auto;
+}
+
+.wfmapmods-modal-row--checkbox-left label {
+    flex: 1 1 auto;
+    white-space: normal;
+    min-width: 0; /* important so wrapping works in flex containers */
+}
 `;
 
 
@@ -10228,6 +10535,26 @@ canvas#deckgl-overlay {
         }
     }
 
+    function applyHideZoomTextCss() {
+        const enabled = !!userSettings?.map?.hideZoomText;
+        let styleEl = document.getElementById("wfmapmods-hide-zoom-text-style");
+
+        if (enabled) {
+            if (!styleEl) {
+                styleEl = document.createElement("style");
+                styleEl.id = "wfmapmods-hide-zoom-text-style";
+                document.head.appendChild(styleEl);
+            }
+            styleEl.textContent = `
+            .zoom-hint-row {
+                display: none !important;
+            }
+        `;
+        } else {
+            if (styleEl) styleEl.remove();
+        }
+    }
+
     // ==================================
     // Bootstrap & event wiring
     // ==================================
@@ -10243,6 +10570,7 @@ canvas#deckgl-overlay {
         loadSettings();
         injectCss();
         applyCssForCurrentRoute();
+        applyHideZoomTextCss();
         createBridges();
         setupMapRouteWatcher();
     }
