@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Icon Embiggener
-// @version      1.0.0
+// @version      1.0.1
 // @description  Makes the map icon in the sidebar not awkwardly smaller than the rest of the icons
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-icon-embiggener.user.js
@@ -38,8 +38,6 @@
     img.sidebar-link__icon[src="/img/map-outlined-24px.svg"] {
       transform: scale(${SCALE});
       transform-origin: center;
-      /* Helps keep layout stable / centered */
-      display: inline-block;
     }
   `;
 
