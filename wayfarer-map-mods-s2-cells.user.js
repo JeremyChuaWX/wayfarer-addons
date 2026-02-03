@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - s2 Cells
-// @version      3.0.3
+// @version      3.0.4
 // @description  Adds s2 cell grids and shading to the Wayfarer Map, and allows manual addition of PokéStops and Gyms
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-s2-cells.user.js
@@ -819,6 +819,22 @@
     // ==================================
     // Lat/Lng observers - Find submit location
     // ==================================
+
+    let s2SubmitCoordsListenerAdded = false;
+
+    function startSubmitCoordsEventBridge() {
+        if (s2SubmitCoordsListenerAdded) return;
+        s2SubmitCoordsListenerAdded = true;
+
+        window.addEventListener("wf:submit-coords", (e) => {
+            const lat = e?.detail?.lat;
+            const lng = e?.detail?.lng;
+            if (typeof lat !== "number" || typeof lng !== "number") return;
+
+            // Push into S2’s existing path
+            handleLatLngChange(lat, lng);
+        });
+    }
 
     function parseLatLng(text) {
         if (!text) return null;
@@ -5637,6 +5653,7 @@
         injectS2CSS();
         loadManualPoisFromIDB();
         setupMapRouteWatcher();
+        startSubmitCoordsEventBridge();
     }
 
     bootstrap();
