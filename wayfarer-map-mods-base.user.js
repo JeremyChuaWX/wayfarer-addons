@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.2.0
+// @version      3.2.1
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -4559,8 +4559,13 @@
         descEl.className = "wfmapmods-wayspot-overlay-desc";
         descEl.textContent = poi?.description || "";
 
-        dialog.appendChild(imageWrapper);
-        dialog.appendChild(descEl);
+        const body = document.createElement("div");
+        body.className = "wfmapmods-wayspot-overlay-body";
+
+        body.appendChild(imageWrapper);
+        body.appendChild(descEl);
+
+        dialog.appendChild(body);
 
         backdrop.appendChild(dialog);
 
@@ -7422,15 +7427,19 @@
                 submissionPinMarker.setMap(map);
             }
 
-            // Update global coordinates
             window.currentLat = lat;
             window.currentLng = lng;
 
-            // Now that we have valid coords, show the panel
-            setLocationFunctionsHidden(false);
+            emitSubmitCoords(lat, lng, "mapview");
 
             handleLatLngChange(lat, lng);
         });
+    }
+
+    function emitSubmitCoords(lat, lng, source = "mapview") {
+        window.dispatchEvent(new CustomEvent("wf:submit-coords", {
+            detail: { lat, lng, source, ts: Date.now() }
+        }));
     }
 
     function disableSubmissionPinMode() {
@@ -7815,6 +7824,8 @@
 
             const centerLatLng = new google.maps.LatLng(lat, lng);
 
+            emitSubmitCoords(lat, lng, "mapview");
+
             try {
                 mapAtSchedule.setCenter(centerLatLng);
                 if (typeof zoom === "number" && !Number.isNaN(zoom)) {
@@ -8031,6 +8042,8 @@
 
         setLocationFunctionsHidden(false);
         handleLatLngChange(lat, lng);
+
+        emitSubmitCoords(lat, lng, "mapview");
     }
 
     function placeSubmissionPinOnSubmit(latLng) {
@@ -9336,7 +9349,7 @@
   background: #ffffff;
   border-radius: 8px;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.45);
-  max-width: 550px;
+  max-width: 500px;
   width: 100%;
   max-height: 90vh;
   display: flex;
@@ -9347,6 +9360,13 @@
   color: #111827;
   overflow: hidden;
   align-items: stretch;
+}
+
+.wfmapmods-wayspot-overlay-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .wfmapmods-wayspot-overlay-header {
@@ -9390,12 +9410,15 @@
   display: inline-block;
   margin-bottom: 8px;
   text-align: center;
+  justify-content: center;
+  display: flex;
 }
 
 .wfmapmods-wayspot-overlay-image {
   display: block;
   max-width: 100% !important;
-  max-height: 500px !important;
+  min-height: 300px;
+  max-height: 60vh !important;
   width: auto !important;
   height: auto !important;
   object-fit: contain !important;
@@ -9409,7 +9432,6 @@
   color: #374151;
   text-align: center;
   margin: 0 auto;
-  overflow-y: auto;
   max-height: 20vh;
   padding-right: 2px;
 }
@@ -9421,6 +9443,8 @@
   overflow-x: auto;
   padding: 8px 0;
   margin-bottom: 8px;
+  height: 72px;
+  flex-shrink: 0;
 }
 
 .wfmapmods-wayspot-overlay-thumb {
