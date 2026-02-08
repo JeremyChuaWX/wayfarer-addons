@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.4.0
+// @version      3.4.1
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -4940,7 +4940,7 @@
                 showAddressChk.className = "wfmapmods-modal-checkbox";
                 showAddressChk.checked = !!mapCfg.showAddress;
                 generalSection.appendChild(
-                    createSettingsRow("Show address of selected Wayspots", showAddressChk, {
+                    createSettingsRow("Show Wayspot address", showAddressChk, {
                         checkboxLeft: true
                     })
                 );
