@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.4.1
+// @version      3.4.2
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -6699,6 +6699,13 @@
     }
 
     function extractAndNormalizeGcsPois(json) {
+        // Cancel processing if zoom is too low
+        // Kicks in if the response comes after user zoomed out
+        const zoom = wfMap?.getZoom?.();
+        if (typeof zoom === "number" && zoom < GCS_MIN_ZOOM) {
+            return [];
+        }
+
         const data = json?.result?.data;
         if (!Array.isArray(data)) return [];
 
