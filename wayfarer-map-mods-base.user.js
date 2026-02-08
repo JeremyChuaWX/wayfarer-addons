@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.2.1
+// @version      3.3.0
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -138,10 +138,13 @@
     let draftSubmissions = [];
     let draftMarkers = [];
 
-    // ----- Deep link state -----
+    // ----- Select Wayspot after deep link or search -----
     let deepLinkTarget = null;
+    let pendingSelectLatLng = null;
+    let pendingSelect = false;
     let skipRestoreMapViewForThisLoad = false;
-    let deepLinkSelectionPending = false;
+    let pendingSelectSourcesNeeded = null; // Set("live","gcs")
+    let pendingSelectSourcesSeen = null;   // Set("live","gcs")
 
     // ----- Observers & watchers -----
     let latLngObserver = null;
@@ -1345,6 +1348,20 @@
 
             settingsSection.appendChild(settingsBody);
 
+            // ==============================
+            // SECTION 6: Last map sync
+            // ==============================
+            const lastSyncSection = document.createElement("div");
+            lastSyncSection.className = "wfmapmods-last-sync wfmapmods-is-hidden";
+            lastSyncSection.style.textAlign = "center";
+            lastSyncSection.style.fontSize = "11px";
+            lastSyncSection.style.opacity = "0.75";
+            lastSyncSection.style.padding = "10px 6px 6px";
+
+            lastMapSyncEl = lastSyncSection;
+            renderLastMapSyncLabel();
+            ensureLastMapSyncTimer();
+
             // Assemble content
             content.appendChild(searchSection);
             content.appendChild(detailsSection);
@@ -1354,6 +1371,7 @@
             content.appendChild(locationFunctionsSection);
             content.appendChild(divider3);
             content.appendChild(settingsSection);
+            content.appendChild(lastSyncSection);
 
             panel.appendChild(content);
             mapDiv.appendChild(panel);
@@ -2256,11 +2274,11 @@
                 supportingImageCount: supportingBlobs.length
             };
 
-            console.log("[WF Submit] /submit/start payload:", startPayload);
+            console.log("[WFMM - Base] /submit/start payload:", startPayload);
 
             const startResp = await postJsonWithCsrf("/api/v1/vault/submit/start", startPayload);
 
-            console.log("[WF Submit] /submit/start response raw:", startResp);
+            console.log("[WFMM - Base] /submit/start response raw:", startResp);
 
             if (!startResp || startResp.captcha) {
                 wfmapmodsHideSubmitProgress();
@@ -2273,8 +2291,8 @@
             const imageUrlMap = result.imageUrlMap || result.uploadUrlMap || {};
             const submissionId = result.submissionId || result.nominationId;
 
-            console.log("[WF Submit] submissionId:", submissionId);
-            console.log("[WF Submit] imageUrlMap:", imageUrlMap);
+            console.log("[WFMM - Base] submissionId:", submissionId);
+            console.log("[WFMM - Base] imageUrlMap:", imageUrlMap);
 
             if (!submissionId) {
                 wfmapmodsHideSubmitProgress();
@@ -2321,7 +2339,7 @@
             // Hard fail if Wayfarer didn't give us a URL for every supporting image.
             if (totalSupporting > 0 && supportingUploadUrls.length < totalSupporting) {
                 const msg =
-                      "[WF Submit] MISMATCH: Need " + totalSupporting +
+                      "[WFMM - Base] MISMATCH: Need " + totalSupporting +
                       " supporting URLs but only got " + supportingUploadUrls.length;
                 console.warn(msg, { supportingUploadUrls, supportingBlobs });
 
@@ -2345,7 +2363,7 @@
                 `Uploading main photo…`,
                 mainPct
             );
-            console.log("[WF Submit] PUT main image to:", mainUploadUrl);
+            console.log("[WFMM - Base] PUT main image to:", mainUploadUrl);
             await putImageToSignedUrlForSubmit(mainUploadUrl, mainBlob);
 
             // === Upload supporting ===
@@ -2364,7 +2382,7 @@
 
                 if (!blob || !url) {
                     console.warn(
-                        "[WF Submit] Missing blob/url for supporting image index",
+                        "[WFMM - Base] Missing blob/url for supporting image index",
                         i,
                         "blob:", !!blob,
                         "url:", url
@@ -2389,7 +2407,7 @@
 
                 wfmapmodsSetSubmitProgress(label, pct);
 
-                console.log(`[WF Submit] PUT supporting image #${uploadedSupportingCount} to:`, url);
+                console.log(`[WFMM - Base] PUT supporting image #${uploadedSupportingCount} to:`, url);
                 await putImageToSignedUrlForSubmit(url, blob);
             }
 
@@ -2400,12 +2418,12 @@
             const completeUrl =
                   "/api/v1/vault/submit/complete?submissionId=" + encodeURIComponent(submissionId);
 
-            console.log("[WF Submit] /submit/complete URL:", completeUrl);
-            console.log("[WF Submit] /submit/complete payload:", completePayload);
+            console.log("[WFMM - Base] /submit/complete URL:", completeUrl);
+            console.log("[WFMM - Base] /submit/complete payload:", completePayload);
 
             const completeResp = await postJsonWithCsrf(completeUrl, completePayload);
 
-            console.log("[WF Submit] /submit/complete response raw:", completeResp);
+            console.log("[WFMM - Base] /submit/complete response raw:", completeResp);
 
             if (!completeResp || completeResp.captcha) {
                 wfmapmodsHideSubmitProgress();
@@ -2426,13 +2444,13 @@
                 try {
                     await deleteDraftSubmissionFromIDB(options.draftIdToDelete);
                 } catch (e) {
-                    console.warn("[WF Submit] Draft deletion failed:", e);
+                    console.warn("[WFMM - Base] Draft deletion failed:", e);
                     // don't fail the submission UI just because cleanup failed
                 }
             }
 
             wfmapmodsSetSubmitProgress("Nomination submitted!", 100);
-            console.log("[WF Submit] DONE for submissionId:", submissionId);
+            console.log("[WFMM - Base] DONE for submissionId:", submissionId);
 
             wfMapmodsIsUploading = false;
 
@@ -3526,11 +3544,11 @@
             };
 
             req.onerror = () => {
-                console.warn("[Base] Failed to cursor drafts from IndexedDB", req.error);
+                console.warn("[WFMM - Base] Failed to cursor drafts from IndexedDB", req.error);
                 db.close();
             };
         }).catch(err => {
-            console.warn("[Base] IndexedDB not available (load drafts):", err);
+            console.warn("[WFMM - Base] IndexedDB not available (load drafts):", err);
         });
     }
 
@@ -3544,7 +3562,7 @@
 
             req.onsuccess = () => { db.close(); resolve(req.result || null); };
             req.onerror   = () => {
-                console.warn("[Base] Failed to load draft by id", req.error);
+                console.warn("[WFMM - Base] Failed to load draft by id", req.error);
                 db.close();
                 resolve(null);
             };
@@ -3572,7 +3590,7 @@
             };
 
             req.onerror = () => {
-                console.warn("[Base] Failed to save draft submission", req.error);
+                console.warn("[WFMM - Base] Failed to save draft submission", req.error);
             };
 
             tx.oncomplete = () => {
@@ -3582,12 +3600,12 @@
             };
 
             tx.onerror = () => {
-                console.warn("[Base] Transaction error while saving draft submission", tx.error);
+                console.warn("[WFMM - Base] Transaction error while saving draft submission", tx.error);
                 db.close();
                 reject(tx.error);
             };
         })).catch(err => {
-            console.warn("[Base] IndexedDB not available (save draft):", err);
+            console.warn("[WFMM - Base] IndexedDB not available (save draft):", err);
         });
     }
 
@@ -3606,7 +3624,7 @@
             };
 
             req.onerror = () => {
-                console.warn("[Base] Failed to delete draft submission", req.error);
+                console.warn("[WFMM - Base] Failed to delete draft submission", req.error);
             };
 
             tx.oncomplete = () => {
@@ -3616,12 +3634,12 @@
             };
 
             tx.onerror = () => {
-                console.warn("[Base] Transaction error while deleting draft submission", tx.error);
+                console.warn("[WFMM - Base] Transaction error while deleting draft submission", tx.error);
                 db.close();
                 reject(tx.error);
             };
         })).catch(err => {
-            console.warn("[Base] IndexedDB not available (delete draft):", err);
+            console.warn("[WFMM - Base] IndexedDB not available (delete draft):", err);
         });
     }
 
@@ -3796,7 +3814,7 @@
                 await saveDraftSubmissionToIDB(draft);
                 alert("Draft saved. It will appear as a draft pin on the map.");
             } catch (err) {
-                console.error("[Base] Failed to save native form draft:", err);
+                console.error("[WFMM - Base] Failed to save native form draft:", err);
                 alert("Could not save draft – see console for details.");
             }
         });
@@ -4046,9 +4064,9 @@
             // Save (best-effort; do not block UX on failure)
             saveReportedWayspotToIDB(rec).then(ok => {
                 if (ok) {
-                    console.log("[Base] Saved wayfarer-map report record:", rec);
+                    console.log("[WFMM - Base] Saved wayfarer-map report record:", rec);
                 } else {
-                    console.warn("[Base] Failed to save wayfarer-map report record (collision or IDB error).", rec);
+                    console.warn("[WFMM - Base] Failed to save wayfarer-map report record (collision or IDB error).", rec);
                 }
             });
 
@@ -4065,11 +4083,11 @@
     }
 
     // ======================================================================
-    // Report history store (Wayfarer-side)
+    // Report history store
     // ======================================================================
 
-    // Optional but recommended for future queries/sorting by mechanism+timestamp
     const REPORTED_IDX_MECH_TS = "byMechanismTimestamp";
+    const REPORTED_IDX_TICKET = "byTicket";
 
     /**
      * Open wayfarer-tools-db ensuring REPORTED_STORE_NAME exists.
@@ -4114,6 +4132,10 @@
                 if (!store.indexNames.contains(REPORTED_IDX_MECH_TS)) {
                     store.createIndex(REPORTED_IDX_MECH_TS, ["reportMechanism", "timestampMs"], { unique: false });
                 }
+
+                if (!store.indexNames.contains(REPORTED_IDX_TICKET)) {
+                    store.createIndex(REPORTED_IDX_TICKET, "ticket", { unique: false });
+                }
             };
 
             openRequest.onerror = (event) => {
@@ -4131,12 +4153,12 @@
 
     function saveReportedWayspotToIDB(rec) {
         if (!rec || typeof rec.timestampMs !== "number" || !Number.isFinite(rec.timestampMs)) {
-            console.warn("[Base] Refusing to save report record: missing/invalid timestampMs", rec);
+            console.warn("[WFMM - Base] Refusing to save report record: missing/invalid timestampMs", rec);
             return Promise.resolve(false);
         }
 
         if (!rec.id || typeof rec.id !== "string") {
-            console.warn("[Base] Refusing to save report record: missing id", rec);
+            console.warn("[WFMM - Base] Refusing to save report record: missing id", rec);
             return Promise.resolve(false);
         }
 
@@ -4147,7 +4169,7 @@
             const req = store.add(rec); // add() fails on duplicate id
 
             req.onerror = () => {
-                console.warn("[Base] Collision: report record not saved because id already exists:", rec.id, req.error, rec);
+                console.warn("[WFMM - Base] Collision: report record not saved because id already exists:", rec.id, req.error, rec);
                 // tx aborts -> handled below
             };
 
@@ -4166,7 +4188,7 @@
                 resolve(false);
             };
         })).catch(err => {
-            console.warn("[Base] IndexedDB not available (save reported wayspot):", err);
+            console.warn("[WFMM - Base] IndexedDB not available (save reported wayspot):", err);
             return false;
         });
     }
@@ -4207,6 +4229,54 @@
         // Your sample response:
         // { result: { success: true }, captcha: false, code: "OK", ... }
         return !!(resp && resp.captcha === false && resp.result && resp.result.success === true);
+    }
+
+    function idbFindReportedByTicket(ticketStr) {
+        const ticket = String(ticketStr || "").trim();
+        if (!/^\d{8}$/.test(ticket)) return Promise.resolve(null);
+
+        return getReportedWayspotsIDBInstance().then(db => new Promise((resolve, reject) => {
+            const tx = db.transaction(REPORTED_STORE_NAME, "readonly");
+            const store = tx.objectStore(REPORTED_STORE_NAME);
+
+            // Prefer index if present, fallback to scan
+            const hasIndex = store.indexNames.contains(REPORTED_IDX_TICKET);
+
+            if (hasIndex) {
+                const idx = store.index(REPORTED_IDX_TICKET);
+                const req = idx.getAll(IDBKeyRange.only(ticket));
+
+                req.onsuccess = () => {
+                    const rows = Array.isArray(req.result) ? req.result : [];
+                    const best = rows
+                    .filter(r => r && typeof r.lat === "number" && typeof r.lng === "number")
+                    .sort((a, b) => (b.timestampMs || 0) - (a.timestampMs || 0))[0] || null;
+
+                    db.close();
+                    resolve(best);
+                };
+                req.onerror = () => { db.close(); reject(req.error); };
+            } else {
+                // Fallback: scan all (slower, but works if old DB)
+                const req = store.getAll();
+                req.onsuccess = () => {
+                    const all = Array.isArray(req.result) ? req.result : [];
+                    const rows = all.filter(r => r && r.ticket === ticket);
+                    const best = rows
+                    .filter(r => typeof r.lat === "number" && typeof r.lng === "number")
+                    .sort((a, b) => (b.timestampMs || 0) - (a.timestampMs || 0))[0] || null;
+
+                    db.close();
+                    resolve(best);
+                };
+                req.onerror = () => { db.close(); reject(req.error); };
+            }
+
+            tx.onerror = () => { db.close(); reject(tx.error); };
+        })).catch(err => {
+            console.warn("[WFMM - Base] IDB ticket search failed:", err);
+            return null;
+        });
     }
 
     // ==================================
@@ -4279,7 +4349,7 @@
             const req = store.put(updatedRec);
 
             req.onerror = () => {
-                console.warn("[Base] Failed to update report record:", updatedRec?.id, req.error);
+                console.warn("[WFMM - Base] Failed to update report record:", updatedRec?.id, req.error);
                 // tx will likely abort; resolve on abort below
             };
 
@@ -4287,7 +4357,7 @@
             tx.onabort = () => { db.close(); resolve(false); };
             tx.onerror = () => { db.close(); resolve(false); };
         })).catch(err => {
-            console.warn("[Base] IndexedDB not available (update reported wayspot):", err);
+            console.warn("[WFMM - Base] IndexedDB not available (update reported wayspot):", err);
             return false;
         });
     }
@@ -4304,7 +4374,7 @@
         try {
             missing = await idbGetAllMissingAddressRecords();
         } catch (e) {
-            console.warn("[Base] Address patch: could not load records:", e);
+            console.warn("[WFMM - Base] Address patch: could not load records:", e);
             return { ok: false, patched: 0, totalMissing: 0 };
         }
 
@@ -4312,7 +4382,7 @@
             return { ok: true, patched: 0, totalMissing: 0 };
         }
 
-        console.log(`[Base] Address patch: ${missing.length} record(s) missing addressString. Starting backfill…`);
+        console.log(`[WFMM - Base] Address patch: ${missing.length} record(s) missing addressString. Starting backfill…`);
 
         let patched = 0;
 
@@ -4334,22 +4404,22 @@
                     const ok = await idbUpdateReportedWayspotRecord(updated);
                     if (ok) {
                         patched++;
-                        console.log("[Base] Address patch: updated", updated.id, addr);
+                        console.log("[WFMM - Base] Address patch: updated", updated.id, addr);
                     } else {
-                        console.warn("[Base] Address patch: failed to write update for", rec.id);
+                        console.warn("[WFMM - Base] Address patch: failed to write update for", rec.id);
                     }
                 } else {
-                    console.log("[Base] Address patch: no address returned for", rec.id);
+                    console.log("[WFMM - Base] Address patch: no address returned for", rec.id);
                 }
             } catch (e) {
-                console.warn("[Base] Address patch: geocode failed for", rec?.id, e);
+                console.warn("[WFMM - Base] Address patch: geocode failed for", rec?.id, e);
             }
 
             // Throttle between requests so you don't hammer geocoder / hit quota / trigger captcha
             await sleep(throttleMs);
         }
 
-        console.log(`[Base] Address patch complete. Patched ${patched}/${missing.length}.`);
+        console.log(`[WFMM - Base] Address patch complete. Patched ${patched}/${missing.length}.`);
         return { ok: true, patched, totalMissing: missing.length };
     }
 
@@ -4357,10 +4427,10 @@
     (() => {
         try {
             patchMissingAddressStringsOnLoad({ throttleMs: 5000 }).then((res) => {
-                console.log("[Base] Address patch result:", res);
+                console.log("[WFMM - Base] Address patch result:", res);
             });
         } catch (e) {
-            console.warn("[Base] Address patch: failed to start:", e);
+            console.warn("[WFMM - Base] Address patch: failed to start:", e);
         }
     })();
 
@@ -6342,8 +6412,8 @@
 
         syncPoiMarkersWithCurrentPois();
 
-        if (deepLinkSelectionPending) {
-            trySelectDeepLinkedPoi();
+        if (pendingSelect) {
+            trySelectPendingPoi();
         }
     }
 
@@ -6593,6 +6663,16 @@
 
         // Recompute combined POIs only for impacted guids
         recomputeCombinedForGuids(affected);
+
+        // Record that this source has delivered at least one snapshot for this selection attempt
+        notePendingSelectSourceSeen(sourceName);
+    }
+
+    function notePendingSelectSourceSeen(sourceName) {
+        if (!pendingSelect || !pendingSelectSourcesSeen) return;
+        if (sourceName !== "live" && sourceName !== "gcs") return;
+
+        pendingSelectSourcesSeen.add(sourceName);
     }
 
     // ==================================
@@ -6642,18 +6722,14 @@
         if (!responseText) return;
 
         let json;
-        try {
-            json = JSON.parse(responseText);
-        } catch {
-            return;
-        }
+        try { json = JSON.parse(responseText); } catch { return; }
 
         if (json?.code && json.code !== "OK") return;
         if (json?.result?.success === false) return;
 
-        const normalized = extractAndNormalizeGcsPois(json);
+        updateGcsLatestGeneratedTimestampFromResponse(json);
 
-        // IMPORTANT: even if empty, this should clear gcsGuids and prune stale ones
+        const normalized = extractAndNormalizeGcsPois(json);
         applySourcePoisSnapshot("gcs", normalized);
     }
 
@@ -6697,7 +6773,7 @@
 
         // If on the Mapview route, stop after clearing gcs data
         // Mapview will do its own calls to gcs api
-        if (!isOnMapviewRoute()) return;
+        if (isOnMapviewRoute()) return;
 
         // If on Submit route, call gcs api manually
         const bounds = map.getBounds?.();
@@ -6910,9 +6986,114 @@
             return availableQuotas;
         })
             .catch(err => {
-            console.warn("[Availability] Failed to fetch /submit/available:", err);
+            console.warn("[WFMM - Base] Failed to fetch /submit/available:", err);
             return availableQuotas; // keep prior cache
         });
+    }
+
+    // ==================================
+    // Map sync timestamp
+    // ==================================
+
+    let lastMapSyncEl = null;
+    let lastMapSyncTimer = null;
+    let lastMapSyncObservedTs = null;
+
+    function updateGcsLatestGeneratedTimestampFromResponse(json) {
+        const blocks = json?.result?.data;
+        if (!Array.isArray(blocks) || blocks.length === 0) return;
+
+        let maxTs = 0;
+
+        for (const cell of blocks) {
+            const tsRaw = cell?.metadata?.generatedTimestamp;
+
+            // It will be digits in ms (string or number). Convert safely.
+            const ts = (typeof tsRaw === "number")
+            ? tsRaw
+            : (typeof tsRaw === "string" && /^\d+$/.test(tsRaw))
+            ? Number(tsRaw)
+            : NaN;
+
+            if (Number.isFinite(ts) && ts > maxTs) maxTs = ts;
+        }
+
+        if (maxTs > (window.gcsLatestGeneratedTimestampMs || 0)) {
+            window.gcsLatestGeneratedTimestampMs = maxTs;
+            renderLastMapSyncLabel();
+        }
+    }
+
+    function formatHoursAndMinsFromMs(tsMs) {
+        if (!Number.isFinite(tsMs) || tsMs <= 0) return "";
+
+        const now = Date.now();
+        let diffMs = now - tsMs;
+        if (!Number.isFinite(diffMs) || diffMs < 0) diffMs = 0;
+
+        const totalMinutes = Math.floor(diffMs / 60000);
+        const totalHours = Math.floor(totalMinutes / 60);
+
+        // If 30 hours or more → switch to days/hours/mins
+        if (totalHours >= 30) {
+            const days = Math.floor(totalHours / 24);
+            const hours = totalHours % 24;
+            const minutes = totalMinutes % 60;
+            return `${days}d ${hours}h ${minutes}m`;
+        }
+
+        // Original behaviour under 30 hours
+        const hours = totalHours;
+        const minutes = totalMinutes % 60;
+
+        if (hours <= 0) {
+            return `${minutes}m`;
+        }
+        return `${hours}h ${minutes}m`;
+    }
+
+    function renderLastMapSyncLabel() {
+        if (!lastMapSyncEl) return;
+
+        const ts = window.gcsLatestGeneratedTimestampMs;
+
+        if (!Number.isFinite(ts) || ts <= 0) {
+            lastMapSyncEl.classList.add("wfmapmods-is-hidden");
+            lastMapSyncEl.textContent = "";
+            lastMapSyncObservedTs = null;
+            return;
+        }
+
+        const age = formatHoursAndMinsFromMs(ts);
+        lastMapSyncEl.textContent = `Map data is ${age} old.`;
+        lastMapSyncEl.classList.remove("wfmapmods-is-hidden");
+        lastMapSyncObservedTs = ts;
+    }
+
+    function ensureLastMapSyncTimer() {
+        if (lastMapSyncTimer) return;
+
+        // Update “ago” over time even if timestamp doesn't change.
+        lastMapSyncTimer = window.setInterval(() => {
+            // If the element isn’t on the page anymore, stop.
+            if (!lastMapSyncEl || !document.body.contains(lastMapSyncEl)) {
+                clearInterval(lastMapSyncTimer);
+                lastMapSyncTimer = null;
+                return;
+            }
+
+            // Only re-render if:
+            // - timestamp exists, OR
+            // - it previously existed (so we can hide if it disappears)
+            const ts = window.gcsLatestGeneratedTimestampMs;
+            if (!Number.isFinite(ts) || ts <= 0) {
+                if (lastMapSyncObservedTs != null) renderLastMapSyncLabel();
+                return;
+            }
+
+            // Re-render every minute regardless so hours/minutes tick naturally.
+            renderLastMapSyncLabel();
+        }, 60 * 1000);
     }
 
     // ==================================
@@ -7274,7 +7455,7 @@
      * - Click toggles submissionPinEnabled
      */
     function createSubmissionPinControl() {
-        if (typeof isOnMapviewRoute === "function" && !isOnMapviewRoute()) return;
+        if (!isOnMapviewRoute()) return;
 
         const map = wfMap;
         if (!window.google || !google.maps || !map) return;
@@ -7897,19 +8078,18 @@
 
         flyToLatLngAndPlaceSubmission(centerLatLng);
 
-        // Mark that we still need to auto-select when POIs load
-        deepLinkSelectionPending = true;
+        // queue select for when POIs load
+        queueExactPoiSelect(lat, lng);
+
         skipRestoreMapViewForThisLoad = true;
     }
 
-    function trySelectDeepLinkedPoi() {
-        if (!deepLinkTarget || !Array.isArray(window.currentPois) || window.currentPois.length === 0) {
+    function trySelectPendingPoi() {
+        if (!pendingSelectLatLng || !pendingSelect || !Array.isArray(window.currentPois) || window.currentPois.length === 0) {
             return;
         }
 
-        const { lat: targetLat, lng: targetLng } = deepLinkTarget;
-        if (!Number.isFinite(targetLat) || !Number.isFinite(targetLng)) return;
-
+        const { lat: targetLat, lng: targetLng } = pendingSelectLatLng;
         const MAX_DISTANCE_METRES = 2;
 
         let closestPoi = null;
@@ -7925,45 +8105,77 @@
             }
         }
 
-        // If nothing is within 2m, stay in "pending" mode.
-        // This is to counteract initial fetch on page load messing things up
         if (!closestPoi) {
-            console.log('Deep Links: No POI within 2m yet; will try again on next POI fetch');
-            return;
+            // If both sources have produced a snapshot since we queued, give up.
+            if (
+                pendingSelectSourcesNeeded &&
+                pendingSelectSourcesSeen &&
+                pendingSelectSourcesNeeded.size > 0
+            ) {
+                let allSeen = true;
+                for (const s of pendingSelectSourcesNeeded) {
+                    if (!pendingSelectSourcesSeen.has(s)) { allSeen = false; break; }
+                }
+
+                if (allSeen) {
+                    pendingSelectLatLng = null;
+                    pendingSelect = false;
+                    pendingSelectSourcesNeeded = null;
+                    pendingSelectSourcesSeen = null;
+                }
+            }
+
+            return; // keep pending (or stop if allSeen)
         }
 
-        // We found a match: publish and then clear the deep-link state.
         publishPoiToBridge(closestPoi);
 
-        // Reset values ONLY on success
+        // clear ONLY on success
+        pendingSelectLatLng = null;
+        pendingSelect = false;
+
+        // if these are only for deep-link flow, keep them where you set them
         deepLinkTarget = null;
         skipRestoreMapViewForThisLoad = false;
-        deepLinkSelectionPending = false;
     }
+
 
     // ==================================
     // Search & geocoding helpers
     // ==================================
 
-    function handleSearchSubmit(rawValue) {
+    async function handleSearchSubmit(rawValue) {
         if (!wfMap) return;
 
         const value = (rawValue || "").trim();
         if (!value) return;
 
-        // 1) Try to parse "lat,lng"
+        // 1) Ticket lookup
+        const ticket = extractTicketNumber(value);
+        if (ticket) {
+            const rec = await idbFindReportedByTicket(ticket);
+            if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) {
+                flyToLatLngAndPlaceSubmission(new google.maps.LatLng(rec.lat, rec.lng));
+                queueExactPoiSelect(rec.lat, rec.lng);
+                return;
+            }
+            console.warn("[Wayfarer Map] No reported record found for ticket:", ticket);
+            // optional: return here to avoid geocoding numeric strings
+            // return;
+        }
+
+        // 2) Try to parse "lat,lng"
         const latLng = tryParseLatLng(value);
         if (latLng) {
             flyToLatLngAndPlaceSubmission(latLng);
+            queueExactPoiSelect(latLng.lat(), latLng.lng());
             return;
         }
 
-        // 2) Fallback to geocoding the address
+        // 3) Fallback to geocoding the address
         if (typeof google !== "undefined" && google.maps && google.maps.Geocoder) {
             const geocoder = new google.maps.Geocoder();
-            geocoder.geocode({
-                address: value
-            }, (results, status) => {
+            geocoder.geocode({ address: value }, (results, status) => {
                 if (status === "OK" && results && results[0]) {
                     const loc = results[0].geometry.location;
                     flyToLatLngAndPlaceSubmission(loc);
@@ -7988,6 +8200,15 @@
         if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
 
         return new google.maps.LatLng(lat, lng);
+    }
+
+    function extractTicketNumber(raw) {
+        const s = String(raw || "").trim();
+        if (!s) return null;
+
+        // 8 digits not immediately preceded/followed by another digit
+        const m = s.match(/(?:^|[^\d])(\d{8})(?:$|[^\d])/);
+        return m ? m[1] : null;
     }
 
     function flyToLatLngAndPlaceSubmission(latLng) {
@@ -8061,6 +8282,16 @@
 
         // If your submit flow needs downstream updates, keep them explicit
         handleLatLngChange(lat, lng);
+    }
+
+    function queueExactPoiSelect(lat, lng) {
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+        pendingSelectLatLng = { lat, lng };
+        pendingSelect = true;
+
+        pendingSelectSourcesNeeded = new Set(["live", "gcs"]);
+        pendingSelectSourcesSeen = new Set();
     }
 
     function setupSearchAutocomplete(inputEl) {
