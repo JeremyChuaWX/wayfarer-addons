@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.4.2
-// @description  Base plug-in for Wayfarer Maps
+// @version      3.4.3
+// @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
@@ -4642,7 +4642,7 @@
               data-copy="${title.replace(/"/g, '&quot;')}"
               title="Click to copy title">${title}</span>
       </div>
-      <button class="wfmapmods-iw-close" title="Close">×</button>
+      <button class="wfmapmods-iw-close wfmapmods-close-btn" title="Close">×</button>
     </div>
 
     <div class="wfmapmods-iw-coords">
@@ -4736,7 +4736,7 @@
 
         const closeBtn = document.createElement("button");
         closeBtn.type = "button";
-        closeBtn.className = "wfmapmods-wayspot-overlay-close";
+        closeBtn.className = "wfmapmods-close-btn";
         closeBtn.textContent = "×";
         closeBtn.title = "Close";
 
@@ -5973,7 +5973,7 @@
         return window[k];
     }
 
-    function openModal({ id, title, buildContent, onOk, width, showFooterButtons }) {
+    function openModal({ id, title, buildContent, onOk, width, showFooterButtons, showHeaderClose }) {
         if (document.getElementById(id)) return; // Modal already open
 
         const backdrop = document.createElement("div");
@@ -5998,6 +5998,36 @@
         header.className = "wfmapmods-modal-title";
         header.textContent = title;
         dialog.appendChild(header);
+
+        // Wrap title + close button (optional)
+        const headerRow = document.createElement("div");
+        headerRow.style.display = "flex";
+        headerRow.style.alignItems = "center";
+        headerRow.style.justifyContent = "space-between";
+        headerRow.style.gap = "8px";
+
+        // Move the header text node into headerRow
+        headerRow.appendChild(header);
+
+        let headerCloseBtn = null;
+        if (showHeaderClose) {
+            headerCloseBtn = document.createElement("button");
+            headerCloseBtn.type = "button";
+            headerCloseBtn.className = "wfmapmods-close-btn";
+            headerCloseBtn.textContent = "×";
+            headerCloseBtn.setAttribute("aria-label", "Close");
+            headerCloseBtn.title = "Close";
+            headerCloseBtn.addEventListener("click", (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                closeModal();
+            });
+            headerRow.appendChild(headerCloseBtn);
+        }
+
+        // Replace previous direct append of header with headerRow
+        // (so REMOVE dialog.appendChild(header); above and do:)
+        dialog.appendChild(headerRow);
 
         let okBtn = null;
         let cancelBtn = null;
@@ -7194,6 +7224,7 @@
             title: poi.title ? `Gallery — ${poi.title}` : "Gallery",
             width: 600,
             showFooterButtons: false,
+            showHeaderClose: true,
             buildContent: (dialog, _okBtn, closeModal) => {
                 const wrap = document.createElement("div");
                 wrap.className = "wfmapmods-gallery-wrap";
@@ -7285,7 +7316,7 @@
         fs.className = "wfmapmods-gallery-fs";
 
         const closeBtn = document.createElement("button");
-        closeBtn.className = "wfmapmods-gallery-fs-close";
+        closeBtn.className = "wfmapmods-close-btn wfmapmods-gallery-fs-close";
         closeBtn.type = "button";
         closeBtn.textContent = "×";
         closeBtn.setAttribute("aria-label", "Close fullscreen");
@@ -9863,6 +9894,23 @@
   cursor: not-allowed;
 }
 
+.wfmapmods-close-btn {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  border: 1px solid rgba(0,0,0,0.2);
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
 /* =============================================================================
    02) Modal: Backdrop + Dialog (generic)
    ============================================================================= */
@@ -10185,24 +10233,6 @@
   width: 100%;
   overflow-wrap: anywhere;
   white-space: normal;
-}
-
-.wfmapmods-wayspot-overlay-close {
-  flex: 0 0 24px;
-  align-self: flex-start;
-  border: 1px solid rgba(0, 0, 0, 0.2);
-  background: #ffffff;
-  border-radius: 9999px;
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-  font-weight: 600;
 }
 
 .wfmapmods-wayspot-overlay-image-link {
@@ -10588,22 +10618,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.wfmapmods-iw-close {
-  flex: 0 0 24px;
-  width: 24px;
-  height: 24px;
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.15);
-  border-radius: 9999px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 0;
 }
 
 .wfmapmods-iw-coords {
@@ -11296,6 +11310,7 @@
 
 .wfmapmods-gallery-wrap {
   margin-top: 8px;
+  padding-bottom: 14px;
 }
 
 .wfmapmods-gallery-loading {
@@ -11376,13 +11391,10 @@
   right: 12px;
   width: 30px;
   height: 30px;
-  border-radius: 9999px;
-  border: 1px solid rgba(255,255,255,0.35);
-  background: rgba(0,0,0,0.25);
-  color: #fff;
   font-size: 22px;
-  line-height: 1;
-  cursor: pointer;
+  color: #fff;
+  border-color: rgba(255,255,255,0.35);
+  background: rgba(0,0,0,0.25);
 }
 
 .wfmapmods-gallery-fs-nav {
