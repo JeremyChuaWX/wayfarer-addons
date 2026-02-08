@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.3.0
+// @version      3.3.1
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -6561,25 +6561,26 @@
         const hasLiveActive = liveGuids.has(guid);
         const hasGcsActive  = gcsGuids.has(guid);
 
-        // If neither source currently claims it, it shouldn't exist in the combined store
-        if (!hasLiveActive && !hasGcsActive) return null;
+        // SUBMIT ROUTE RULE:
+        // Only show POIs that are in the live snapshot.
+        if (isOnSubmitRoute()) {
+            if (!hasLiveActive) return null;
+        } else {
+            // MAPVIEW ROUTE RULE:
+            // If neither source claims it, don't show it.
+            if (!hasLiveActive && !hasGcsActive) return null;
+        }
 
         const live = livePoisByGuid.get(guid) || null;
 
-        // IMPORTANT RULE:
-        // Only include GCS fields if the POI is currently in the GCS set.
-        // If GCS dropped it, revert to live-only.
+        // Only include GCS fields if GCS currently claims it.
+        // On submit route this becomes "enrich live POIs if they also appear in GCS".
         const gcs = hasGcsActive ? (gcsPoisByGuid.get(guid) || null) : null;
 
-        // Start with GCS (so address/gmo/pgo/isCommunityContributed/hasAdditionalImages come from GCS)
         const out = gcs ? { ...gcs } : { guid };
 
-        // Now overlay the LIVE-preferred fields if we have live data cached
-        // (and we keep it even if Live is no longer active, as long as GCS is still active)
         if (live) {
             out.guid = guid;
-
-            // Live-preferred fields
             out.title = live.title ?? out.title ?? "";
             out.description = live.description ?? out.description ?? "";
             out.lat = (typeof live.lat === "number") ? live.lat : out.lat;
