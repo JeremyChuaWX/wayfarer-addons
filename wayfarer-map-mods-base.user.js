@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.4.3
+// @version      3.4.4
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -11343,8 +11343,14 @@
   display: block;
 }
 
-/* On small screens, fall back to 1 column */
+/* Mobile: when grid is 1-col, keep dialog narrow too */
 @media (max-width: 620px) {
+  .wfmapmods-modal-dialog {
+    width: 300px !important;
+    max-width: calc(100% - 24px) !important;
+    max-height: 80vh !important;
+  }
+
   .wfmapmods-gallery-grid {
     grid-template-columns: 266px;
   }
