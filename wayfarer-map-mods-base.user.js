@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.4.4
+// @version      3.4.5
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -7858,41 +7858,6 @@
         wfMap.setOptions({ styles });
     }
 
-    function initUserLocationMarker(map) {
-        userLocationMarker = new google.maps.Marker({
-            map,
-            clickable: false,
-            zIndex: 9999,
-            optimized: false,
-            icon: {
-                path: google.maps.SymbolPath.CIRCLE,
-                scale: 8,
-                fillColor: '#4285F4',
-                fillOpacity: 0.9,
-                strokeColor: 'white',
-                strokeWeight: 2
-            }
-        });
-
-        // Hide by default until we have a position
-        userLocationMarker.setVisible(false);
-    }
-
-    function focusMapOnSubmitterLocation(map) {
-        if (!map) return;
-
-        if (!hasSubmitterLocation()) {
-            console.warn("Wayfarer Map: No live location yet");
-            // Optionally show a toast/alert: “Waiting for location permission…”
-            return;
-        }
-
-        const latLng = new google.maps.LatLng(submitterLocation.lat, submitterLocation.lng);
-
-        map.panTo(latLng);
-        map.setZoom(Math.max(map.getZoom(), 18));
-    }
-
     function teardownMap() {
         // Close info window
         try {
@@ -8240,6 +8205,64 @@
             navigator.geolocation.clearWatch(geoWatchId);
         }
         geoWatchId = null;
+    }
+
+    function createUserLocationIcon() {
+        const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+  <circle cx="20" cy="20" r="15" fill="rgba(22,188,240,0.35)">
+    <animate attributeName="r"
+             values="15;20;15"
+             dur="2s"
+             repeatCount="indefinite"
+             calcMode="spline"
+             keySplines="0.4 0 0.6 1; 0.4 0 0.6 1"/>
+    <animate attributeName="opacity"
+             values="1;0.3;1"
+             dur="2s"
+             repeatCount="indefinite"
+             calcMode="spline"
+             keySplines="0.4 0 0.6 1; 0.4 0 0.6 1"/>
+  </circle>
+  <circle cx="20" cy="20" r="8"
+          fill="#0096fe"
+          stroke="white"
+          stroke-width="4"/>
+</svg>`;
+
+        return {
+            url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
+            scaledSize: new google.maps.Size(40, 40),
+            anchor: new google.maps.Point(20, 20)
+        };
+    }
+
+    function initUserLocationMarker(map) {
+        userLocationMarker = new google.maps.Marker({
+            map,
+            clickable: false,
+            zIndex: 9999,
+            optimized: false,
+            icon: createUserLocationIcon(),
+        });
+
+        // Hide by default until we have a position
+        userLocationMarker.setVisible(false);
+    }
+
+    function focusMapOnSubmitterLocation(map) {
+        if (!map) return;
+
+        if (!hasSubmitterLocation()) {
+            console.warn("Wayfarer Map: No live location yet");
+            // Optionally show a toast/alert: “Waiting for location permission…”
+            return;
+        }
+
+        const latLng = new google.maps.LatLng(submitterLocation.lat, submitterLocation.lng);
+
+        map.panTo(latLng);
+        map.setZoom(Math.max(map.getZoom(), 18));
     }
 
     // ==============================
@@ -11513,6 +11536,11 @@ app-poi-detail-panel {
 
 /* Hide default Wayspots canvas */
 canvas#deckgl-overlay {
+  display: none !important;
+}
+
+/* Hide Google’s built-in blue geolocation dot */
+.gm-style img[src*="rgba(22%2C%20188%2C%20240%2C%200.4)"][src*="%230096ff"] {
   display: none !important;
 }
       `
