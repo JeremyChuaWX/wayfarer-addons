@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Report Wayspots
-// @version      3.0.1
-// @description  Adds a "Report Wayspot" link to the side panel and pre-fills the Helpshift form
+// @version      3.1.0
+// @description  Displays Reported Wayspots history on the map and adds additional reporting mechanisms.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
@@ -70,6 +70,16 @@
     const RATE_LIMIT_REPORT_MECHANISM = "pgo-locations-web";
     const REPORTED_IDX_MECH_TS = "byMechanismTimestamp";
 
+    // Report table modal
+    const REPORT_HISTORY_LINK_ID = "wfmapmods-settings-reporting-history";
+    const REPORT_HISTORY_MODAL_ID = "wfmapmods-report-history-backdrop";
+    const REPORT_HISTORY_PAGE_SIZE = 10;
+    const WFMM_DETAILS_ROW_CLASS = "wfmm-reporting-details-row";
+
+    // Api endpoint urls
+    const WFMM_GCS_ENDPOINT_PART = "/api/v1/vault/mapview/gcs?";
+    const WFMM_LIVE_POIS_ENDPOINT_PART = "/api/v1/vault/live-pois-in-radius?";
+
     // Helpshift form slots
     const HS_SLOTS = {
         name: "niantic_form_field_20180829003003565-76757f675145667",
@@ -86,7 +96,9 @@
     const HS_DROPDOWN_SLOTS = {
         country: "niantic_form_field_20190926192331730-5f5841a93bbe40b",
         propertyOwner: "niantic_form_field_20181106191511987-b598f73a256c0ac",
-        preferredLanguage: "niantic_form_field_20181112193004636-810bc70ee8c9615"
+        preferredLanguage: "niantic_form_field_20181112193004636-810bc70ee8c9615",
+        typeOfLocation: "niantic_form_field_20181102230310264-4041184eb6fa399",
+        reasonForRemovalRequest: "niantic_form_field_20181106014139979-551d4e76e210179",
     };
 
     // Report codes on Helpshift form
@@ -409,10 +421,35 @@
     let rateLimitTimer = null;
 
     // Settings cache
-    const userSettings = {};
+    const userSettings = {
+        reporting: {
+            name: "",
+            email: "",
+            propertyOwner: false,
+            preferredLanguage: "English",
+            typeOfLocation: "",
+            reasonForRemovalRequest: ""
+        },
+
+        // Controls which pulse types are visible on the map
+        pulseVisibility: {
+            live: true,
+            modified: true,
+            reinstated: true,
+            retired: false
+        }
+    };
 
     // Helshift-side state
     let helpshiftCurrentWayspotPayload = null;
+
+    // Map element
+    let wfMap = null;
+    let mapAttached = false;
+    const GCS_MIN_ZOOM = 18;
+
+    // Report history table
+    let WFMM_REPORTING_HISTORY_CTX = null;
 
     // ======================================================================
     // Utilities
@@ -490,6 +527,7 @@
         loadSettings();
         setupWayfarerMessaging();
         setupRouteWatcher();
+        injectCss();
     }
 
     function isOnMapCapableRoute() {
@@ -500,6 +538,7 @@
     function onRouteChange() {
         if (isOnMapCapableRoute()) {
             startSidePanelWatcher();
+
         } else {
             // Any other internal route → stop watching to save work
             stopSidePanelWatcher();
@@ -582,6 +621,51 @@
         });
     }
 
+
+    /**
+     * Reads ALL records from reportedWayspots store.
+     * Returns Array<rec>.
+     */
+    function loadAllReportedWayspotsFromIDB() {
+        return getReportedWayspotsIDBInstance().then((db) => new Promise((resolve) => {
+            const out = [];
+            try {
+                const tx = db.transaction(REPORTED_STORE_NAME, "readonly");
+                const store = tx.objectStore(REPORTED_STORE_NAME);
+
+                const req = store.openCursor(null, "next"); // natural order; we'll sort in JS
+
+                req.onsuccess = (ev) => {
+                    const cursor = ev.target.result;
+                    if (!cursor) return;
+                    out.push(cursor.value);
+                    cursor.continue();
+                };
+
+                req.onerror = () => {
+                    // still resolve, but empty
+                    resolve([]);
+                };
+
+                tx.oncomplete = () => {
+                    try { db.close(); } catch {}
+                    resolve(out);
+                };
+
+                tx.onabort = tx.onerror = () => {
+                    try { db.close(); } catch {}
+                    resolve([]);
+                };
+            } catch (e) {
+                try { db.close(); } catch {}
+                resolve([]);
+            }
+        })).catch((err) => {
+            console.warn("[Base] IndexedDB not available (read reporting history):", err);
+            return [];
+        });
+    }
+
     function saveReportedWayspotToIDB(rec) {
         if (!rec || typeof rec.timestampMs !== "number" || !Number.isFinite(rec.timestampMs)) {
             console.warn("[Report Wayspot] Refusing to save record: missing/invalid timestampMs", rec);
@@ -639,6 +723,57 @@
         const randPart = Math.random().toString(36).slice(2, 12);
 
         return `rpt_${timePart}_${randPart}`;
+    }
+
+    function patchReportedWayspotInIDB(id, patch) {
+        if (!id || typeof id !== "string") return Promise.resolve(false);
+        if (!patch || typeof patch !== "object") return Promise.resolve(false);
+
+        return getReportedWayspotsIDBInstance().then(db => new Promise((resolve) => {
+            let tx;
+            try {
+                tx = db.transaction(REPORTED_STORE_NAME, "readwrite");
+                const store = tx.objectStore(REPORTED_STORE_NAME);
+
+                const getReq = store.get(id);
+
+                getReq.onsuccess = () => {
+                    const rec = getReq.result;
+                    if (!rec) {
+                        // record missing; nothing to patch
+                        resolve(false);
+                        return;
+                    }
+
+                    const updated = Object.assign({}, rec, patch);
+
+                    const putReq = store.put(updated);
+                    putReq.onerror = () => {
+                        console.warn("[Report Wayspot] Failed to patch record:", id, putReq.error);
+                    };
+                };
+
+                getReq.onerror = () => {
+                    console.warn("[Report Wayspot] Failed to read record for patch:", id, getReq.error);
+                    resolve(false);
+                };
+
+                tx.oncomplete = () => {
+                    try { db.close(); } catch {}
+                    resolve(true);
+                };
+                tx.onabort = tx.onerror = () => {
+                    try { db.close(); } catch {}
+                    resolve(false);
+                };
+            } catch (e) {
+                try { db.close(); } catch {}
+                resolve(false);
+            }
+        })).catch(err => {
+            console.warn("[Report Wayspot] IndexedDB not available (patch):", err);
+            return false;
+        });
     }
 
     // ======================================================================
@@ -937,8 +1072,10 @@
 
         if (panelPresent) {
             insertReportWayspotLinkIfReady();
+            insertReportingHistoryLinkIfReady();
             insertReportingSettingsLinkIfReady();
             startPoiBridgeWatcherIfReady();
+            attachToMapIfNeeded();
             stopSidePanelWatcher();
         }
 
@@ -1007,6 +1144,27 @@
         });
     }
 
+    function insertReportingHistoryLinkIfReady() {
+        const settingsBody = document.querySelector(".wfmapmods-settings-links");
+        if (!settingsBody) return;
+
+        // Already injected
+        if (document.getElementById(REPORT_HISTORY_LINK_ID)) return;
+
+        const link = document.createElement("a");
+        link.id = REPORT_HISTORY_LINK_ID;
+        link.textContent = "Reporting History";
+        link.style.cursor = "pointer";
+
+        settingsBody.appendChild(link);
+
+        link.addEventListener("click", (ev) => {
+            ev.preventDefault();
+            openReportingHistoryModal();
+        });
+    }
+
+
     function insertReportingSettingsLinkIfReady() {
         const settingsBody = document.querySelector(".wfmapmods-settings-links");
         if (!settingsBody) return;
@@ -1015,7 +1173,7 @@
 
         const link = document.createElement("a");
         link.id = "wfmapmods-settings-reporting";
-        link.textContent = "Reporting";
+        link.textContent = "Reporting Settings";
         link.style.cursor = "pointer";
 
         settingsBody.appendChild(link);
@@ -1033,20 +1191,9 @@
         // Ensure global settings are loaded into userSettings
         loadSettings();
 
-        // Read existing reporting settings (if any)
-        const reporting = (userSettings.reporting && typeof userSettings.reporting === "object")
-        ? userSettings.reporting
-        : {};
-
-        // Defaults
-        const defaultPropertyOwner = false; // No
-        const defaultPreferredLanguage = "English";
-
-        // Normalise existing values safely
-        const savedPropertyOwner =
-              typeof reporting.propertyOwner === "boolean"
-        ? reporting.propertyOwner
-        : defaultPropertyOwner;
+        // Assumes userSettings is initialised with full structure
+        const reporting = userSettings.reporting;
+        const pulseVisibility = userSettings.pulseVisibility;
 
         const LANGUAGE_OPTIONS = [
             "English",
@@ -1065,10 +1212,56 @@
             "Hindi",
         ];
 
+        const TYPE_OF_LOCATION_OPTIONS = [
+            { value: "", label: "[Leave Blank]" },
+            { value: "Apartment/Condominium", label: "Apartment/Condominium" },
+            { value: "Business/Corporate campus", label: "Business/Corporate campus" },
+            { value: "Cemetery", label: "Cemetery" },
+            { value: "College/University campus", label: "College/University campus" },
+            { value: "Government office/property", label: "Government office/property" },
+            { value: "Historical site/landmark", label: "Historical site/landmark" },
+            { value: "Public park", label: "Public park" },
+            { value: "Place of worship", label: "Place of worship" },
+            { value: "Private residence or farm", label: "Private residence or farm" },
+            { value: "School (K-12)", label: "School (K-12)" },
+        ];
+
+        const REASON_FOR_REMOVAL_OPTIONS = [
+            { value: "", label: "[Leave blank]" },
+            { value: "It’s on private property ", label: "It’s on private property" },
+            { value: "Applying limiting hours of operations to public parks", label: "Applying limiting hours of operations to public parks" },
+            { value: "Safety concern - on a major roadway, highway, or bridge", label: "Safety concern - on a major roadway, highway, or bridge" },
+            { value: "Safety concern - interfering with emergency operations", label: "Safety concern - interfering with emergency operations" },
+            { value: "Safety concern - on an industrial site or power plant", label: "Safety concern - on an industrial site or power plant" },
+            { value: "Safety concern - on an airport runway or train tracks", label: "Safety concern - on an airport runway or train tracks" },
+            { value: "Safety concern - in the middle of a body of water with no land", label: "Safety concern - in the middle of a body of water with no land" },
+        ];
+
+        // Validate against current option lists (guards against stale/invalid localStorage)
         const savedPreferredLanguage =
               (typeof reporting.preferredLanguage === "string" && LANGUAGE_OPTIONS.includes(reporting.preferredLanguage))
         ? reporting.preferredLanguage
-        : defaultPreferredLanguage;
+        : "English";
+
+        const savedTypeOfLocation =
+              (typeof reporting.typeOfLocation === "string" &&
+               TYPE_OF_LOCATION_OPTIONS.some(o => o.value === reporting.typeOfLocation))
+        ? reporting.typeOfLocation
+        : "";
+
+        const savedReasonForRemoval =
+              (typeof reporting.reasonForRemovalRequest === "string" &&
+               REASON_FOR_REMOVAL_OPTIONS.some(o => o.value === reporting.reasonForRemovalRequest))
+        ? reporting.reasonForRemovalRequest
+        : "";
+
+        // Values straight from settings
+        const savedPropertyOwner = !!reporting.propertyOwner;
+
+        const savedPulseLive       = !!pulseVisibility.live;
+        const savedPulseModified   = !!pulseVisibility.modified;
+        const savedPulseRetired    = !!pulseVisibility.retired;
+        const savedPulseReinstated = !!pulseVisibility.reinstated;
 
         // --- Backdrop ---
         const backdrop = document.createElement("div");
@@ -1118,11 +1311,101 @@
         Object.assign(title.style, {
             fontSize: "15px",
             fontWeight: "600",
-            marginBottom: "10px"
+            marginBottom: "8px"
         });
         dialog.appendChild(title);
 
-        // --- Context / helper text ---
+        // =========================================================================
+        // Section 1: Pulse settings (FIRST)
+        // =========================================================================
+        const pulseSectionTitle = document.createElement("div");
+        pulseSectionTitle.textContent = "Pulse indicators";
+        Object.assign(pulseSectionTitle.style, {
+            fontSize: "12px",
+            fontWeight: "600",
+            marginTop: "2px",
+            marginBottom: "6px"
+        });
+        dialog.appendChild(pulseSectionTitle);
+
+        const pulseSectionHelper = document.createElement("div");
+        pulseSectionHelper.textContent = "Show a pulsing marker behind reported Wayspots based on last known status.";
+        Object.assign(pulseSectionHelper.style, {
+            fontSize: "11px",
+            color: "#4b5563",
+            marginBottom: "8px",
+            lineHeight: "1.4"
+        });
+        dialog.appendChild(pulseSectionHelper);
+
+        function makeCheckboxInline(labelText, checked) {
+            const wrap = document.createElement("label");
+            Object.assign(wrap.style, {
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                userSelect: "none",
+                fontSize: "11px",
+                color: "#374151",
+                cursor: "pointer"
+            });
+
+            const cb = document.createElement("input");
+            cb.type = "checkbox";
+            cb.checked = !!checked;
+            cb.style.margin = "0";
+
+            const txt = document.createElement("span");
+            txt.textContent = labelText;
+
+            wrap.appendChild(cb);
+            wrap.appendChild(txt);
+
+            return { wrap, cb };
+        }
+
+        // One row, 4 checkboxes: Live, Modified, Retired, Reinstated (in that order)
+        const pulseRow = document.createElement("div");
+        Object.assign(pulseRow.style, {
+            display: "flex",
+            flexDirection: "column",
+            gap: "6px",
+            marginBottom: "10px",
+            paddingLeft: "14px"
+        });
+
+        const liveCb = makeCheckboxInline("Live (Red)", savedPulseLive);
+        const modCb  = makeCheckboxInline("Modified (Yellow)", savedPulseModified);
+        const retCb  = makeCheckboxInline("Retired (Grey)", savedPulseRetired);
+        const reinCb = makeCheckboxInline("Reinstated (Purple)", savedPulseReinstated);
+
+        pulseRow.appendChild(liveCb.wrap);
+        pulseRow.appendChild(modCb.wrap);
+        pulseRow.appendChild(retCb.wrap);
+        pulseRow.appendChild(reinCb.wrap);
+        dialog.appendChild(pulseRow);
+
+        // Divider between sections
+        const divider = document.createElement("div");
+        Object.assign(divider.style, {
+            height: "1px",
+            background: "#e5e7eb",
+            margin: "8px 0 10px"
+        });
+        dialog.appendChild(divider);
+
+        // =========================================================================
+        // Section 2: Form settings
+        // =========================================================================
+        const formSectionTitle = document.createElement("div");
+        formSectionTitle.textContent = "Auto-fill webform";
+        Object.assign(formSectionTitle.style, {
+            fontSize: "12px",
+            fontWeight: "600",
+            marginBottom: "6px"
+        });
+        dialog.appendChild(formSectionTitle);
+
         const helper = document.createElement("div");
         helper.textContent = "Provide details for auto-import into the Report Wayspot webform.";
         Object.assign(helper.style, {
@@ -1150,12 +1433,18 @@
                 color: "#374151"
             });
 
-            inputEl.style.flex = "1 0 auto";
+            inputEl.style.flex = "1 1 0";
+            inputEl.style.minWidth = "0";
+            inputEl.style.width = "100%";
             inputEl.style.fontSize = "11px";
             inputEl.style.padding = "3px 4px";
             inputEl.style.borderRadius = "4px";
             inputEl.style.border = "1px solid #d1d5db";
             inputEl.style.boxSizing = "border-box";
+
+            if (inputEl.tagName === "SELECT") {
+                inputEl.style.whiteSpace = "normal";
+            }
 
             row.appendChild(label);
             row.appendChild(inputEl);
@@ -1176,6 +1465,28 @@
         emailInput.value = reporting.email || "";
         dialog.appendChild(makeRow("Email:", emailInput));
 
+        // --- Type of Location dropdown ---
+        const typeOfLocationSelect = document.createElement("select");
+        for (const item of TYPE_OF_LOCATION_OPTIONS) {
+            const opt = document.createElement("option");
+            opt.value = item.value;
+            opt.textContent = item.label;
+            typeOfLocationSelect.appendChild(opt);
+        }
+        typeOfLocationSelect.value = savedTypeOfLocation;
+        dialog.appendChild(makeRow("Type of Location:", typeOfLocationSelect));
+
+        // --- Reason for Removal Request dropdown ---
+        const reasonForRemovalSelect = document.createElement("select");
+        for (const item of REASON_FOR_REMOVAL_OPTIONS) {
+            const opt = document.createElement("option");
+            opt.value = item.value;
+            opt.textContent = item.label;
+            reasonForRemovalSelect.appendChild(opt);
+        }
+        reasonForRemovalSelect.value = savedReasonForRemoval;
+        dialog.appendChild(makeRow("Reason for Removal:", reasonForRemovalSelect));
+
         // --- Property Owner (Yes/No dropdown) ---
         const propertyOwnerSelect = document.createElement("select");
         const poNo = document.createElement("option");
@@ -1187,7 +1498,7 @@
         propertyOwnerSelect.appendChild(poNo);
         propertyOwnerSelect.appendChild(poYes);
         propertyOwnerSelect.value = savedPropertyOwner ? "yes" : "no";
-        dialog.appendChild(makeRow("Property Owner:", propertyOwnerSelect));
+        dialog.appendChild(makeRow("I am the owner:", propertyOwnerSelect));
 
         // --- Preferred Language dropdown ---
         const languageSelect = document.createElement("select");
@@ -1243,18 +1554,36 @@
         });
 
         saveBtn.addEventListener("click", () => {
-            if (!userSettings.reporting || typeof userSettings.reporting !== "object") {
-                userSettings.reporting = {};
-            }
+            // Snapshot pulse settings before change (to detect changes)
+            const prevPulseVisibility = { ...userSettings.pulseVisibility };
 
+            // --- Save pulse settings ---
+            userSettings.pulseVisibility.live       = !!liveCb.cb.checked;
+            userSettings.pulseVisibility.modified   = !!modCb.cb.checked;
+            userSettings.pulseVisibility.retired    = !!retCb.cb.checked;
+            userSettings.pulseVisibility.reinstated = !!reinCb.cb.checked;
+
+            const pulsesChanged =
+                  prevPulseVisibility.live !== userSettings.pulseVisibility.live ||
+                  prevPulseVisibility.modified !== userSettings.pulseVisibility.modified ||
+                  prevPulseVisibility.retired !== userSettings.pulseVisibility.retired ||
+                  prevPulseVisibility.reinstated !== userSettings.pulseVisibility.reinstated;
+
+            // --- Save form fields ---
             userSettings.reporting.name = nameInput.value.trim();
             userSettings.reporting.email = emailInput.value.trim();
-
-            // NEW: save extra settings
+            userSettings.reporting.typeOfLocation = typeOfLocationSelect.value || "";
+            userSettings.reporting.reasonForRemovalRequest = reasonForRemovalSelect.value || "";
             userSettings.reporting.propertyOwner = (propertyOwnerSelect.value === "yes");
-            userSettings.reporting.preferredLanguage = languageSelect.value || defaultPreferredLanguage;
+            userSettings.reporting.preferredLanguage = languageSelect.value || "English";
 
             saveSettings();
+
+            if (pulsesChanged) {
+                // Hide/show pulses according to new settings
+                try { schedulePulseRefresh(0); } catch {}
+            }
+
             closeModal();
         });
 
@@ -1342,13 +1671,8 @@
             return true;
         }
 
-        if (source === 'wfmm-s2' && status !== 'MISSING' && status !== 'MANUAL IMPORT') {
-            // Condition 2: Gym/Pokestop custom marker from s2 plug-in
-            return true;
-        }
-
         if (status === 'LIVE' || status === 'ACCEPTED') {
-            // Condition 3: LIVE/ACCEPTED from any other plug-in, but must match a loaded POI lat,lng
+            // Condition 2: LIVE/ACCEPTED from any other plug-in, but must match a loaded POI lat,lng
             const pois = Array.isArray(livePois) ? livePois : [];
             return pois.some(p => p?.lat === lat && p?.lng === lng);
         }
@@ -1424,43 +1748,53 @@
             ...wayspotData,
             name: reporting.name || null,
             email: reporting.email || null,
+
             propertyOwner: (typeof reporting.propertyOwner === "boolean") ? reporting.propertyOwner : false,
+
             preferredLanguage: (typeof reporting.preferredLanguage === "string" && reporting.preferredLanguage.trim())
             ? reporting.preferredLanguage.trim()
-            : "English"
+            : "English",
+
+            typeOfLocation: (typeof reporting.typeOfLocation === "string" && reporting.typeOfLocation.trim())
+            ? reporting.typeOfLocation.trim()
+            : null,
+
+            reasonForRemovalRequest: (typeof reporting.reasonForRemovalRequest === "string" && reporting.reasonForRemovalRequest.trim())
+            ? reporting.reasonForRemovalRequest.trim()
+            : null,
         };
 
-        const needsAddress =
-              !(basePayload.address &&
-                basePayload.city &&
-                basePayload.state &&
-                basePayload.country &&
-                basePayload.postcode);
-
-        if (needsAddress && basePayload.lat != null && basePayload.lng != null) {
+        if (basePayload.lat != null && basePayload.lng != null) {
             try {
                 const geoResults = await pageReverseGeocode(basePayload.lat, basePayload.lng);
                 const geo = extractBestAddress(geoResults);
 
+                // Address components for the Helpshift form
                 basePayload.address  ||= geo.street1;
                 basePayload.city     ||= geo.city;
                 basePayload.state    ||= geo.state;
                 basePayload.country  ||= geo.country;
                 basePayload.postcode ||= geo.postcode;
 
-                basePayload.rawAddress ||= geo.formatted;
+                // Single address string field for storing in the IDB
+                basePayload.addressString ||= geo.formatted || [geo.street1, geo.city, geo.state, geo.postcode, geo.country]
+                    .filter(Boolean)
+                    .join(", ");
             } catch (e) {
                 console.warn("[Report Wayspot] Reverse geocode failed:", e);
 
-                // Hard fallbacks (mandatory fields)
                 basePayload.address  ||= "Unknown";
                 basePayload.city     ||= "Unknown";
                 basePayload.state    ||= "Unknown";
                 basePayload.country  ||= "Unknown";
                 basePayload.postcode ||= "-";
+
+                basePayload.addressString ||= "Unknown";
             }
         }
 
+        console.log('base payload');
+        console.log(basePayload);
         openHelpshiftWithData(basePayload);
     }
 
@@ -1469,53 +1803,37 @@
         let title = null;
         let lat = null;
         let lng = null;
-        let address = null;
-        let city = null;
-        let state = null;
-        let country = null;
-        let postcode = null;
         let status = null;
+        let description = null;
+        let imageUrl = null;
+        let isCommunityContributed = null;
 
         const bridge = document.getElementById('wfmapmods-poi-bridge');
 
         if (!bridge) {
             console.warn('[Report Wayspot] POI bridge element #wfmapmods-poi-bridge not found.');
         } else {
-            // The other plugin stores a JSON payload in data-payload
-            let payloadAttr = bridge.getAttribute('data-payload');
+            const payloadAttr = bridge.getAttribute('data-payload');
 
             if (payloadAttr) {
-                let jsonStr = payloadAttr;
-
-                // Safety: decode common entities if present
-                jsonStr = jsonStr.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+                const jsonStr = payloadAttr
+                .replace(/&quot;/g, '"')
+                .replace(/&amp;/g, '&');
 
                 try {
                     const payload = JSON.parse(jsonStr);
 
                     if (payload && typeof payload === 'object') {
-                        if (typeof payload.guid === "string") {
-                            guid = payload.guid;
-                        }
-                        if (typeof payload.title === 'string') {
-                            title = payload.title;
-                        }
-                        if (payload.lat !== undefined) {
-                            lat = payload.lat;
-                        }
-                        if (payload.lng !== undefined) {
-                            lng = payload.lng;
-                        }
-
-                        // In case the Wayfarer-side script already added these to the JSON:
-                        if (payload.address) address = payload.address;
-                        if (payload.city) city = payload.city;
-                        if (payload.state) state = payload.state;
-                        if (payload.country) country = payload.country;
-                        if (payload.postcode) postcode = payload.postcode;
-
-                        // NEW: grab status from bridge
+                        if (typeof payload.guid === "string") guid = payload.guid;
+                        if (typeof payload.title === "string") title = payload.title;
+                        if (typeof payload.description === "string") description = payload.description;
+                        if (typeof payload.imageUrl === "string") imageUrl = payload.imageUrl;
                         if (payload.status) status = payload.status;
+                        if (payload.lat !== undefined) lat = payload.lat;
+                        if (payload.lng !== undefined) lng = payload.lng;
+                        if (typeof payload.isCommunityContributed === "boolean") {
+                            isCommunityContributed = payload.isCommunityContributed;
+                        }
                     }
                 } catch (err) {
                     console.warn('[Report Wayspot] Failed to parse data-payload JSON:', err);
@@ -1525,44 +1843,30 @@
             }
         }
 
-        // Normalise lat/lng to numbers if possible
-        let latNum = null;
-        let lngNum = null;
+        const latNum = (typeof lat === "number" && Number.isFinite(lat)) ? lat : null;
+        const lngNum = (typeof lng === "number" && Number.isFinite(lng)) ? lng : null;
 
-        if (lat !== null && lat !== undefined && lat !== '') {
-            const parsedLat = parseFloat(lat);
-            if (!Number.isNaN(parsedLat)) latNum = parsedLat;
-        }
-
-        if (lng !== null && lng !== undefined && lng !== '') {
-            const parsedLng = parseFloat(lng);
-            if (!Number.isNaN(parsedLng)) lngNum = parsedLng;
-        }
-
-        const result = {
-            // profile/contact fields left null (not provided by bridge)
+        return {
             name: null,
             email: null,
             preferredLanguage: null,
 
-            // Address bits
-            address: address || null,
-            city: city || null,
-            state: state || null,
-            country: country || null,
-            postcode: postcode || null,
+            address: null,
+            city: null,
+            state: null,
+            country: null,
+            postcode: null,
+            addressString: null,
 
-            // from POI bridge
-            guid: guid || null,
-            title: title || null,
+            guid,
+            title,
             lat: latNum,
             lng: lngNum,
-
-            // wayspot status from bridge
-            status: status || null
+            description,
+            imageUrl,
+            status,
+            isCommunityContributed,
         };
-
-        return result;
     }
 
     // If you decide to use this later, it now just reuses the same pattern
@@ -1788,6 +2092,2229 @@
     }
 
     // ======================================================================
+    // AddressString backfill (rate-limited reverse geocode)
+    // ======================================================================
+
+    const WFMM_ADDR_BACKFILL = {
+        running: false,
+        abortToken: null,
+    };
+
+    function sleep(ms) {
+        return new Promise(r => setTimeout(r, ms));
+    }
+
+    function isMissingAddressString(rec) {
+        // "doesn't exist at all for the record" + also treat empty/whitespace as missing
+        if (!rec || typeof rec !== "object") return false;
+
+        if (!("addressString" in rec)) return true;
+
+        const v = rec.addressString;
+        if (v == null) return true;
+        if (typeof v !== "string") return true;
+        if (!v.trim()) return true;
+
+        return false;
+    }
+
+    function getCoordsForAddressBackfill(rec) {
+        // Use the "effective" coords: prefer new coords if present
+        const { lat, lng } = getEffectiveCoords(rec);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        return { lat, lng };
+    }
+
+    async function backfillMissingAddressStrings({
+        records,
+        onPatched,          // optional callback per successful patch
+        onDone,             // optional callback once complete
+        delayMs = 5000,
+        timeoutMs = 10000,
+        abortToken,
+    } = {}) {
+        if (!Array.isArray(records) || !records.length) return;
+
+        // Build a stable list of candidates (missing address only)
+        const todo = records.filter(r => isMissingAddressString(r) && r?.id);
+
+        for (const rec of todo) {
+            if (abortToken?.aborted) break;
+
+            // Re-check right before doing work (record might have been patched already)
+            if (!isMissingAddressString(rec)) continue;
+
+            const coords = getCoordsForAddressBackfill(rec);
+            if (!coords) continue;
+
+            try {
+                const results = await pageReverseGeocode(coords.lat, coords.lng, timeoutMs);
+
+                // You already have scoring/parsing; we only need formatted_address
+                const best = extractBestAddress(results);
+                const formatted = (best && typeof best.formatted === "string") ? best.formatted.trim() : "";
+
+                if (formatted) {
+                    // Patch ONLY if still missing right now
+                    if (isMissingAddressString(rec)) {
+                        const ok = await patchReportedWayspotInIDB(rec.id, { addressString: formatted });
+                        if (ok) {
+                            // Update in-memory copies so UI/logic sees it immediately
+                            rec.addressString = formatted;
+                            const cached = WFMM_CACHE.byId.get(rec.id);
+                            if (cached) cached.addressString = formatted;
+
+                            if (typeof onPatched === "function") onPatched(rec.id, formatted);
+                        }
+                    }
+                }
+            } catch (e) {
+                // Don’t fail the whole run; just continue
+                console.warn("[WFMM] address backfill failed for", rec?.id, e);
+            }
+
+            // Rate limit: one every 5 seconds
+            if (abortToken?.aborted) break;
+            await sleep(delayMs);
+        }
+
+        if (typeof onDone === "function") onDone();
+    }
+
+    function startAddressBackfillForModal(ctx) {
+        if (!ctx || !Array.isArray(ctx.allReports)) return;
+
+        // Only run one backfill worker at a time globally
+        if (WFMM_ADDR_BACKFILL.running) return;
+
+        WFMM_ADDR_BACKFILL.running = true;
+        const token = { aborted: false };
+        WFMM_ADDR_BACKFILL.abortToken = token;
+
+        // Optional: you can show progress in console, or update UI after patches
+        backfillMissingAddressStrings({
+            records: ctx.allReports,
+            delayMs: 5000,
+            timeoutMs: 10000,
+            abortToken: token,
+            onPatched: () => {
+                // If addresses impact filtering or display, re-apply filters so it appears.
+                // This is safe but may be a bit “chatty” if many patches; you can debounce if you want.
+                try {
+                    applyFiltersAndRender(ctx);
+                    updateSortIndicators(ctx);
+                } catch {}
+            },
+            onDone: () => {
+                WFMM_ADDR_BACKFILL.running = false;
+                WFMM_ADDR_BACKFILL.abortToken = null;
+            }
+        }).catch((e) => {
+            console.warn("[WFMM] address backfill worker crashed:", e);
+            WFMM_ADDR_BACKFILL.running = false;
+            WFMM_ADDR_BACKFILL.abortToken = null;
+        });
+    }
+
+    function stopAddressBackfill() {
+        const t = WFMM_ADDR_BACKFILL.abortToken;
+        if (t) t.aborted = true;
+        WFMM_ADDR_BACKFILL.abortToken = null;
+        WFMM_ADDR_BACKFILL.running = false;
+    }
+
+    // ======================================================================
+    // Reporting History Modal
+    // ======================================================================
+
+    function openReportingHistoryModal() {
+        // Avoid duplicates
+        if (document.getElementById(REPORT_HISTORY_MODAL_ID)) return;
+
+        openModal({
+            id: REPORT_HISTORY_MODAL_ID,
+            title: "Reporting History",
+            width: 720,
+            showFooterButtons: false,
+            buildContent: (dialog, _okBtn, closeModal) => {
+                const ctx = {
+                    closeModal,
+                    allReports: [],
+                    page: 0,
+                    pageSize: REPORT_HISTORY_PAGE_SIZE,
+                    sortKey: "timestampMs",
+                    sortDir: "desc", // default: most recent first
+                    tableBody: null,
+                    pageInfoEl: null,
+                    prevBtn: null,
+                    nextBtn: null,
+                    loadingWrap: null,
+                    emptyWrap: null,
+                    showTicket: true,
+                    columns: null,
+                    thead: null,
+                    viewReports: [],
+                    filters: {
+                        flag: "all",
+                        status: "all",
+                        title: "",
+                        ticket: "",
+                        address: ""
+                    },
+                    filterEls: null,
+                    openDetailsId: null,
+                };
+
+                WFMM_REPORTING_HISTORY_CTX = ctx;
+
+                // make sure we clear it on close
+                const origClose = closeModal;
+                ctx.closeModal = () => {
+                    try { WFMM_REPORTING_HISTORY_CTX = null; } catch {}
+                    try { stopAddressBackfill(); } catch {}
+                    origClose();
+                };
+
+                // Layout wrapper
+                const wrap = document.createElement("div");
+                wrap.className = "wfmapmods-reporting-wrap";
+
+                // Top controls row: Close button
+                const topRow = document.createElement("div");
+                topRow.className = "wfmapmods-reporting-top-row";
+
+                const hint = document.createElement("div");
+                hint.className = "wfmapmods-reporting-text-sm";
+                hint.textContent = "Click a row to view details. Click 🔍 to fly to that location and update status.";
+                topRow.appendChild(hint);
+
+                wrap.appendChild(topRow);
+
+                // Loading state
+                const loadingWrap = document.createElement("div");
+                loadingWrap.className = "wfmapmods-reporting-loading-wrap";
+
+                const spinner = document.createElement("div");
+                spinner.className = "wfmapmods-reporting-spinner";
+                loadingWrap.appendChild(spinner);
+
+                const loadingText = document.createElement("div");
+                loadingText.className = "wfmapmods-reporting-text-sm";
+                loadingText.textContent = "Loading report history…";
+                loadingWrap.appendChild(loadingText);
+
+                ctx.loadingWrap = loadingWrap;
+                wrap.appendChild(loadingWrap);
+
+                // Empty state
+                const emptyWrap = document.createElement("div");
+                emptyWrap.className = "wfmapmods-reporting-empty-wrap wfmapmods-reporting-text-sm";
+                emptyWrap.textContent = "No reports found.";
+                ctx.emptyWrap = emptyWrap;
+                wrap.appendChild(emptyWrap);
+
+                // Filters row (above table)
+                wrap.appendChild(buildFiltersRow(ctx));
+
+                // Table
+                const table = document.createElement("table");
+                table.className = "wfmapmods-reporting-table";
+                ctx.tableEl = table;
+
+                const thead = document.createElement("thead");
+                ctx.thead = thead;
+                table.appendChild(thead);
+
+                const tbody = document.createElement("tbody");
+                ctx.tableBody = tbody;
+                table.appendChild(tbody);
+
+                wrap.appendChild(table);
+
+                // Pager row
+                const pager = document.createElement("div");
+                pager.className = "wfmapmods-reporting-pager";
+
+                const left = document.createElement("div");
+                left.className = "wfmapmods-reporting-pager-left";
+
+                const prevBtn = document.createElement("button");
+                prevBtn.type = "button";
+                prevBtn.className = "wfmapmods-reporting-btn";
+                prevBtn.textContent = "Previous";
+                prevBtn.addEventListener("click", () => {
+                    if (ctx.page <= 0) return;
+                    ctx.page--;
+                    renderReportingHistory(ctx);
+                });
+
+                const nextBtn = document.createElement("button");
+                nextBtn.type = "button";
+                nextBtn.className = "wfmapmods-reporting-btn";
+                nextBtn.textContent = "Next";
+                nextBtn.addEventListener("click", () => {
+                    const totalPages = getTotalPages((ctx.viewReports || []).length, ctx.pageSize);
+                    if (ctx.page + 1 >= totalPages) return;
+                    ctx.page++;
+                    renderReportingHistory(ctx);
+                });
+
+                ctx.prevBtn = prevBtn;
+                ctx.nextBtn = nextBtn;
+
+                left.appendChild(prevBtn);
+                left.appendChild(nextBtn);
+
+                const pageInfo = document.createElement("div");
+                pageInfo.className = "wfmapmods-reporting-text-sm";
+                ctx.pageInfoEl = pageInfo;
+
+                const center = document.createElement("div");
+                center.className = "wfmapmods-reporting-pager-center";
+                center.appendChild(pageInfo);
+
+                const right = document.createElement("div");
+                right.className = "wfmapmods-reporting-pager-right";
+
+                const exportBtn = document.createElement("button");
+                exportBtn.type = "button";
+                exportBtn.className = "wfmapmods-reporting-btn";
+                exportBtn.textContent = "Export 0 Reports to CSV";
+                exportBtn.addEventListener("click", () => exportReportsToCsv(ctx));
+
+                ctx.exportBtn = exportBtn; // keep your existing update logic
+                right.appendChild(exportBtn);
+
+                pager.appendChild(left);
+                pager.appendChild(center);
+                pager.appendChild(right);
+
+                wrap.appendChild(pager);
+
+
+                dialog.appendChild(wrap);
+
+                // Async load
+                loadAllReportedWayspotsFromIDB()
+                    .then((reports) => {
+                    ctx.allReports = (Array.isArray(reports) ? reports : []).map(normalizeReportRecord);
+
+                    // Decide whether to show Ticket column:
+                    // show only if ANY record has a non-empty ticket string
+                    ctx.showTicket = ctx.allReports.some(r => typeof r?.ticket === "string" && r.ticket.trim().length > 0);
+
+                    // Build columns + header now that we know showTicket
+                    buildReportingHistoryColumns(ctx);
+                    buildReportingHistoryHeader(ctx);
+
+                    // Hide loading
+                    if (ctx.loadingWrap) ctx.loadingWrap.style.display = "none";
+
+                    // Empty state check uses *allReports* (raw data)
+                    if (!ctx.allReports.length) {
+                        if (ctx.emptyWrap) ctx.emptyWrap.style.display = "";
+                        ctx.viewReports = [];
+                        renderReportingHistory(ctx);
+                        return;
+                    }
+
+                    // Not empty → hide empty message and render filtered/sorted view
+                    if (ctx.emptyWrap) ctx.emptyWrap.style.display = "none";
+                    applyFiltersAndRender(ctx);
+
+                    // Kick off background backfill for missing addressString (1 every 5 seconds)
+                    startAddressBackfillForModal(ctx);
+                })
+                    .catch((err) => {
+                    console.warn("[Base] Failed to load reporting history:", err);
+                    if (ctx.loadingWrap) ctx.loadingWrap.style.display = "none";
+                    if (ctx.emptyWrap) {
+                        ctx.emptyWrap.textContent = "Could not load report history (see console).";
+                        ctx.emptyWrap.style.display = "";
+                    }
+                });
+
+                return ctx;
+            },
+        });
+    }
+
+    // ======================================================================
+    // Modal Framework
+    // ======================================================================
+
+    function openModal({ id, title, buildContent, onOk, width, showFooterButtons }) {
+        if (document.getElementById(id)) return;
+
+        const backdrop = document.createElement("div");
+        backdrop.id = id;
+        backdrop.className = "wfmapmods-reporting-backdrop";
+
+        const dialog = document.createElement("div");
+        dialog.className = "wfmapmods-reporting-dialog wfmapmods-reporting-dialog--flex";
+
+        if (typeof width === "number") {
+            dialog.style.width = width + "px";
+            dialog.style.maxWidth = "min(96vw," + width + "px)";
+        }
+
+        const header = document.createElement("div");
+        header.className = "wfmapmods-reporting-title";
+        header.textContent = title || "";
+        dialog.appendChild(header);
+
+        let okBtn = null;
+        let cancelBtn = null;
+        let ctx = null;
+        let closed = false;
+
+        function closeModal() {
+            if (closed) return;
+            closed = true;
+            document.removeEventListener("keydown", escHandler);
+            backdrop.remove();
+            ctx = null;
+        }
+
+        function escHandler(ev) {
+            if (ev.key === "Escape") {
+                ev.stopPropagation();
+                closeModal();
+            }
+        }
+
+        let footer = null;
+        if (showFooterButtons !== false) {
+            footer = document.createElement("div");
+            footer.className = "wfmapmods-reporting-footer";
+
+            cancelBtn = document.createElement("button");
+            cancelBtn.type = "button";
+            cancelBtn.textContent = "Cancel";
+            cancelBtn.className = "wfmapmods-reporting-btn";
+
+            okBtn = document.createElement("button");
+            okBtn.type = "button";
+            okBtn.textContent = "OK";
+            okBtn.className = "wfmapmods-reporting-btn wfmapmods-reporting-btn-primary";
+
+            cancelBtn.addEventListener("click", closeModal);
+            okBtn.addEventListener("click", () => {
+                if (onOk) onOk(ctx, closeModal);
+            });
+
+            footer.appendChild(cancelBtn);
+            footer.appendChild(okBtn);
+        }
+
+        // Let caller build the content
+        ctx = buildContent ? buildContent(dialog, okBtn, closeModal) : null;
+
+        if (footer) dialog.appendChild(footer);
+
+        // Backdrop click close (simple + safe)
+        backdrop.addEventListener("pointerdown", (ev) => {
+            if (ev.target === backdrop) backdrop.__wfmmDown = true;
+        });
+        backdrop.addEventListener("pointerup", (ev) => {
+            if (backdrop.__wfmmDown && ev.target === backdrop) closeModal();
+            backdrop.__wfmmDown = false;
+        });
+        backdrop.addEventListener("pointercancel", () => {
+            backdrop.__wfmmDown = false;
+        });
+
+        document.addEventListener("keydown", escHandler);
+
+        backdrop.appendChild(dialog);
+        document.body.appendChild(backdrop);
+
+        return { closeModal };
+    }
+
+    // ======================================================================
+    // Reporting History UI Builders
+    // ======================================================================
+
+    function buildReportingHistoryColumns(ctx) {
+        ctx.columns = [
+            { key: "flagged", label: "★", align: "center", width: "45px", minWidth: 45 },
+            { key: "title", label: "Title", align: "left", width: "53%" },
+            { key: "timestampMs", label: "Reported", align: "left", width: "18%" },
+            { key: "lastKnownStatus", label: "Status", align: "left", width: "14%" },
+            { key: "__go", label: "", align: "center", width: "8%", noSort: true },
+        ];
+    }
+
+    function buildReportingHistoryHeader(ctx) {
+        const thead = ctx?.thead;
+        const columns = ctx?.columns;
+        if (!thead || !Array.isArray(columns)) return;
+
+        thead.innerHTML = "";
+        const headRow = document.createElement("tr");
+
+        for (const col of columns) {
+            const th = document.createElement("th");
+            th.textContent = col.label;
+            th.className = "wfmapmods-reporting-th" + (!col.noSort ? " wfmapmods-reporting-th--sortable" : "");
+
+            th.style.width = col.width;
+            if (col.minWidth) th.style.minWidth = col.minWidth + "px";
+            th.style.textAlign = col.align;
+
+            if (!col.noSort) {
+                th.style.cursor = "pointer";
+                th.title = "Sort";
+
+                th.addEventListener("click", () => {
+                    if (ctx.sortKey === col.key) {
+                        ctx.sortDir = (ctx.sortDir === "asc") ? "desc" : "asc";
+                    } else {
+                        ctx.sortKey = col.key;
+                        // reasonable defaults per column
+                        if (col.key === "timestampMs") ctx.sortDir = "desc";
+                        else if (col.key === "flagged") ctx.sortDir = "desc"; // flagged first
+                        else if (col.key === "lastKnownStatus") ctx.sortDir = "asc"; // Live→Moved→Retired
+                        else ctx.sortDir = "asc";
+                    }
+
+                    ctx.page = 0;
+                    ctx.openDetailsId = null; // collapse on sort to avoid weirdness
+                    applyFiltersAndRender(ctx);
+                    updateSortIndicators(ctx);
+                });
+            }
+
+            headRow.appendChild(th);
+        }
+
+        thead.appendChild(headRow);
+        updateSortIndicators(ctx);
+    }
+
+    function updateSortIndicators(ctx) {
+        const thead = ctx?.thead;
+        const columns = ctx?.columns;
+        if (!thead || !Array.isArray(columns)) return;
+
+        const ths = [...thead.querySelectorAll("th")];
+
+        for (let i = 0; i < ths.length; i++) {
+            const th = ths[i];
+            const col = columns[i];
+            if (!col) continue;
+
+            th.textContent = col.label;
+
+            if (!col.noSort && col.key === ctx.sortKey) {
+                th.textContent = col.label + (ctx.sortDir === "asc" ? " ▲" : " ▼");
+            }
+        }
+    }
+
+    function buildFiltersRow(ctx) {
+        const row = document.createElement("div");
+        row.className = "wfmapmods-reporting-filters";
+
+        const mkLabel = (txt) => {
+            const l = document.createElement("span");
+            l.textContent = txt;
+            l.className = "wfmapmods-reporting-label";
+            return l;
+        };
+
+        const starLabel = mkLabel("Star:");
+        const flagSel = document.createElement("select");
+        flagSel.className = "wfmapmods-reporting-btn wfmapmods-reporting-select";
+        for (const [val, lab] of [["all", "All"], ["on", "Starred"], ["off", "Not starred"]]) {
+            const o = document.createElement("option");
+            o.value = val;
+            o.textContent = lab;
+            flagSel.appendChild(o);
+        }
+
+        const statusLabel = mkLabel("Status:");
+        const statusSel = document.createElement("select");
+        statusSel.className = "wfmapmods-reporting-btn wfmapmods-reporting-select";
+        for (const [val, lab] of [["all", "All"], ["Live", "Live"], ["Moved", "Moved"], ["Retired", "Retired"]]) {
+            const o = document.createElement("option");
+            o.value = val;
+            o.textContent = lab;
+            statusSel.appendChild(o);
+        }
+
+        const titleLabel = mkLabel("Title:");
+        const titleInput = document.createElement("input");
+        titleInput.type = "text";
+        titleInput.placeholder = "contains…";
+        titleInput.className = "wfmapmods-reporting-input";
+
+        const ticketLabel = mkLabel("Ticket Number:");
+        const ticketInput = document.createElement("input");
+        ticketInput.type = "text";
+        ticketInput.placeholder = "contains…";
+        ticketInput.className = "wfmapmods-reporting-input wfmapmods-reporting-input--ticket";
+
+        const addressLabel = mkLabel("Address:");
+        const addressInput = document.createElement("input");
+        addressInput.type = "text";
+        addressInput.placeholder = "contains…";
+        addressInput.className = "wfmapmods-reporting-input";
+
+        const clearBtn = document.createElement("button");
+        clearBtn.type = "button";
+        clearBtn.className = "wfmapmods-reporting-btn";
+        clearBtn.textContent = "Clear filters";
+
+        const apply = () => {
+            ctx.filters.flag = flagSel.value;
+            ctx.filters.status = statusSel.value;
+            ctx.filters.title = titleInput.value || "";
+            ctx.filters.ticket = ticketInput.value || "";
+            ctx.filters.address = addressInput.value || "";
+            ctx.page = 0;
+            ctx.openDetailsId = null;
+            applyFiltersAndRender(ctx);
+            updateSortIndicators(ctx);
+        };
+
+        flagSel.addEventListener("change", apply);
+        statusSel.addEventListener("change", apply);
+
+        let t = null;
+        titleInput.addEventListener("input", () => {
+            clearTimeout(t);
+            t = setTimeout(apply, 150);
+        });
+
+        clearBtn.addEventListener("click", () => {
+            flagSel.value = "all";
+            statusSel.value = "all";
+            titleInput.value = "";
+            ticketInput.value = "";
+            addressInput.value = "";
+            apply();
+        });
+
+        ticketInput.addEventListener("input", () => {
+            clearTimeout(t);
+            t = setTimeout(apply, 150);
+        });
+
+        addressInput.addEventListener("input", () => {
+            clearTimeout(t);
+            t = setTimeout(apply, 150);
+        });
+
+
+        row.appendChild(starLabel);
+        row.appendChild(flagSel);
+
+        row.appendChild(titleLabel);
+        row.appendChild(titleInput);
+
+        row.appendChild(statusLabel);
+        row.appendChild(statusSel);
+
+        const fullRowBreak = () => {
+            const br = document.createElement("div");
+            br.className = "wfmapmods-reporting-row-break";
+            return br;
+        };
+
+        row.appendChild(fullRowBreak());
+
+        row.appendChild(ticketLabel);
+        row.appendChild(ticketInput);
+
+        row.appendChild(addressLabel);
+        row.appendChild(addressInput);
+
+        const spacer = document.createElement("div");
+        spacer.className = "wfmapmods-reporting-filters-spacer";
+        row.appendChild(spacer);
+
+        row.appendChild(clearBtn);
+
+        ctx.filterEls = { flagSel, statusSel, titleInput, clearBtn };
+        return row;
+    }
+
+    function buildDetailsBlock(rec) {
+        const wrap = document.createElement("div");
+        wrap.className = "wfmapmods-reporting-details";
+
+        // Row container: image (left) + details (right)
+        const row = document.createElement("div");
+        row.className = "wfmapmods-reporting-details-row";
+
+        // LEFT: Image (optional)
+        if (rec.imageUrl) {
+            const imgWrap = document.createElement("div");
+            imgWrap.className = "wfmapmods-reporting-details-imgwrap";
+
+            const link = document.createElement("a");
+            link.href = rec.imageUrl + "=s0";
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+
+            const img = document.createElement("img");
+            img.src = rec.imageUrl + "=s120-c";
+            img.className = "wfmapmods-reporting-details-img";
+
+            link.appendChild(img);
+            imgWrap.appendChild(link);
+            row.appendChild(imgWrap);
+        }
+
+        // RIGHT: Details grid
+        const detailsCol = document.createElement("div");
+        detailsCol.className = "wfmapmods-reporting-details-col";
+
+        const grid = document.createElement("div");
+        grid.className = "wfmapmods-reporting-details-grid";
+
+        const addRow = (label, value) => {
+            if (value == null || value === "") return;
+
+            const k = document.createElement("div");
+            k.textContent = label;
+            k.className = "wfmapmods-reporting-details-k";
+
+            const v = document.createElement("div");
+            v.textContent = value;
+            v.className = "wfmapmods-reporting-details-v";
+
+            grid.appendChild(k);
+            grid.appendChild(v);
+        };
+
+        // Row order
+        addRow("Ticket", rec.ticket);
+        addRow("New Title", rec.title_new);
+        addRow("Description", rec.description);
+        addRow("New Description", rec.description_new);
+
+        const coords =
+              (typeof rec.lat === "number" && typeof rec.lng === "number")
+        ? `${rec.lat.toFixed(6)}, ${rec.lng.toFixed(6)}`
+        : null;
+        addRow("Coordinates", coords);
+
+        if (typeof rec.lat_new === "number" && typeof rec.lng_new === "number") {
+            addRow("New Coordinates", `${rec.lat_new.toFixed(6)}, ${rec.lng_new.toFixed(6)}`);
+        }
+
+        addRow("Address", rec.addressString);
+        addRow("Removal Reason", rec.removalReasonText);
+        addRow("Supporting Text", rec.supportingText);
+
+        const mechanismLabel =
+              rec.reportMechanism === "wayfarer-map"
+        ? "Wayfarer Map"
+        : rec.reportMechanism === "pgo-locations-web"
+        ? "Web Form"
+        : rec.reportMechanism;
+
+        addRow("Report Mechanism", mechanismLabel);
+
+        // Last Seen (fallback to timestampMs)
+        const lastSeenMs =
+              (typeof rec.lastSeenMs === "number" && Number.isFinite(rec.lastSeenMs))
+        ? rec.lastSeenMs
+        : ((typeof rec.timestampMs === "number" && Number.isFinite(rec.timestampMs))
+           ? rec.timestampMs
+           : null);
+
+        addRow("Last Seen", lastSeenMs != null ? formatDateTime(lastSeenMs) : null);
+
+        // First Noticed Missing (only if exists)
+        if (typeof rec.firstNoticedMissingMs === "number" && Number.isFinite(rec.firstNoticedMissingMs)) {
+            addRow("First Noticed Missing", formatDateTime(rec.firstNoticedMissingMs));
+        }
+
+        detailsCol.appendChild(grid);
+        row.appendChild(detailsCol);
+        wrap.appendChild(row);
+
+        return wrap;
+    }
+
+    function closeOpenDetailsRow(ctx, tbody) {
+        if (!ctx?.openDetailsId || !tbody) return;
+
+        const id = ctx.openDetailsId;
+
+        const main = tbody.querySelector(
+            `tr.wfmm-reporting-main-row[data-rec-id="${cssEscape(id)}"]`
+        );
+        const details = tbody.querySelector(
+            `tr.${WFMM_DETAILS_ROW_CLASS}[data-rec-id="${cssEscape(id)}"]`
+        );
+
+        if (details) details.style.display = "none";
+        if (main) {
+            main.classList.remove("wfmm-expanded");
+            if (main.__wfmmExpBtn) main.__wfmmExpBtn.textContent = "▸";
+        }
+
+        ctx.openDetailsId = null;
+    }
+
+    // ======================================================================
+    // Reporting History Rendering & Actions
+    // ======================================================================
+
+    function applyFiltersAndRender(ctx) {
+        const all = Array.isArray(ctx.allReports) ? ctx.allReports : [];
+        const f = ctx.filters || { flag: "all", status: "all", title: "" };
+
+        const titleNeedle = (f.title || "").trim().toLowerCase();
+        const ticketNeedle = (f.ticket || "").trim().toLowerCase();
+        const addressNeedle = (f.address || "").trim().toLowerCase();
+
+        let out = all.filter(rec => {
+            if (!rec || typeof rec !== "object") return false;
+
+            // flag filter
+            if (f.flag === "on" && !rec.flagged) return false;
+            if (f.flag === "off" && rec.flagged) return false;
+
+            // status filter
+            if (f.status && f.status !== "all") {
+                const s = (rec.lastKnownStatus || "Live");
+                if (s !== f.status) return false;
+            }
+
+            // title contains filter
+            if (titleNeedle) {
+                const t = (typeof rec.title === "string" ? rec.title : "").toLowerCase();
+                if (!t.includes(titleNeedle)) return false;
+            }
+
+            // ticket filter
+            if (ticketNeedle) {
+                const t = (typeof rec.ticket === "string" ? rec.ticket : "").toLowerCase();
+                if (!t.includes(ticketNeedle)) return false;
+            }
+
+            // address filter
+            if (addressNeedle) {
+                const a = (typeof rec.addressString === "string" ? rec.addressString : "").toLowerCase();
+                if (!a.includes(addressNeedle)) return false;
+            }
+
+            return true;
+        });
+
+        // sort filtered view
+        sortReportsInPlace(out, ctx.sortKey, ctx.sortDir);
+
+        ctx.viewReports = out;
+
+        // clamp page
+        const totalPages = getTotalPages(out.length, ctx.pageSize);
+        if (ctx.page >= totalPages) ctx.page = Math.max(0, totalPages - 1);
+
+        renderReportingHistory(ctx);
+
+        if (ctx.exportBtn) {
+            ctx.exportBtn.textContent = `Export to CSV`;
+        }
+    }
+
+    function renderReportingHistory(ctx) {
+        const tbody = ctx?.tableBody;
+        if (!tbody) return;
+
+        tbody.innerHTML = "";
+
+        const list = Array.isArray(ctx.viewReports) ? ctx.viewReports : [];
+
+        const total = list.length;
+        const totalPages = getTotalPages(total, ctx.pageSize);
+        const page = Math.min(Math.max(0, ctx.page), Math.max(0, totalPages - 1));
+        ctx.page = page;
+
+        const start = page * ctx.pageSize;
+        const end = Math.min(total, start + ctx.pageSize);
+        const slice = list.slice(start, end);
+
+        // helper: detect selection (Range means user highlighted text)
+        const hasTextSelection = () => {
+            try {
+                const sel = window.getSelection?.();
+                return !!(sel && sel.type === "Range" && String(sel).trim().length > 0);
+            } catch {
+                return false;
+            }
+        };
+
+        for (const rec of slice) {
+            const recId = rec?.id || "";
+            const title = (typeof rec?.title === "string" && rec.title.trim()) ? rec.title.trim() : "(untitled)";
+            const lat = (typeof rec?.lat === "number" && Number.isFinite(rec.lat)) ? rec.lat : null;
+            const lng = (typeof rec?.lng === "number" && Number.isFinite(rec.lng)) ? rec.lng : null;
+
+            const coords = (lat !== null && lng !== null) ? `${lat.toFixed(6)},${lng.toFixed(6)}` : "—";
+            const ticket = (typeof rec?.ticket === "string" && rec.ticket.trim()) ? rec.ticket.trim() : null;
+            const reason = (typeof rec?.removalReasonText === "string" && rec.removalReasonText.trim()) ? rec.removalReasonText.trim() : "—";
+            const supportingRaw = (typeof rec?.supportingText === "string") ? rec.supportingText.trim() : "";
+            const supporting = supportingRaw ? supportingRaw : null;
+
+            const reportDate = (typeof rec?.timestampMs === "number" && Number.isFinite(rec.timestampMs))
+            ? formatDateOnly(rec.timestampMs)
+            : "—";
+
+            const status = (typeof rec?.lastKnownStatus === "string" && rec.lastKnownStatus)
+            ? rec.lastKnownStatus
+            : "Live";
+
+            const lastSeenMs = (typeof rec?.lastSeenMs === "number" && Number.isFinite(rec.lastSeenMs))
+            ? rec.lastSeenMs
+            : (typeof rec?.timestampMs === "number" && Number.isFinite(rec.timestampMs) ? rec.timestampMs : null);
+
+            // MAIN ROW
+            const trMain = document.createElement("tr");
+            trMain.className = "wfmm-reporting-main-row wfmapmods-reporting-row-main";
+            trMain.dataset.recId = recId;
+
+            // drag detection (for click vs drag-select)
+            let down = null;
+            const DRAG_PX = 6;
+
+            trMain.addEventListener("pointerdown", (ev) => {
+                // only left click / primary pointer
+                if (ev.button !== 0) return;
+                down = { x: ev.clientX, y: ev.clientY, dragged: false };
+            });
+
+            trMain.addEventListener("pointermove", (ev) => {
+                if (!down) return;
+                const dx = ev.clientX - down.x;
+                const dy = ev.clientY - down.y;
+                if (Math.hypot(dx, dy) >= DRAG_PX) down.dragged = true;
+            });
+
+            trMain.addEventListener("pointerup", () => {
+                // keep down until click handler runs
+                // (we'll clear it there)
+            });
+
+            const toggleDetailsForThisRow = () => {
+                if (!recId) return;
+
+                // do not toggle if user is selecting text
+                if (hasTextSelection()) return;
+
+                // do not toggle if this was a drag
+                if (down?.dragged) return;
+
+                // close other open row first
+                if (ctx.openDetailsId && ctx.openDetailsId !== recId) {
+                    closeOpenDetailsRow(ctx, tbody);
+                }
+
+                const isOpen = (ctx.openDetailsId === recId) && (trDetails.style.display !== "none");
+
+                if (isOpen) {
+                    trDetails.style.display = "none";
+                    trMain.classList.remove("wfmm-expanded");
+                    if (trMain.__wfmmExpBtn) trMain.__wfmmExpBtn.textContent = "▸";
+                    ctx.openDetailsId = null;
+                } else {
+                    trDetails.style.display = "";
+                    trMain.classList.add("wfmm-expanded");
+                    if (trMain.__wfmmExpBtn) trMain.__wfmmExpBtn.textContent = "▾";
+                    ctx.openDetailsId = recId;
+                }
+            };
+
+            // 1) Star (bigger)
+            {
+                const tdFlag = document.createElement("td");
+                tdFlag.className =
+                    "wfmapmods-reporting-cell wfmapmods-reporting-align-center " +
+                    "wfmapmods-reporting-cell--no-ellipsis wfmapmods-reporting-cell-flag";
+
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "wfmapmods-reporting-btn wfmapmods-reporting-btn--star";
+
+                const setStar = (flagged) => {
+                    btn.textContent = flagged ? "★" : "☆";
+                    btn.title = flagged ? "Unstar" : "Star";
+                };
+                setStar(!!rec.flagged);
+
+                btn.addEventListener("click", async (ev) => {
+                    ev.stopPropagation();
+
+                    const next = !rec.flagged;
+                    rec.flagged = next;
+                    setStar(next);
+
+                    const ok = await patchReportedWayspotInIDB(rec.id, { flagged: next });
+                    if (!ok) {
+                        rec.flagged = !next;
+                        setStar(rec.flagged);
+                        return;
+                    }
+
+                    // IMPORTANT: avoid sudden reordering when sorted by stars.
+                    // Only re-apply filters if the current filter would change membership.
+                    const flagFilter = ctx.filters?.flag || "all";
+                    const mustReFilter =
+                          (flagFilter === "on" && !next) ||   // user unstarred, but filter wants starred-only
+                          (flagFilter === "off" && next);     // user starred, but filter wants unstarred-only
+
+                    if (mustReFilter) {
+                        ctx.page = 0;
+                        ctx.openDetailsId = null;
+                        applyFiltersAndRender(ctx);
+                        updateSortIndicators(ctx);
+                    }
+                    // else: do nothing (no resort, no rerender) -> row stays put
+                });
+
+                tdFlag.appendChild(btn);
+                trMain.appendChild(tdFlag);
+            }
+
+            // 2) Title (row click expands; title stays selectable)
+            {
+                const tdTitle = document.createElement("td");
+                tdTitle.className = "wfmapmods-reporting-cell wfmapmods-reporting-align-left";
+
+                const titleSpan = document.createElement("span");
+                titleSpan.textContent = title;
+                titleSpan.className = "wfmapmods-reporting-title-selectable";
+
+                tdTitle.appendChild(titleSpan);
+                trMain.appendChild(tdTitle);
+            }
+
+            // 3) Report date
+            trMain.appendChild(td(reportDate, "left"));
+
+            // 4) Status (sortable key: lastKnownStatus)
+            {
+                const tdStatus = td(status, "left");
+                if (lastSeenMs) tdStatus.title = "Last seen: " + formatDateTime(lastSeenMs);
+                trMain.appendChild(tdStatus);
+            }
+
+            // 5) Magnifier (no toggle)
+            {
+                const tdGo = document.createElement("td");
+                tdGo.className =
+                    "wfmapmods-reporting-cell wfmapmods-reporting-align-center wfmapmods-reporting-cell--no-ellipsis";
+
+                const goBtn = document.createElement("button");
+                goBtn.type = "button";
+                goBtn.className = "wfmapmods-reporting-btn wfmapmods-reporting-btn--go";
+                goBtn.title = "Go to location";
+                goBtn.innerHTML = magnifierSvg(14);
+
+                const canGo = (lat !== null && lng !== null && typeof google !== "undefined" && google?.maps);
+                if (!canGo) {
+                    goBtn.disabled = true;
+                    goBtn.title = "Map not ready / missing coordinates";
+                } else {
+                    goBtn.addEventListener("click", (ev) => {
+                        ev.stopPropagation();
+                        try {
+                            const ll = new google.maps.LatLng(lat, lng);
+                            flyToLatLngAndPlaceSubmission(ll);
+                        } catch (e) {
+                        } finally {
+                            // Don't close the modal
+                            // if (typeof ctx.closeModal === "function") ctx.closeModal();
+                        }
+                    });
+                }
+
+                tdGo.appendChild(goBtn);
+                trMain.appendChild(tdGo);
+            }
+
+            // Row click toggles details (but not on drag-select or text selection)
+            trMain.addEventListener("click", () => {
+                try { down = down || { dragged: false }; } catch {}
+                toggleDetailsForThisRow();
+                down = null;
+            });
+
+            // DETAILS ROW
+            const trDetails = document.createElement("tr");
+            trDetails.className = WFMM_DETAILS_ROW_CLASS;
+            trDetails.dataset.recId = recId;
+            trDetails.style.display = "none";
+
+            // allow copying in details without closing
+            trDetails.addEventListener("click", (ev) => ev.stopPropagation());
+
+            const tdDetails = document.createElement("td");
+            tdDetails.colSpan = Array.isArray(ctx.columns) ? ctx.columns.length : 6;
+            tdDetails.className = "wfmapmods-reporting-details-cell";
+
+            tdDetails.appendChild(buildDetailsBlock(rec));
+            trDetails.appendChild(tdDetails);
+
+            // restore open state if needed
+            if (ctx.openDetailsId && ctx.openDetailsId === recId) {
+                trDetails.style.display = "";
+                trMain.classList.add("wfmm-expanded");
+                if (trMain.__wfmmExpBtn) trMain.__wfmmExpBtn.textContent = "▾";
+            }
+
+            tbody.appendChild(trMain);
+            tbody.appendChild(trDetails);
+        }
+
+        // If open row not on this page anymore, clear it
+        if (ctx.openDetailsId && !slice.some(r => r?.id === ctx.openDetailsId)) {
+            ctx.openDetailsId = null;
+        }
+
+        // Pager state
+        if (ctx.pageInfoEl) {
+            if (total === 0) ctx.pageInfoEl.textContent = "0 reports";
+            else ctx.pageInfoEl.textContent = `${start + 1}-${end} of ${total} (page ${page + 1}/${Math.max(1, totalPages)})`;
+        }
+
+        if (ctx.prevBtn) ctx.prevBtn.disabled = (page <= 0);
+        if (ctx.nextBtn) ctx.nextBtn.disabled = (page + 1 >= totalPages);
+    }
+
+    function applyPatchToReportingHistoryModal(id, patch) {
+        const ctx = WFMM_REPORTING_HISTORY_CTX;
+        if (!ctx || !id || !patch) return;
+
+        // Update master list
+        const a = Array.isArray(ctx.allReports) ? ctx.allReports : [];
+        const r1 = a.find(x => x && x.id === id);
+        if (r1) Object.assign(r1, patch);
+
+        // Update current view list (IMPORTANT: don't rebuild viewReports via filters)
+        const v = Array.isArray(ctx.viewReports) ? ctx.viewReports : [];
+        const r2 = v.find(x => x && x.id === id);
+        if (r2 && r2 !== r1) Object.assign(r2, patch);
+
+        // Debounced repaint of the current page only
+        if (ctx.__wfmmLiveTimer) return;
+        ctx.__wfmmLiveTimer = setTimeout(() => {
+            ctx.__wfmmLiveTimer = null;
+            try { renderReportingHistory(ctx); } catch {}
+        }, 50);
+    }
+
+    function exportReportsToCsv(ctx) {
+        const rows = Array.isArray(ctx.viewReports) ? ctx.viewReports : [];
+        if (!rows.length) {
+            alert("No reports to export.");
+            return;
+        }
+
+        // Sort most recent -> oldest by timestampMs
+        const sorted = [...rows].sort((a, b) => (b?.timestampMs ?? 0) - (a?.timestampMs ?? 0));
+
+        // CSV escape helper
+        const esc = (v) => {
+            if (v === null || v === undefined) return "";
+            const s = String(v);
+            if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+            return s;
+        };
+
+        // ms -> YYYY-MM-DD (UTC). If you prefer local time, change toLocalDate below.
+        const toYMD = (ms) => {
+            if (ms === null || ms === undefined || ms === "") return "";
+            const n = Number(ms);
+            if (!Number.isFinite(n)) return "";
+            return new Date(n).toISOString().slice(0, 10);
+        };
+
+        const mapLink = (lat, lng) => {
+            if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return "";
+            // Note: you asked for ?${lat},${lng} (no param name). Keeping exactly that:
+            return `https://wayfarer.nianticlabs.com/new/mapview?${lat},${lng}`;
+        };
+
+        // Define EXACT columns and order
+        const columns = [
+            { header: "Date",                 value: (r) => toYMD(r.timestampMs) },
+            { header: "Ticket",               value: (r) => r.ticket },
+            { header: "Guid",                 value: (r) => r.guid },
+            { header: "Title",                value: (r) => r.title },
+            { header: "Description",          value: (r) => r.description },
+            { header: "Lat",                  value: (r) => r.lat },
+            { header: "Lng",                  value: (r) => r.lng },
+            { header: "Map link",             value: (r) => mapLink(r.lat, r.lng) },
+            { header: "Image URL",            value: (r) => r.imageUrl },
+            { header: "Removal reason",       value: (r) => r.removalReasonText },
+            { header: "Supporting text",      value: (r) => r.supportingText },
+            { header: "Report mechanism",     value: (r) => r.reportMechanism },
+            { header: "Last known status",    value: (r) => r.lastKnownStatus },
+            {
+                header: "Last Seen",
+                value: (r) => toYMD(r.lastSeenMs ?? r.timestampMs),
+            },
+            {
+                header: "First noticed missing",
+                value: (r) => toYMD(r.firstNoticedMissingMs),
+            },
+            { header: "flagged",              value: (r) => r.flagged },
+        ];
+
+        const headers = columns.map(c => c.header);
+
+        const lines = [];
+        lines.push(headers.map(esc).join(","));
+
+        for (const rec of sorted) {
+            lines.push(columns.map(c => esc(c.value(rec))).join(","));
+        }
+
+        const csv = "\uFEFF" + lines.join("\n"); // UTF-8 BOM for Excel
+
+        // Download
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        a.href = url;
+
+        const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+        a.download = `wfmapmods-report-history-${ts}.csv`;
+
+        document.body.appendChild(a);
+        a.click();
+
+        setTimeout(() => {
+            URL.revokeObjectURL(url);
+            a.remove();
+        }, 0);
+    }
+
+    // ======================================================================
+    // Reporting History Data & Sorting
+    // ======================================================================
+
+    function normalizeReportRecord(r) {
+        if (!r || typeof r !== "object") return r;
+
+        if (typeof r.flagged !== "boolean") r.flagged = false;
+
+        if (typeof r.lastKnownStatus !== "string" || !r.lastKnownStatus) {
+            r.lastKnownStatus = "Live";
+        }
+
+        if (typeof r.lastSeenMs !== "number" || !Number.isFinite(r.lastSeenMs)) {
+            r.lastSeenMs = (typeof r.timestampMs === "number" && Number.isFinite(r.timestampMs))
+                ? r.timestampMs
+            : Date.now();
+        }
+
+        return r;
+    }
+
+    /**
+     * Sorts the FULL array in-place (not just the current page).
+     * sortKey: "flagged" | "title" | "timestampMs" | "lastKnownStatus"
+     * sortDir: "asc" | "desc"
+     */
+    function sortReportsInPlace(arr, sortKey, sortDir) {
+        if (!Array.isArray(arr) || !arr.length) return;
+
+        const key = sortKey || "timestampMs";
+        const dir = (sortDir === "asc") ? 1 : -1;
+
+        arr.sort((a, b) => {
+            const av = getSortValue(a, key);
+            const bv = getSortValue(b, key);
+
+            // nulls last
+            const aNull = (av === null || av === undefined);
+            const bNull = (bv === null || bv === undefined);
+            if (aNull && bNull) return 0;
+            if (aNull) return 1;
+            if (bNull) return -1;
+
+            // string compare for any string-sort key
+            if (typeof av === "string" || typeof bv === "string") {
+                const as = String(av).toLowerCase();
+                const bs = String(bv).toLowerCase();
+                if (as < bs) return -1 * dir;
+                if (as > bs) return 1 * dir;
+                return 0;
+            }
+
+            // numeric compare
+            const an = Number(av);
+            const bn = Number(bv);
+            if (!Number.isFinite(an) && !Number.isFinite(bn)) return 0;
+            if (!Number.isFinite(an)) return 1;
+            if (!Number.isFinite(bn)) return -1;
+            return (an - bn) * dir;
+        });
+    }
+
+    function getSortValue(rec, key) {
+        if (!rec || typeof rec !== "object") return null;
+
+        switch (key) {
+            case "flagged":
+                return rec.flagged ? 1 : 0;
+
+            case "lastKnownStatus": {
+                // define a stable ordering
+                const s = (rec.lastKnownStatus || "Live");
+                if (s === "Live") return 1;
+                if (s === "Moved") return 2;
+                if (s === "Retired") return 3;
+                return 9;
+            }
+
+            case "title":
+                return (typeof rec.title === "string") ? rec.title : "";
+
+            case "timestampMs":
+                return (typeof rec.timestampMs === "number" && Number.isFinite(rec.timestampMs)) ? rec.timestampMs : null;
+
+            default:
+                return null;
+        }
+    }
+
+    function getTotalPages(totalItems, pageSize) {
+        const n = Number(totalItems) || 0;
+        const ps = Number(pageSize) || 1;
+        return Math.max(1, Math.ceil(n / ps));
+    }
+
+    // ======================================================================
+    // Formatting & DOM Helpers
+    // ======================================================================
+
+    function td(text, align) {
+        const cell = document.createElement("td");
+        cell.textContent = String(text ?? "");
+
+        const a = (align === "center") ? "wfmapmods-reporting-align-center" : "wfmapmods-reporting-align-left";
+        cell.className = `wfmapmods-reporting-cell ${a}`;
+
+        return cell;
+    }
+
+    function formatDateOnly(timestampMs) {
+        try {
+            // system locale, date only
+            return new Date(timestampMs).toLocaleDateString();
+        } catch {
+            return String(timestampMs);
+        }
+    }
+
+    function formatDateTime(timestampMs) {
+        try {
+            return new Date(timestampMs).toLocaleString();
+        } catch {
+            return String(timestampMs);
+        }
+    }
+
+    function magnifierSvg(sizePx = 14) {
+        const s = Number(sizePx) || 14;
+        // inline SVG (no external dependencies)
+        return `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="11" cy="11" r="7"></circle>
+      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+    </svg>
+  `.trim();
+    }
+
+    function cssEscape(s) {
+        // CSS.escape is not supported in all userscript environments
+        const str = String(s ?? "");
+        if (typeof CSS !== "undefined" && CSS.escape) return CSS.escape(str);
+        return str.replace(/["\\#.;?+*~':!^$[\]()=>|/@]/g, "\\$&");
+    }
+
+    // ======================================================================
+    // Geometry & Spatial Helpers
+    // ======================================================================
+
+    function haversineMeters(lat1, lng1, lat2, lng2) {
+        const R = 6371000;
+        const toRad = x => x * Math.PI / 180;
+
+        const dLat = toRad(lat2 - lat1);
+        const dLng = toRad(lng2 - lng1);
+
+        const a =
+              Math.sin(dLat / 2) ** 2 +
+              Math.cos(toRad(lat1)) *
+              Math.cos(toRad(lat2)) *
+              Math.sin(dLng / 2) ** 2;
+
+        return 2 * R * Math.asin(Math.sqrt(a));
+    }
+
+    function pointInBounds(lat, lng, bounds) {
+        if (!bounds || !bounds.ne || !bounds.sw) return false;
+
+        return (
+            lat <= bounds.ne.lat &&
+            lat >= bounds.sw.lat &&
+            lng <= bounds.ne.lng &&
+            lng >= bounds.sw.lng
+        );
+    }
+
+    function getEffectiveCoords(rec) {
+        if (typeof rec.lat_new === "number" && typeof rec.lng_new === "number") {
+            return { lat: rec.lat_new, lng: rec.lng_new };
+        }
+        return { lat: rec.lat, lng: rec.lng };
+    }
+
+    // ======================================================================
+    // Text Normalization
+    // ======================================================================
+
+    function normText(s) {
+        if (s == null) return "";
+        return String(s)
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
+    // ======================================================================
+    // POI Observation & Reconciliation
+    // ======================================================================
+
+    async function observePois(pois) {
+        await ensureCacheLoaded();
+        if (!WFMM_CACHE.ready) return;
+
+        for (const poi of pois) {
+            const ids = WFMM_CACHE.byGuid.get(poi.guid);
+            if (!ids) continue;
+
+            for (const id of ids) {
+                const rec = WFMM_CACHE.byId.get(id);
+                if (rec) handleObservedPoiCached(rec, poi);
+            }
+        }
+    }
+
+    function handleObservedPoiCached(rec, poi) {
+        const patch = {};
+        let statusChange = null;
+
+        // -------------------------
+        // #0 — Backfill missing data
+        // -------------------------
+        const poiDesc = (typeof poi.description === "string") ? poi.description : "";
+        const poiTitle = (typeof poi.title === "string") ? poi.title : "";
+        const poiImg = (typeof poi.imageUrl === "string") ? poi.imageUrl : "";
+
+        if (rec.description === undefined && normText(poiDesc)) patch.description = poiDesc;
+        if (rec.imageUrl === undefined && normText(poiImg)) patch.imageUrl = poiImg;
+        if (rec.isCommunityContributed == null && typeof poi.isCommunityContributed === "boolean") {
+            patch.isCommunityContributed = poi.isCommunityContributed;
+        }
+
+        // Compute "effective old" values AFTER considering backfill patch
+        const oldTitleEff = (patch.title ?? rec.title ?? "");
+        const oldDescEff  = (patch.description ?? rec.description ?? "");
+
+        const changes = {};
+
+        // Title compare (normalized)
+        if (normText(poiTitle) && normText(poiTitle) !== normText(oldTitleEff)) {
+            changes.title_new = poiTitle;
+        }
+
+        // Description compare (normalized; allow empty)
+        if (normText(poiDesc) !== normText(oldDescEff)) {
+            changes.description_new = poiDesc;
+        }
+
+        // Location compare
+        const { lat: oldLat, lng: oldLng } = getEffectiveCoords(rec);
+        if (Number.isFinite(oldLat) && Number.isFinite(oldLng) && Number.isFinite(poi.lat) && Number.isFinite(poi.lng)) {
+            const d = haversineMeters(oldLat, oldLng, poi.lat, poi.lng);
+            if (d > 5) { // reduce GPS jitter
+                changes.lat_new = poi.lat;
+                changes.lng_new = poi.lng;
+            }
+        }
+
+        // Only mark Modified if the change is real (and not just backfill)
+        if (Object.keys(changes).length) {
+            Object.assign(patch, changes);
+            statusChange = "Modified";
+        }
+
+        // reinstatement rules (with stale gcs guard)
+        if (rec.lastKnownStatus === "Retired") {
+            const missingTs = (typeof rec.firstNoticedMissingMs === "number") ? rec.firstNoticedMissingMs : null;
+
+            if (poi.source === "gcs" && missingTs != null && typeof poi.seenAtMs === "number" && poi.seenAtMs <= missingTs) {
+                // stale gcs - don't change status
+            } else {
+                if (Number.isFinite(oldLat) && Number.isFinite(oldLng) && Number.isFinite(poi.lat) && Number.isFinite(poi.lng)) {
+                    const d = haversineMeters(oldLat, oldLng, poi.lat, poi.lng);
+                    if (d > 100) statusChange = "Modified";
+                    else {
+                        statusChange = "Reinstated";
+                        patch.reinstatedMs = poi.seenAtMs;
+                    }
+                } else {
+                    statusChange = "Reinstated";
+                    patch.reinstatedMs = poi.seenAtMs;
+                }
+            }
+        }
+
+        // lastSeen bump (newer wins)
+        if (typeof poi.seenAtMs === "number" && (!rec.lastSeenMs || poi.seenAtMs > rec.lastSeenMs)) {
+            patch.lastSeenMs = poi.seenAtMs;
+        }
+
+        if (statusChange) patch.lastKnownStatus = statusChange;
+
+        if (Object.keys(patch).length) enqueuePatch(rec.id, patch);
+    }
+
+    function markRetiredCached(rec, ts) {
+        if (rec.firstNoticedMissingMs) return;
+        enqueuePatch(rec.id, { lastKnownStatus: "Retired", firstNoticedMissingMs: ts });
+    }
+
+    function detectMissingFromGcsCached(gcsPois, bounds, responseTs) {
+        const seen = new Set(gcsPois.map(p => p.guid));
+        if (!bounds) return;
+
+        for (const id of gridCandidatesInBounds(bounds)) {
+            const rec = WFMM_CACHE.byId.get(id);
+            if (!rec?.guid) continue;
+            if (rec.lastKnownStatus === "Retired") continue;
+
+            const { lat, lng } = getEffectiveCoords(rec);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+            if (!pointInBounds(lat, lng, bounds)) continue; // keep exact check
+
+            if (!seen.has(rec.guid)) {
+                markRetiredCached(rec, responseTs);
+            }
+        }
+    }
+
+    function detectMissingFromLiveCached(livePois, center, radius) {
+        const seen = new Set(livePois.map(p => p.guid));
+
+        for (const id of gridCandidatesInRadius(center, radius)) {
+            const rec = WFMM_CACHE.byId.get(id);
+            if (!rec?.guid) continue;
+            if (rec.isCommunityContributed !== true) continue;
+            if (rec.lastKnownStatus === "Retired") continue;
+
+            const { lat, lng } = getEffectiveCoords(rec);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+            // Exact circle test
+            const d = haversineMeters(lat, lng, center.lat, center.lng);
+            if (d <= radius && !seen.has(rec.guid)) {
+                markRetiredCached(rec, Date.now());
+            }
+        }
+    }
+
+    // ======================================================================
+    // Network Response Handlers
+    // ======================================================================
+
+    async function onLivePoisResponse(json) {
+        await ensureCacheLoaded();
+        if (!WFMM_CACHE.ready) return;
+
+        const pois = (json?.result?.pois || []).map(p => ({
+            guid: p.guid,
+            title: p.title,
+            description: p.description ?? "",
+            imageUrl: p.imageUrl ?? "",
+            lat: p.lat,
+            lng: p.lng,
+            seenAtMs: Date.now(),
+            source: "live",
+        }));
+
+        observePois(pois);
+
+        detectMissingFromLiveCached(
+            pois,
+            json.result.location,
+            json.result.radius
+        );
+    }
+
+    async function onGcsResponse(json, bounds) {
+        await ensureCacheLoaded();
+        if (!WFMM_CACHE.ready) return;
+
+        const pois = [];
+        let responseTs = 0;
+
+        for (const cell of json?.result?.data || []) {
+            const cellTs = Number(cell?.metadata?.generatedTimestamp);
+            if (Number.isFinite(cellTs)) responseTs = Math.max(responseTs, cellTs);
+
+            for (const p of cell.pois || []) {
+                const lat = (typeof p.latE6 === "number") ? p.latE6 / 1e6 : null;
+                const lng = (typeof p.lngE6 === "number") ? p.lngE6 / 1e6 : null;
+                if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+                // Use the cell timestamp as the last seen time
+                const seenAtMs = Number.isFinite(cellTs) ? cellTs : Date.now();
+
+                pois.push({
+                    guid: p.poiId,
+                    title: p.title,
+                    description: p.description ?? "",
+                    imageUrl: p.mainImage ?? "",
+                    isCommunityContributed: p.isCommunityContributed,
+                    lat, lng,
+                    seenAtMs,
+                    source: "gcs",
+                });
+            }
+        }
+
+        if (!responseTs) responseTs = Date.now();
+
+        observePois(pois);
+        detectMissingFromGcsCached(pois, bounds, responseTs);
+    }
+
+
+    // ======================================================================
+    // Listen: GCS responses
+    // ======================================================================
+
+    function parseGcsBoundsFromUrl(url) {
+        try {
+            const u = new URL(url, location.origin);
+            const neRaw = u.searchParams.get("ne");
+            const swRaw = u.searchParams.get("sw");
+            if (!neRaw || !swRaw) return null;
+
+            const parsePair = (s) => {
+                const m = String(s).match(/\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)/);
+                if (!m) return null;
+                return { lat: Number(m[1]), lng: Number(m[2]) };
+            };
+
+            const ne = parsePair(neRaw);
+            const sw = parsePair(swRaw);
+            if (!ne || !sw) return null;
+
+            return { ne, sw };
+        } catch {
+            return null;
+        }
+    }
+
+    (function installGcsXhrListener() {
+        const origOpen = XMLHttpRequest.prototype.open;
+        const origSend = XMLHttpRequest.prototype.send;
+
+        XMLHttpRequest.prototype.open = function (method, url) {
+            try { this.__wfmm_url = url; } catch {}
+            return origOpen.apply(this, arguments);
+        };
+
+        XMLHttpRequest.prototype.send = function () {
+            const url = String(this.__wfmm_url || "");
+
+            if (url.includes(WFMM_GCS_ENDPOINT_PART)) {
+                const bounds = parseGcsBoundsFromUrl(url);
+
+                this.addEventListener("load", () => {
+                    try {
+                        if (this.status < 200 || this.status >= 300) return;
+                        const json = JSON.parse(this.responseText);
+                        if (json?.code && json.code !== "OK") return;
+                        if (json?.result?.success === false) return;
+
+                        onGcsResponse(json, bounds);
+                    } catch (e) {
+                        console.warn("WFMM - Reporting: GCS handler error:", e);
+                    }
+                });
+            }
+
+            return origSend.apply(this, arguments);
+        };
+    })();
+
+    // ======================================================================
+    // Listen: live-pois-in-radius responses
+    // ======================================================================
+
+    (function installLivePoisXhrListener() {
+        const origOpen = XMLHttpRequest.prototype.open;
+        const origSend = XMLHttpRequest.prototype.send;
+
+        XMLHttpRequest.prototype.open = function (method, url) {
+            try { this.__wfmm_url = url; } catch {}
+            return origOpen.apply(this, arguments);
+        };
+
+        XMLHttpRequest.prototype.send = function () {
+            try {
+                const url = String(this.__wfmm_url || "");
+                if (url.includes(WFMM_LIVE_POIS_ENDPOINT_PART)) {
+                    this.addEventListener("load", () => {
+                        try {
+                            if (this.status < 200 || this.status >= 300) return;
+
+                            const json = JSON.parse(this.responseText);
+                            if (json?.code && json.code !== "OK") return;
+
+                            onLivePoisResponse(json);
+                        } catch (e) {
+                            console.warn("WFMM - Reporting: live-pois-in-radious parse/handler error:", e);
+                        }
+                    });
+                }
+            } catch (e) {
+                console.warn("WFMM - Reporting: Listener install error:", e);
+            }
+
+            return origSend.apply(this, arguments);
+        };
+    })();
+
+    // ======================================================================
+    // Attach to map
+    // ======================================================================
+
+    function looksLikeGoogleMap(obj) {
+        return !!(obj &&
+                  typeof obj.getCenter === "function" &&
+                  typeof obj.addListener === "function" &&
+                  typeof obj.getDiv === "function");
+    }
+
+    function extractMapFromCtxEntry(entry) {
+        if (!entry) return null;
+        if (looksLikeGoogleMap(entry)) return entry; // mapview
+        const m = entry?.componentRef?.map;          // submit
+        return looksLikeGoogleMap(m) ? m : null;
+    }
+
+    function getWfMap() {
+        return new Promise((resolve) => {
+            let attempts = 80;
+
+            function tryFindMap() {
+                const candidates = document.querySelectorAll("app-submit-wayspot-map nia-map, app-wf-base-map");
+
+                for (const el of candidates) {
+                    const ctx = el && el.__ngContext__;
+                    if (!ctx) continue;
+
+                    for (const entry of ctx) {
+                        try {
+                            const map = extractMapFromCtxEntry(entry);
+                            if (map) return resolve(map);
+                        } catch { /* ignore */ }
+                    }
+                }
+
+                if (attempts-- <= 0) return resolve(null);
+                setTimeout(tryFindMap, 250);
+            }
+
+            tryFindMap();
+        });
+    }
+
+    function isMapStale(map) {
+        try {
+            const div = map && map.getDiv && map.getDiv();
+            return !div || !div.isConnected;
+        } catch {
+            return true;
+        }
+    }
+
+    async function attachToMapIfNeeded() {
+        // If we think we're attached but the underlying map is gone, reset and reattach
+        if (mapAttached) {
+            if (wfMap && !isMapStale(wfMap)) return;
+            teardownMap();
+        }
+
+        const map = await getWfMap();
+
+        if (!map) {
+            console.warn("[S2] Map not found – cannot attach");
+            return;
+        }
+
+        wfMap = map;
+
+        ensurePulseOverlayClass();
+        wfmmEnsurePulseLayer(wfMap);
+        schedulePulseRefresh(0);
+    }
+
+    function teardownMap() {
+        if (!mapAttached) return;
+        wfMap = null;
+        mapAttached = false;
+    }
+
+    // ======================================================================
+    // Map Navigation
+    // ======================================================================
+
+    function flyToLatLngAndPlaceSubmission(latLng) {
+        if (!wfMap || !latLng || typeof google === "undefined" || !google.maps) return;
+
+        const lat = latLng.lat;
+        const lng = latLng.lng;
+
+        emitSubmitCoords(lat, lng, "mapview");
+        // Center map
+        wfMap.setCenter(latLng);
+
+        // Ensure zoom
+        const z = wfMap.getZoom();
+        if (typeof z === "number" && z < GCS_MIN_ZOOM) {
+            wfMap.setZoom(GCS_MIN_ZOOM);
+        }
+
+        // Allow map to settle before firing click
+        google.maps.event.addListenerOnce(wfMap, "idle", () => {
+            try {
+                google.maps.event.trigger(wfMap, "click", { latLng });
+            } catch (e) {
+            }
+        });
+    }
+
+    function emitSubmitCoords(lat, lng, source = "mapview") {
+        window.dispatchEvent(new CustomEvent("wf:submit-coords", {
+            detail: { lat, lng, source, ts: Date.now() }
+        }));
+    }
+
+    // ======================================================================
+    // Reported Wayspots Cache (in-memory)
+    // ======================================================================
+
+    const WFMM_CACHE = {
+        ready: false,
+        loading: null,
+        loadedAtMs: 0,
+
+        // guid -> Set(recordId)
+        byGuid: new Map(),
+        // recordId -> record object (we keep a mutable copy)
+        byId: new Map(),
+    };
+
+    // How often to refresh from IDB (ms)
+    const WFMM_CACHE_TTL_MS = 120_000; // 2 minutes
+
+    function wfmmIndexRecord(rec) {
+        if (!rec?.id || !rec?.guid) return;
+
+        WFMM_CACHE.byId.set(rec.id, rec);
+
+        let set = WFMM_CACHE.byGuid.get(rec.guid);
+        if (!set) WFMM_CACHE.byGuid.set(rec.guid, (set = new Set()));
+        set.add(rec.id);
+    }
+
+    function wfmmClearCache() {
+        WFMM_CACHE.ready = false;
+        WFMM_CACHE.byGuid.clear();
+        WFMM_CACHE.byId.clear();
+        WFMM_CACHE.loadedAtMs = 0;
+    }
+
+    function ensureCacheLoaded({ force = false } = {}) {
+        if (WFMM_CACHE.loading) return WFMM_CACHE.loading;
+
+        const stale = !WFMM_CACHE.ready || (Date.now() - WFMM_CACHE.loadedAtMs > WFMM_CACHE_TTL_MS);
+        if (!force && !stale) return Promise.resolve(true);
+
+        WFMM_CACHE.loading = loadAllReportedWayspotsFromIDB()
+            .then((records) => {
+            wfmmClearCache();
+            gridClear();
+
+            for (const r of (records || [])) {
+                wfmmIndexRecord(r);
+                gridAddOrMoveRecord(r);
+            }
+
+            if (wfMap) {
+                wfmmEnsurePulseLayer(wfMap);
+                schedulePulseRefresh(0);
+            }
+
+            WFMM_CACHE.ready = true;
+            WFMM_CACHE.loadedAtMs = Date.now();
+            return true;
+        })
+            .catch((e) => {
+            console.warn("[WFMM] cache load failed:", e);
+            return false;
+        })
+            .finally(() => {
+            WFMM_CACHE.loading = null;
+        });
+
+        return WFMM_CACHE.loading;
+    }
+
+    // ======================================================================
+    // Patch queue (coalesce per recordId)
+    // ======================================================================
+
+    const WFMM_PATCH_QUEUE = {
+        pending: new Map(),   // id -> patch object
+        flushTimer: null,
+        flushDelayMs: 300,
+    };
+
+    function enqueuePatch(id, patch) {
+        if (!id || !patch || typeof patch !== "object") return;
+
+        const prev = WFMM_PATCH_QUEUE.pending.get(id);
+        if (prev) Object.assign(prev, patch);
+        else WFMM_PATCH_QUEUE.pending.set(id, { ...patch });
+
+        if (!WFMM_PATCH_QUEUE.flushTimer) {
+            WFMM_PATCH_QUEUE.flushTimer = setTimeout(flushPatches, WFMM_PATCH_QUEUE.flushDelayMs);
+        }
+    }
+
+    async function flushPatches() {
+        clearTimeout(WFMM_PATCH_QUEUE.flushTimer);
+        WFMM_PATCH_QUEUE.flushTimer = null;
+
+        const entries = Array.from(WFMM_PATCH_QUEUE.pending.entries());
+        WFMM_PATCH_QUEUE.pending.clear();
+
+        for (const [id, patch] of entries) {
+            // Skip empty patch
+            if (!patch || !Object.keys(patch).length) continue;
+
+            const ok = await patchReportedWayspotInIDB(id, patch);
+            if (!ok) continue;
+
+            // Update in-memory copy so future logic uses latest values
+            const rec = WFMM_CACHE.byId.get(id);
+            if (rec) Object.assign(rec, patch);
+
+            applyPatchToReportingHistoryModal(id, patch);
+
+            // If coords can change, update pulse positions
+            schedulePulseRefresh(50);
+        }
+    }
+
+    // ======================================================================
+    // Spatial index (grid buckets)
+    // ======================================================================
+
+    const WFMM_GRID = {
+        // bucketKey -> Set(recordId)
+        buckets: new Map(),
+        // recordId -> bucketKey (so we can move it if coords change)
+        idToBucket: new Map(),
+    };
+
+    // ~1.1km lat. Tweak if you want denser/sparser buckets.
+    const GRID_DEG = 0.01;
+
+    function bucketKeyForLatLng(lat, lng) {
+        const x = Math.floor(lat / GRID_DEG);
+        const y = Math.floor(lng / GRID_DEG);
+        return `${x}:${y}`;
+    }
+
+    function gridAddOrMoveRecord(rec) {
+        const { lat, lng } = getEffectiveCoords(rec);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+        const key = bucketKeyForLatLng(lat, lng);
+        const prevKey = WFMM_GRID.idToBucket.get(rec.id);
+
+        if (prevKey === key) return;
+
+        if (prevKey) {
+            const prevSet = WFMM_GRID.buckets.get(prevKey);
+            if (prevSet) {
+                prevSet.delete(rec.id);
+                if (!prevSet.size) WFMM_GRID.buckets.delete(prevKey);
+            }
+        }
+
+        let set = WFMM_GRID.buckets.get(key);
+        if (!set) WFMM_GRID.buckets.set(key, (set = new Set()));
+        set.add(rec.id);
+        WFMM_GRID.idToBucket.set(rec.id, key);
+    }
+
+    function gridClear() {
+        WFMM_GRID.buckets.clear();
+        WFMM_GRID.idToBucket.clear();
+    }
+
+    // Iterate recordIds in buckets overlapping a bounds box
+    function* gridCandidatesInBounds(bounds) {
+        const { ne, sw } = bounds;
+        const minX = Math.floor(sw.lat / GRID_DEG);
+        const maxX = Math.floor(ne.lat / GRID_DEG);
+        const minY = Math.floor(sw.lng / GRID_DEG);
+        const maxY = Math.floor(ne.lng / GRID_DEG);
+
+        for (let x = minX; x <= maxX; x++) {
+            for (let y = minY; y <= maxY; y++) {
+                const set = WFMM_GRID.buckets.get(`${x}:${y}`);
+                if (!set) continue;
+                for (const id of set) yield id;
+            }
+        }
+    }
+
+    // Iterate recordIds in buckets overlapping a radius (via bbox first)
+    function* gridCandidatesInRadius(center, radiusMeters) {
+        // Quick bbox around circle (approx; refine with haversine afterward)
+        const latDeg = radiusMeters / 111_320; // meters per degree latitude
+        const lngDeg = radiusMeters / (111_320 * Math.cos(center.lat * Math.PI / 180));
+
+        const bounds = {
+            ne: { lat: center.lat + latDeg, lng: center.lng + lngDeg },
+            sw: { lat: center.lat - latDeg, lng: center.lng - lngDeg },
+        };
+
+        yield* gridCandidatesInBounds(bounds);
+    }
+
+    // ======================================================================
+    // Pulsing "reported" indicators (non-clickable, behind markers)
+    // ======================================================================
+
+    const WFMM_PULSES = {
+        map: null,
+        overlaysById: new Map(),  // report recordId -> overlay instance
+        refreshTimer: null,
+    };
+
+    let WfmmPulseOverlay = null;
+
+    function ensurePulseOverlayClass() {
+        if (WfmmPulseOverlay) return true;
+        if (typeof google === "undefined" || !google.maps?.OverlayView) return false;
+
+        WfmmPulseOverlay = class extends google.maps.OverlayView {
+            constructor(latLng, opts = {}) {
+                super();
+                this.latLng = latLng;
+                this.sizePx = opts.sizePx || 40;
+                this.scaleWithZoom = !!opts.scaleWithZoom;
+                this.status = opts.status || "Live";
+                this.div = null;
+            }
+
+            onAdd() {
+                const div = document.createElement("div");
+                div.className = "wfmm-reported-pulse";
+                div.style.width = this.sizePx + "px";
+                div.style.height = this.sizePx + "px";
+                div.style.pointerEvents = "none";
+                div.style.position = "absolute";
+
+                this.applyStatusClass(div);
+
+                this.div = div;
+                this.getPanes().overlayLayer.appendChild(div);
+            }
+
+            applyStatusClass(div) {
+                const status = (this.status || "").toLowerCase();
+
+                div.classList.remove(
+                    "wfmm-reported-live",
+                    "wfmm-reported-modified",
+                    "wfmm-reported-retired",
+                    "wfmm-reported-reinstated"
+                );
+
+                switch (status) {
+                    case "modified":
+                        div.classList.add("wfmm-reported-modified");
+                        break;
+                    case "retired":
+                        div.classList.add("wfmm-reported-retired");
+                        break;
+                    case "reinstated":
+                        div.classList.add("wfmm-reported-reinstated");
+                        break;
+                    default:
+                        div.classList.add("wfmm-reported-live");
+                }
+            }
+
+            setStatus(status) {
+                this.status = status;
+                if (this.div) {
+                    this.applyStatusClass(this.div);
+                }
+            }
+
+            draw() {
+                if (!this.div) return;
+
+                const proj = this.getProjection();
+                if (!proj) return;
+
+                const p = proj.fromLatLngToDivPixel(this.latLng);
+                if (!p) return;
+
+                this.div.style.left = p.x + "px";
+                this.div.style.top  = p.y + "px";
+                this.div.style.transform = "translate(-50%, -50%)";
+            }
+
+            onRemove() {
+                this.div?.remove();
+                this.div = null;
+            }
+
+            setLatLng(latLng) {
+                this.latLng = latLng;
+                this.draw();
+            }
+        };
+
+        return true;
+    }
+
+    // Debounced refresh so you can call it freely
+    function schedulePulseRefresh(delay = 100) {
+        clearTimeout(WFMM_PULSES.refreshTimer);
+        WFMM_PULSES.refreshTimer = setTimeout(() => {
+            try { wfmmRefreshPulses(); } catch {}
+        }, delay);
+    }
+
+    function wfmmEnsurePulseLayer(map) {
+        if (!map || typeof google === "undefined" || !google.maps) return false;
+        if (WFMM_PULSES.map === map) return true;
+
+        // map changed (or first attach) -> teardown old overlays
+        wfmmClearPulses();
+        WFMM_PULSES.map = map;
+
+        // Reposition on zoom/drag for smoothness (OverlayView will redraw anyway; this is just extra safety)
+        map.addListener?.("zoom_changed", () => schedulePulseRefresh(50));
+        map.addListener?.("idle", () => schedulePulseRefresh(50));
+
+        return true;
+    }
+
+    function wfmmClearPulses() {
+        for (const ov of WFMM_PULSES.overlaysById.values()) {
+            try { ov.setMap(null); } catch {}
+        }
+        WFMM_PULSES.overlaysById.clear();
+    }
+
+    // Build a stable list of reported records -> pulse overlays
+    function wfmmRefreshPulses() {
+        const map = WFMM_PULSES.map;
+        if (!map) return;
+
+        // Zoom gate: hide pulses below threshold to reduce lag
+        if (!wfmmShouldShowPulses(map)) {
+            wfmmClearPulses();
+            return;
+        }
+
+        // Use your in-memory cache if loaded; fallback to nothing
+        const records = Array.from(WFMM_CACHE?.byId?.values?.() || []);
+
+        const visibility = userSettings.pulseVisibility;
+
+        const wanted = [];
+        for (const rec of records) {
+            if (!rec?.id) continue;
+
+            const { lat, lng } = getEffectiveCoords(rec);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+            const statusKey = (rec.lastKnownStatus || "Live").toLowerCase();
+            if (!visibility[statusKey]) continue;
+
+            wanted.push({
+                id: rec.id,
+                lat,
+                lng,
+                status: rec.lastKnownStatus || "Live"
+            });
+        }
+
+        const wantedIds = new Set(wanted.map(x => x.id));
+
+        // Remove overlays for records that no longer exist
+        for (const [id, ov] of WFMM_PULSES.overlaysById.entries()) {
+            if (!wantedIds.has(id)) {
+                try { ov.setMap(null); } catch {}
+                WFMM_PULSES.overlaysById.delete(id);
+            }
+        }
+
+        // Add/update overlays
+        for (const w of wanted) {
+            const ll = new google.maps.LatLng(w.lat, w.lng);
+            const existing = WFMM_PULSES.overlaysById.get(w.id);
+
+            if (!existing) {
+                const ov = new WfmmPulseOverlay(ll, {
+                    sizePx: 40,
+                    scaleWithZoom: false,
+                    status: w.status,
+                });
+                ov.setMap(map);
+                WFMM_PULSES.overlaysById.set(w.id, ov);
+            } else {
+                existing.setLatLng(ll);
+                existing.setStatus(w.status);
+            }
+        }
+    }
+
+    // Hide on low zoom levels
+    function wfmmShouldShowPulses(map) {
+        if (!map || typeof map.getZoom !== "function") return true;
+        const z = map.getZoom();
+        return (typeof z === "number") && z >= 8;
+    }
+
+    // ======================================================================
     // Cross-window messaging (Wayfarer ↔ Helpshift)
     // ======================================================================
 
@@ -1981,13 +4508,13 @@
         setFormValue(findField('postcode'), wayspot.postcode);
 
         // ---- Dropdowns: run sequentially to avoid focus/popover fights ----
-        await setPropertyOwnerDropdownYesNoAsync(wayspot.propertyOwner);
-
-        await setPreferredLanguageDropdownAsync(wayspot.preferredLanguage);
-
+        await setTypeOfLocationDropdownAsync(wayspot.typeOfLocation);
         const helpshiftCountries = HELPSHIFT_COUNTRIES;
         const resolved = resolveHelpshiftCountryName(wayspot.country, helpshiftCountries);
         await setCountryInStaticDropdownAsync(resolved || wayspot.country);
+        await setRemovalReasonDropdownAsync(wayspot.reasonForRemovalRequest);
+        await setPropertyOwnerDropdownYesNoAsync(wayspot.propertyOwner);
+        await setPreferredLanguageDropdownAsync(wayspot.preferredLanguage);
 
         // Optional final scroll reset
         scrollHelpshiftToTop();
@@ -2087,7 +4614,7 @@
                 const items = Array.from(sr.querySelectorAll("li.hc-static-dropdown__popover-item"));
                 const match = items.find(li => {
                     const p = li.querySelector("p.hc-static-dropdown__item-title");
-                    const itemTitle = p?.getAttribute("title") || p?.textContent?.trim();
+                    const itemTitle = (p?.getAttribute("title") || p?.textContent || "").trim();
                     return itemTitle === title;
                 });
 
@@ -2115,6 +4642,24 @@
     function setPreferredLanguageDropdownAsync(language) {
         const lang = String(language || "").trim() || "English";
         return setStaticDropdownByTitleAsync(HS_DROPDOWN_SLOTS.preferredLanguage, lang, {
+            useSearch: true
+        });
+    }
+
+    function setTypeOfLocationDropdownAsync(typeOfLocation) {
+        const t = String(typeOfLocation || "").trim();
+        if (!t) return Promise.resolve(false);
+
+        return setStaticDropdownByTitleAsync(HS_DROPDOWN_SLOTS.typeOfLocation, t, {
+            useSearch: true
+        });
+    }
+
+    function setRemovalReasonDropdownAsync(reasonText) {
+        const t = String(reasonText || "").trim();
+        if (!t) return Promise.resolve(false);
+
+        return setStaticDropdownByTitleAsync(HS_DROPDOWN_SLOTS.reasonForRemovalRequest, t, {
             useSearch: true
         });
     }
@@ -2333,44 +4878,480 @@
     function buildTicketRecordFromHelpshift(reqParsed, respJson, wayspotPayload) {
         const ticket = respJson?.publish_id ? String(respJson.publish_id) : null;
 
-        const timestampMs = (typeof respJson?.created_at_epoch === "number" && Number.isFinite(respJson.created_at_epoch))
+        const timestampMs =
+              (typeof respJson?.created_at_epoch === "number" && Number.isFinite(respJson.created_at_epoch))
         ? respJson.created_at_epoch
         : Date.now();
 
         const wp = wayspotPayload || {};
-        const guid = (typeof wp.guid === "string" && wp.guid.trim()) ? wp.guid.trim() : null;
-        const title = (typeof wp.title === "string" && wp.title.trim()) ? wp.title.trim() : null;
-        const lat = (typeof wp.lat === "number") ? wp.lat : null;
-        const lng = (typeof wp.lng === "number") ? wp.lng : null;
 
         const removalReasonCode = extractRemovalReasonCode(reqParsed?.meta);
-        const removalReasonText = resolveRemovalReasonText(removalReasonCode);
-
-        const supportingText =
-              (typeof reqParsed?.message === "string" && reqParsed.message.trim())
-        ? reqParsed.message.trim()
-        : null;
 
         return {
-            // Primary Key - Unique ID
+            // Primary Key – unique per report
             id: makeReportId(timestampMs),
 
-            // Wayspot being reported
-            guid,
-            title,
-            lat,
-            lng,
+            // Wayspot identity & location
+            guid:          (typeof wp.guid === "string") ? wp.guid : null,
+            title:         (typeof wp.title === "string") ? wp.title : null,
+            lat:           (typeof wp.lat === "number") ? wp.lat : null,
+            lng:           (typeof wp.lng === "number") ? wp.lng : null,
+            description:   (typeof wp.description === "string") ? wp.description : null,
+            imageUrl:      (typeof wp.imageUrl === "string") ? wp.imageUrl : null,
+            addressString: (typeof wp.addressString === "string") ? wp.addressString : null,
+            isCommunityContributed: (typeof wp.isCommunityContributed === "boolean") ? wp.isCommunityContributed : null,
 
             // Report metadata
             ticket,
             timestampMs,
             reportMechanism: "pgo-locations-web",
 
+            // Report details
             removalReasonCode,
-            removalReasonText,
-            supportingText
+            removalReasonText: resolveRemovalReasonText(removalReasonCode),
+            supportingText: (typeof reqParsed?.message === "string") ? reqParsed.message : null
         };
     }
+
+    // ======================================================================
+    // Css styles
+    // ======================================================================
+
+    function injectCss() {
+        const STYLE_ID = "wfmapmods-reporting-history-css";
+        if (document.getElementById(STYLE_ID)) return;
+
+        const style = document.createElement("style");
+        style.id = STYLE_ID;
+        style.type = "text/css";
+        style.textContent = `
+/* Modal (EXISTING) */
+.wfmapmods-reporting-backdrop{
+  position:fixed; inset:0; z-index:2000;
+  display:flex; align-items:center; justify-content:center;
+  background:rgba(0,0,0,.35);
+  padding:12px;
+}
+.wfmapmods-reporting-dialog{
+  background:#fff; border-radius:10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.25);
+  padding:14px;
+  max-width: min(96vw, 860px);
+  width: min(860px, 96vw);
+  overflow: hidden;
+}
+.wfmapmods-reporting-title{
+  font-size:16px; font-weight:700;
+  margin-bottom:10px;
+}
+.wfmapmods-reporting-footer{
+  display:flex; justify-content:flex-end; gap:8px;
+  margin-top:12px;
+}
+
+/* Buttons (EXISTING) */
+.wfmapmods-reporting-btn{
+  border:1px solid rgba(0,0,0,.2);
+  background:#fff;
+  border-radius:8px;
+  padding:6px 10px;
+  cursor:pointer;
+  font-size:12px;
+}
+.wfmapmods-reporting-btn:disabled{
+  opacity:.5;
+  cursor:not-allowed;
+}
+.wfmapmods-reporting-btn-primary{
+  background:#2563eb;
+  color:#fff;
+  border-color:#2563eb;
+}
+
+/* Table (EXISTING) */
+.wfmapmods-reporting-table{
+  width:100%;
+  border-collapse:collapse;
+  font-size:12px;
+  table-layout:fixed;
+}
+.wfmapmods-reporting-table th,
+.wfmapmods-reporting-table td{
+  border-bottom:1px solid rgba(0,0,0,.1);
+  padding:6px 6px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.wfmapmods-reporting-table th{
+  text-align:left;
+  user-select:none;
+  cursor:pointer;
+}
+
+/* Spinner */
+.wfmapmods-reporting-spinner{
+  width:16px; height:16px;
+  border:2px solid rgba(0,0,0,.2);
+  border-top-color: rgba(0,0,0,.55);
+  border-radius:50%;
+  animation: wfmapmodsReportingSpin .8s linear infinite;
+}
+@keyframes wfmapmodsReportingSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Main vertical wrapper in modal content */
+.wfmapmods-reporting-wrap{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  margin-top:6px;
+  flex: 1 1 auto;            /* key */
+  min-height: 0;             /* key */
+  overflow: auto;            /* key: scroll inside modal */
+}
+
+/* Top row with hint + buttons */
+.wfmapmods-reporting-top-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+/* Small helper text (hint/loading/page info/empty) */
+.wfmapmods-reporting-text-sm{
+  font-size:12px;
+  color:#374151;
+}
+
+/* Loading row */
+.wfmapmods-reporting-loading-wrap{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:6px 0;
+}
+
+/* Empty state */
+.wfmapmods-reporting-empty-wrap{
+  display:none; /* toggled via JS */
+}
+
+/* Pager */
+.wfmapmods-reporting-pager{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+}
+.wfmapmods-reporting-pager-left{
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
+
+/* Dialog layout (replaces dialog.style.maxHeight/display/flexDirection) */
+.wfmapmods-reporting-dialog--flex{
+  max-height:90vh;
+  display:flex;
+  flex-direction:column;
+  min-height: 0;
+}
+
+/* Table header cell base (replaces many th.style.*) */
+.wfmapmods-reporting-th{
+  user-select:none;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+/* Sortable header cells */
+.wfmapmods-reporting-th--sortable{
+  cursor:pointer;
+}
+
+/* Filters row container */
+.wfmapmods-reporting-filters{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  align-items:center;
+  padding:6px 0;
+}
+
+/* Label in filters/details */
+.wfmapmods-reporting-label{
+  font-size:12px;
+  color:#374151;
+  user-select:none;
+}
+
+/* Make selects look compact while reusing .wfmapmods-reporting-btn base */
+.wfmapmods-reporting-select{
+  padding:2px 6px;
+}
+
+/* Text input styling */
+.wfmapmods-reporting-input{
+  font-size:12px;
+  padding:3px 6px;
+  border:1px solid #d1d5db;
+  border-radius:6px;
+  min-width:180px;
+}
+
+/* Full-width break in flex row */
+.wfmapmods-reporting-row-break{
+  flex-basis:100%;
+  height:0;
+}
+
+/* Details block wrapper */
+.wfmapmods-reporting-details{
+  margin-top:6px;
+  overflow-y:auto;
+  max-height:55vh;
+  padding:0;
+  white-space:normal;
+  overflow-x:hidden;
+  max-width:100%;
+}
+
+/* Details row container: image + details */
+.wfmapmods-reporting-details-row{
+  display:flex;
+  align-items:flex-start;
+  gap:12px;
+  flex-wrap:wrap; /* stack on narrow widths */
+}
+
+/* Image column wrapper */
+.wfmapmods-reporting-details-imgwrap{
+  width:120px;
+  height:120px;
+  flex:0 0 120px;
+}
+
+/* Details image */
+.wfmapmods-reporting-details-img{
+  width:120px;
+  height:120px;
+  object-fit:cover;
+  border-radius:6px;
+  display:block;
+}
+
+/* Right-hand column */
+.wfmapmods-reporting-details-col{
+  flex:1 1 280px;
+  min-width:0; /* important for long text */
+}
+
+/* Details grid */
+.wfmapmods-reporting-details-grid{
+  display:grid;
+  grid-template-columns:130px 1fr;
+  row-gap:4px;
+  column-gap:10px;
+}
+
+/* Details key/value cells */
+.wfmapmods-reporting-details-k{
+  font-weight:600;
+  color:#374151;
+  user-select:none;
+}
+.wfmapmods-reporting-details-v{
+  color:#111827;
+  white-space:normal;
+  min-width:0;
+  max-width:100%;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+
+/* Clickable main rows */
+.wfmapmods-reporting-row-main{
+  cursor:pointer;
+}
+
+/* Common cell baseline (replaces td() helper inline styles) */
+.wfmapmods-reporting-cell{
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+/* Alignment helpers */
+.wfmapmods-reporting-align-left{ text-align:left; }
+.wfmapmods-reporting-align-center{ text-align:center; }
+
+/* Cells that must not ellipsis (e.g., icon buttons) */
+.wfmapmods-reporting-cell--no-ellipsis{
+  white-space:nowrap;
+  overflow:visible;
+  text-overflow:clip;
+}
+
+/* Star column cell sizing */
+.wfmapmods-reporting-cell-flag{
+  width:45px;
+  min-width:45px;
+}
+
+/* Star button (bigger click target, big star) */
+.wfmapmods-reporting-btn--star{
+  padding:0 8px;
+  line-height:1;
+  font-size:16px;
+  min-width:28px;
+  user-select:none;
+}
+
+/* Title span should be selectable even though row is clickable */
+.wfmapmods-reporting-title-selectable{
+  user-select:text;
+}
+
+/* Go/magnifier button */
+.wfmapmods-reporting-btn--go{
+  padding:2px 6px;
+  line-height:1;
+}
+
+/* Disabled go button (you already set disabled=true in JS; this styles it) */
+.wfmapmods-reporting-btn--go:disabled{
+  opacity:.5;
+  cursor:not-allowed;
+}
+
+/* Details row cell content should wrap */
+.wfmapmods-reporting-details-cell{
+  white-space:normal;
+  overflow-x:hidden;
+}
+
+/* Pager: 3-zone layout (left / centered info / right) */
+.wfmapmods-reporting-pager{
+  display:grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items:center;
+  gap:10px;
+}
+
+.wfmapmods-reporting-pager-left{
+  justify-self:start;
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
+
+.wfmapmods-reporting-pager-center{
+  justify-self:center;
+}
+
+.wfmapmods-reporting-pager-right{
+  justify-self:end;
+}
+
+/* Filters: push "Clear filters" to the far right */
+.wfmapmods-reporting-filters-spacer{
+  margin-left:auto;
+}
+
+/* Make clear filters read as a command, not an input */
+.wfmapmods-reporting-btn--clear{
+  border-color: transparent;
+  background: transparent;
+  color:#374151;
+}
+.wfmapmods-reporting-btn--clear:hover{
+  border-color: rgba(0,0,0,.15);
+  background: rgba(0,0,0,.03);
+}
+
+/* Narrow Ticket input */
+.wfmapmods-reporting-input--ticket{
+  min-width: 100px;
+  width: 100px;
+}
+  `;
+        document.head.appendChild(style);
+    }
+
+    (function injectWfmmPulseCss() {
+        if (document.getElementById("wfmm-pulse-css")) return;
+
+        const style = document.createElement("style");
+        style.id = "wfmm-pulse-css";
+        style.textContent = `
+@keyframes wfmmPulseRing {
+  0%   { transform: scale(0.65); opacity: 0.85; }
+  70%  { transform: scale(1.8);  opacity: 0.00; }
+  100% { transform: scale(1.8);  opacity: 0.00; }
+}
+
+.wfmm-reported-pulse {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  border-radius: 9999px;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+/* expanding ring */
+.wfmm-reported-pulse::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 2px solid var(--wfmm-color, rgba(255,0,0,0.95));
+  box-shadow: 0 0 6px var(--wfmm-glow, rgba(255,0,0,0.65));
+  transform-origin: 50% 50%;
+  animation: wfmmPulseRing 1.25s ease-out infinite;
+}
+
+/* core dot */
+.wfmm-reported-pulse::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  transform: translate(-50%, -50%);
+  border-radius: 9999px;
+  background: var(--wfmm-color, rgba(255,0,0,0.95));
+  box-shadow: 0 0 7px var(--wfmm-glow, rgba(255,0,0,0.85));
+}
+
+/* status colours */
+.wfmm-reported-live {
+  --wfmm-color: rgba(255, 0, 0, 0.95);
+  --wfmm-glow:  rgba(255, 0, 0, 0.65);
+}
+
+.wfmm-reported-modified {
+  --wfmm-color: rgba(255, 210, 0, 0.95);
+  --wfmm-glow:  rgba(255, 210, 0, 0.65);
+}
+
+.wfmm-reported-retired {
+  --wfmm-color: rgba(90, 90, 90, 0.95);
+  --wfmm-glow:  rgba(90, 90, 90, 0.65);
+}
+
+.wfmm-reported-reinstated {
+  --wfmm-color: rgba(170, 0, 255, 0.95);
+  --wfmm-glow:  rgba(170, 0, 255, 0.65);
+}
+  `;
+        document.head.appendChild(style);
+    })();
 
     // ======================================================================
     // Entry point
