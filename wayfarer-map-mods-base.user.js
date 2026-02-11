@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.4.5
+// @version      3.4.6
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -7004,35 +7004,47 @@
 
     function requestGcsPoisForBounds(map) {
         const zoom = map.getZoom?.();
+
+        // Track previous zoom on the map instance
+        const prevZoom = (typeof map._wfmmPrevZoom === "number") ? map._wfmmPrevZoom : zoom;
+        map._wfmmPrevZoom = zoom;
+
         if (typeof zoom !== "number" || zoom < GCS_MIN_ZOOM) {
             clearGcsPois();
+            map._wfmmGcsNeedsRefresh = true;
             return;
         }
 
-        // If on the Mapview route, stop after clearing gcs data
-        // Mapview will do its own calls to gcs api
-        if (isOnMapviewRoute()) return;
-
-        // If on Submit route, call gcs api manually
         const bounds = map.getBounds?.();
         if (!bounds) return;
 
         const ne = bounds.getNorthEast();
         const sw = bounds.getSouthWest();
 
+        // Decide if we should issue a request
+        let shouldRequest = true;
+
+        if (isOnMapviewRoute()) {
+            const crossedUp =
+                  (typeof prevZoom === "number" && prevZoom < GCS_MIN_ZOOM && zoom >= GCS_MIN_ZOOM);
+
+            // On mapview, ONLY request in the edge case
+            shouldRequest = !!(map._wfmmGcsNeedsRefresh || crossedUp);
+
+            // Consume the flag if we’re about to request
+            if (shouldRequest) map._wfmmGcsNeedsRefresh = false;
+        }
+
+        if (!shouldRequest) return;
+
         const url = `/api/v1/vault/mapview/gcs?ne=(${ne.lat()},${ne.lng()})&sw=(${sw.lat()},${sw.lng()})`;
 
-        try {
-            if (map._wfmmGcsXhr) map._wfmmGcsXhr.abort();
-        } catch (_) {}
+        try { map._wfmmGcsXhr?.abort?.(); } catch (_) {}
 
         const xhr = new XMLHttpRequest();
         map._wfmmGcsXhr = xhr;
-
         xhr.open("GET", url, true);
         xhr.withCredentials = true;
-
-        // No onload parsing here — interceptor handles it.
         xhr.send();
     }
 
