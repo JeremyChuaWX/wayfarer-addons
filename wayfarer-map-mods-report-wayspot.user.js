@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Report Wayspots
-// @version      3.1.0
+// @version      3.1.1
 // @description  Displays Reported Wayspots history on the map and adds additional reporting mechanisms.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
@@ -2575,7 +2575,7 @@
                         // reasonable defaults per column
                         if (col.key === "timestampMs") ctx.sortDir = "desc";
                         else if (col.key === "flagged") ctx.sortDir = "desc"; // flagged first
-                        else if (col.key === "lastKnownStatus") ctx.sortDir = "asc"; // Live→Moved→Retired
+                        else if (col.key === "lastKnownStatus") ctx.sortDir = "asc"; // Live→Modified→Retired
                         else ctx.sortDir = "asc";
                     }
 
@@ -2637,7 +2637,7 @@
         const statusLabel = mkLabel("Status:");
         const statusSel = document.createElement("select");
         statusSel.className = "wfmapmods-reporting-btn wfmapmods-reporting-select";
-        for (const [val, lab] of [["all", "All"], ["Live", "Live"], ["Moved", "Moved"], ["Retired", "Retired"]]) {
+        for (const [val, lab] of [["all", "All"], ["Live", "Live"], ["Modified", "Modified"], ["Retired", "Retired"]]) {
             const o = document.createElement("option");
             o.value = val;
             o.textContent = lab;
@@ -3372,7 +3372,7 @@
                 // define a stable ordering
                 const s = (rec.lastKnownStatus || "Live");
                 if (s === "Live") return 1;
-                if (s === "Moved") return 2;
+                if (s === "Modified") return 2;
                 if (s === "Retired") return 3;
                 return 9;
             }
