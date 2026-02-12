@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.4.6
+// @version      3.4.7
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -7982,13 +7982,13 @@
 
         if (enabled) {
             // Stay hidden until we actually have coordinates (i.e. first click)
-            setLocationFunctionsHidden(true);
+            hideLocationFunctions();
 
             // Enter placement mode (bind click listener)
             enableSubmissionPinMode();
         } else {
             // Turn off: always hide panel and clean up
-            setLocationFunctionsHidden(true);
+            hideLocationFunctions();
 
             disableSubmissionPinMode();
             clearSubmissionRelatedCircles();
@@ -8089,6 +8089,8 @@
             emitSubmitCoords(lat, lng, "mapview");
 
             handleLatLngChange(lat, lng);
+
+            showLocationFunctions();
         });
     }
 
@@ -8110,6 +8112,14 @@
             submissionPinMarker.setMap(null);
             submissionPinMarker = null;
         }
+    }
+
+    function showLocationFunctions() {
+        setLocationFunctionsHidden(false);
+    }
+
+    function hideLocationFunctions() {
+        setLocationFunctionsHidden(true);
     }
 
     function setLocationFunctionsHidden(hidden) {
@@ -8799,7 +8809,7 @@
         window.currentLat = lat;
         window.currentLng = lng;
 
-        setLocationFunctionsHidden(false);
+        showLocationFunctions();
         handleLatLngChange(lat, lng);
 
         emitSubmitCoords(lat, lng, "mapview");
