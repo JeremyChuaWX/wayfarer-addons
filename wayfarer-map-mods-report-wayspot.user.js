@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Report Wayspots
-// @version      3.1.1
+// @version      3.1.2
 // @description  Displays Reported Wayspots history on the map and adds additional reporting mechanisms.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
@@ -5277,6 +5277,44 @@
 .wfmapmods-reporting-input--ticket{
   min-width: 100px;
   width: 100px;
+}
+
+.wfmapmods-reporting-dialog{
+  color: rgb(82, 82, 82);
+}
+
+.wfmapmods-reporting-title,
+.wfmapmods-reporting-text-sm,
+.wfmapmods-reporting-label,
+.wfmapmods-reporting-table,
+.wfmapmods-reporting-table th,
+.wfmapmods-reporting-table td,
+.wfmapmods-reporting-th,
+.wfmapmods-reporting-cell,
+.wfmapmods-reporting-details-k,
+.wfmapmods-reporting-details-v{
+  color: rgb(82, 82, 82);
+  opacity: 1;
+}
+
+.wfmapmods-reporting-input{
+  color: rgb(82, 82, 82);
+  opacity: 1;
+}
+
+.wfmapmods-reporting-input::placeholder{
+  color: rgba(82, 82, 82, 0.55);
+  opacity: 1;
+}
+
+.wfmapmods-reporting-btn{
+  color: rgb(82, 82, 82);
+  opacity: 1;
+}
+
+.wfmapmods-reporting-btn-primary{
+  color: #fff;
+  opacity: 1;
 }
   `;
         document.head.appendChild(style);
