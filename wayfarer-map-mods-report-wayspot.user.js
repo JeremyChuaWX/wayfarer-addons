@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Report Wayspots
-// @version      3.1.2
+// @version      3.1.3
 // @description  Displays Reported Wayspots history on the map and adds additional reporting mechanisms.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
@@ -402,6 +402,7 @@
         "reunion": "Réunion",
         "curacao": "Curaçao",
         "vatican city": "Holy See ",
+        "deutschland": "Germany",
     };
 
     // ======================================================================
