@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.4.7
+// @version      3.4.8
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -784,7 +784,7 @@
         // Checkbox change handler (Wayspots)
         wayspotsChk.addEventListener("change", () => {
             userSettings.layers.wayspots.enabled = !!wayspotsChk.checked;
-            applyPoiVisibilityToAllMarkers();
+            refreshAllPoiMarkers();
             saveSettings();
         });
 
@@ -820,21 +820,10 @@
     }
 
     function isWayspotsLayerEnabled() {
-        const layers = userSettings.layers;
-        return layers.wayspots.enabled;
-    }
-
-    function applyWayspotVisibilityToMarkerEntry(entry) {
-        if (!entry || !entry.marker) return;
-        const enabled = isWayspotsLayerEnabled();
-        entry.marker.setMap(enabled ? wfMap : null);
-    }
-
-    function applyWayspotVisibilityToAllMarkers() {
-        if (!wfMap) return;
-        for (const guid in markersByGuid) {
-            applyWayspotVisibilityToMarkerEntry(markersByGuid[guid]);
-        }
+        const layers = (userSettings && userSettings.layers) || {};
+        const wayspotsLayer = layers.wayspots || {};
+        // Default to ON unless explicitly disabled
+        return wayspotsLayer.enabled !== false;
     }
 
     // ==================================
@@ -869,39 +858,10 @@
         }
     }
 
-    function areAllGameEntitiesDisabled() {
-        const go = userSettings.poi.filters.gameObject;
-        return !go.pokestop && !go.gym && !go.powerspot && !go.none;
-    }
-
-    function enforceWayspotsLayerBasedOnEntities() {
-        // Rule:
-        // - If all entities disabled => wayspots layer disabled
-        // - If any entity enabled and wayspots layer was disabled => enable wayspots layer
-        const anyEnabled = !areAllGameEntitiesDisabled();
-
-        if (!anyEnabled) {
-            userSettings.layers.wayspots.enabled = false;
-        } else if (userSettings.layers.wayspots.enabled === false) {
-            userSettings.layers.wayspots.enabled = true;
-        }
-    }
-
     function onFiltersChanged() {
         userSettings.poi.filters.enabled = true;
-
-        const beforeWayspotsLayer = userSettings.layers.wayspots.enabled;
-        enforceWayspotsLayerBasedOnEntities();
-
         saveSettings();
-
-        // If filters auto-toggled the wayspots layer, reflect it in the layers UI immediately
-        if (userSettings.layers.wayspots.enabled !== beforeWayspotsLayer) {
-            syncLayersMenuUI();
-        }
-
-        // Apply filters to existing markers immediately
-        applyPoiVisibilityToAllMarkers(true);
+        refreshAllPoiMarkers();
     }
 
     function buildFiltersMenu(menu) {
@@ -1008,9 +968,6 @@
         wrap.appendChild(sourceSection);
         wrap.appendChild(entitySection);
         menu.appendChild(wrap);
-
-        // Ensure UI reflects current settings (and enforces wayspots layer rule on initial build too)
-        enforceWayspotsLayerBasedOnEntities();
     }
 
     function syncFiltersMenuUI() {
@@ -7823,7 +7780,7 @@
 
         ensureSidePanel();
         ensureMapTopRightControls();
-        applyPoiVisibilityToAllMarkers();
+        refreshAllPoiMarkers();
         loadDraftSubmissionsFromIDB();
 
         if (isOnSubmitRoute()) {
@@ -9750,6 +9707,14 @@
         }
     }
 
+    function refreshAllPoiMarkers() {
+        if (!wfMap) return;
+        for (const guid in markersByGuid) {
+            refreshPoiMarkerIcon(markersByGuid[guid]);
+        }
+        syncPowerSpotRingsWithMarkers();
+    }
+
     function upsertPoiMarker(poi) {
         const guid = poi.guid;
         const existing = markersByGuid[guid];
@@ -9849,34 +9814,6 @@
 
         // Hard reset the index to release references
         markersByGuid = {};
-    }
-
-    // ==================================
-    // Visibility helpers (layer/filter visibility propagation)
-    // ==================================
-
-    function applyPoiVisibilityToMarkerEntry(entry) {
-        if (!entry || !entry.marker) return;
-
-        const marker = entry.marker;
-        const poi = entry.poi;
-
-        const layerOn = isWayspotsLayerEnabled();
-        const filterOn = shouldShowPoi(poi);
-
-        const visible = layerOn && filterOn;
-
-        // Use setVisible instead of setMap
-        marker.setVisible(visible);
-    }
-
-    function applyPoiVisibilityToAllMarkers() {
-        if (!wfMap) return;
-        for (const guid in markersByGuid) {
-            applyPoiVisibilityToMarkerEntry(markersByGuid[guid]);
-        }
-
-        syncPowerSpotRingsWithMarkers();
     }
 
     // ==================================
