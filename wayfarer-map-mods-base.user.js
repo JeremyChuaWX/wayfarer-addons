@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.4.8
+// @version      3.4.9
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -7521,6 +7521,9 @@
 
     function renderLastMapSyncLabel() {
         if (!lastMapSyncEl) return;
+
+        // Don't show on Submit route
+        if (isOnSubmitRoute()) return;
 
         const ts = window.gcsLatestGeneratedTimestampMs;
 
