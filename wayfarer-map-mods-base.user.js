@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.4.9
+// @version      3.4.10
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -8697,14 +8697,56 @@
     }
 
     function tryParseLatLng(str) {
-        const match = str.match(/^\s*\(?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)?\s*$/);
-        if (!match) return null;
+        if (typeof str !== "string") return null;
 
-        const lat = parseFloat(match[1]);
-        const lng = parseFloat(match[2]);
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        // ---- Decimal degrees (comma OR space separated) ----
+        const decMatch = str.match(
+            /^\s*\(?\s*(-?\d+(?:\.\d+)?)\s*(?:,\s*|\s+)(-?\d+(?:\.\d+)?)\s*\)?\s*$/
+        );
 
-        // Optional: sanity check ranges
+        if (decMatch) {
+            const lat = parseFloat(decMatch[1]);
+            const lng = parseFloat(decMatch[2]);
+
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+            if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+
+            return new google.maps.LatLng(lat, lng);
+        }
+
+        // ---- Degrees / Minutes / Seconds with hemisphere letters ----
+        const dmsMatch = str.match(
+            /^\s*\(?\s*([0-9]{1,3})\s*[°º]\s*([0-9]{1,2})\s*['’′]\s*([0-9]{1,2}(?:\.\d+)?)\s*(?:"|”|″)?\s*([NS])\s+([0-9]{1,3})\s*[°º]\s*([0-9]{1,2})\s*['’′]\s*([0-9]{1,2}(?:\.\d+)?)\s*(?:"|”|″)?\s*([EW])\s*\)?\s*$/i
+        );
+
+        if (!dmsMatch) return null;
+
+        const latDeg = parseInt(dmsMatch[1], 10);
+        const latMin = parseInt(dmsMatch[2], 10);
+        const latSec = parseFloat(dmsMatch[3]);
+        const latHem = dmsMatch[4].toUpperCase();
+
+        const lngDeg = parseInt(dmsMatch[5], 10);
+        const lngMin = parseInt(dmsMatch[6], 10);
+        const lngSec = parseFloat(dmsMatch[7]);
+        const lngHem = dmsMatch[8].toUpperCase();
+
+        if (
+            !Number.isFinite(latDeg) || !Number.isFinite(latMin) || !Number.isFinite(latSec) ||
+            !Number.isFinite(lngDeg) || !Number.isFinite(lngMin) || !Number.isFinite(lngSec)
+        ) return null;
+
+        if (latMin >= 60 || latSec >= 60 || lngMin >= 60 || lngSec >= 60) return null;
+
+        const dmsToDecimal = (deg, min, sec, hem) => {
+            let value = deg + min / 60 + sec / 3600;
+            if (hem === "S" || hem === "W") value *= -1;
+            return value;
+        };
+
+        const lat = dmsToDecimal(latDeg, latMin, latSec, latHem);
+        const lng = dmsToDecimal(lngDeg, lngMin, lngSec, lngHem);
+
         if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
 
         return new google.maps.LatLng(lat, lng);
