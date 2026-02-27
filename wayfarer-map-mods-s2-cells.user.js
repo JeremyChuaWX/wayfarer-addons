@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - s2 Cells
-// @version      3.0.4
+// @version      3.1.0
 // @description  Adds s2 cell grids and shading to the Wayfarer Map, and allows manual addition of PokéStops and Gyms
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-s2-cells.user.js
@@ -3431,7 +3431,8 @@
                         const json = JSON.parse(this.responseText || "{}");
 
                         const parsed = parseMapviewGcsPois(json);
-                        updateL14GcsCountsCache(parsed, gcsLastQueryBounds);
+                        const returnedLevel = getGcsReturnedCellLevel(json);
+                        updateL14GcsCountsCache(parsed, gcsLastQueryBounds, returnedLevel);
                         pruneL14GcsCache?.();
 
                         // Only update + redraw if it meaningfully changed
@@ -3530,11 +3531,24 @@
         }
     })();
 
-    function updateL14GcsCountsCache(gcsPois, queryBounds) {
+    function getGcsReturnedCellLevel(json) {
+        // Prefer the response-level field if present
+        const lvl = json?.result?.cellLevel;
+        if (Number.isFinite(lvl)) return lvl;
+
+        // Fall back to first block’s metadata
+        const first = json?.result?.data?.[0]?.metadata?.s2CellLevel;
+        if (Number.isFinite(first)) return first;
+
+        return null; // unknown
+    }
+
+    function updateL14GcsCountsCache(gcsPois, queryBounds, returnedLevel) {
         if (!queryBounds) return;
         if (!Array.isArray(gcsPois) || !gcsPois.length) return;
 
-        const L14_LEVEL = 14;
+        // If GCS is returning L14 (or coarser, i.e. <= 14), assume returned cells are complete.
+        const responseIsAtLeastL14 = Number.isFinite(returnedLevel) && returnedLevel <= 14;
 
         // 1) Count this response's GCS POIs per L14
         const tmp = new Map(); // cellId -> { cell, gcsItems, gcsGyms }
@@ -3542,7 +3556,7 @@
         for (const p of gcsPois) {
             if (!p || typeof p.lat !== "number" || typeof p.lng !== "number") continue;
 
-            const cell = S2.S2Cell.FromLatLng({ lat: p.lat, lng: p.lng }, L14_LEVEL);
+            const cell = S2.S2Cell.FromLatLng({ lat: p.lat, lng: p.lng }, 14);
             const cellId = cell.toString();
 
             let info = tmp.get(cellId);
@@ -3555,16 +3569,20 @@
             if (p.poiType === "gym") info.gcsGyms++;
         }
 
-        // 2) Only promote counts into the long-lived cache if the L14 cell is "complete"
+        // 2) Promote counts into the long-lived cache
         const now = Date.now();
 
         for (const [cellId, info] of tmp.entries()) {
-            const centre = getCellCentreLatLng(info.cell);
-            if (!centre) continue;
+            if (!responseIsAtLeastL14) {
+                // Fallback completeness rule (needed when response is finer than L14, e.g. L15)
+                const centre = getCellCentreLatLng(info.cell);
+                if (!centre) continue;
 
-            // Your completeness rule: L14 centre inside last query bounds
-            if (!pointInQueryBounds(centre, queryBounds)) continue;
+                // L14 centre inside last query bounds
+                if (!pointInQueryBounds(centre, queryBounds)) continue;
+            }
 
+            // Either: response is L14/coarser (auto-complete), OR it passed the centre-in-bounds gate
             l14GcsCountsByCellId.set(cellId, {
                 cell: info.cell,
                 gcsItems: info.gcsItems,
