@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Contributions Overlay
-// @version      3.0.0
+// @version      3.1.0
 // @description  Loads nominations from the Contributions list and shows them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-contributions-overlay.user.js
+// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-contributions-overlay.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
 // @run-at       document-start
@@ -88,7 +89,7 @@
     let mapPanelObserver = null;
     let mapPanelMutationScheduled = false;
 
-    // Pending submissions created via /submit/start
+    // Pending submissions created via /submit/now
     let pendingSubmissions = {};          // id -> { id, title, description, lat, lng, submittedAt }
     let pendingSubmissionMarkers = {};    // id -> google.maps.Marker
     let pendingSubmissionTimers = {};     // id -> timeout ID (for 3-minute recheck)
@@ -466,12 +467,11 @@
     // Network & Wayfarer API Integration
     // -----------------------------
 
-
     /**
      * Monkey-patch XMLHttpRequest to:
      *  - watch GET /api/v1/vault/manage responses and update local nominations
      *  - watch POST /api/v1/vault/manage/* actions and update local status
-     *  - watch POST /api/v1/vault/submit/start to track pending submissions
+     *  - watch POST /api/v1/vault/submit/now and track successful submissions
      */
     (function (open, send) {
         XMLHttpRequest.prototype.open = function (method, url) {
@@ -517,6 +517,38 @@
                 }, false);
             }
 
+            // Track successful POST /api/v1/vault/submit/now
+            if (upperMethod === "POST" && cleanUrl === "/api/v1/vault/submit/now") {
+                this.addEventListener("load", function () {
+                    try {
+                        const response = this.responseText || this.response;
+                        const json = response ? JSON.parse(response) : null;
+
+                        if (!json || json.captcha) {
+                            console.warn("[ContribOverlay] submit/now response missing or captcha required");
+                            return;
+                        }
+
+                        if (json.result !== "DONE") {
+                            console.warn("[ContribOverlay] submit/now did not succeed:", json);
+                            return;
+                        }
+
+                        const payload = this._wfmapmodsSubmitNowPayload;
+                        if (!payload) {
+                            console.warn("[ContribOverlay] submit/now succeeded but no payload was captured");
+                            return;
+                        }
+
+                        console.log("[ContribOverlay] submit/now success via XHR:", payload);
+                        handleSubmitNowPayload(payload);
+
+                    } catch (err) {
+                        console.warn("[ContribOverlay] Error handling submit/now response:", err);
+                    }
+                }, false);
+            }
+
             // Let the original open() run
             return open.apply(this, arguments);
         };
@@ -540,19 +572,18 @@
                 }
             }
 
-            // Detect POST /api/v1/vault/submit/start and record a pending submission
-            if (method === "POST" && url === "/api/v1/vault/submit/start" && body) {
+            // Detect POST /api/v1/vault/submit/now and store payload for success handling on load
+            if (method === "POST" && url === "/api/v1/vault/submit/now" && body) {
                 try {
                     if (typeof body === "string") {
                         const payload = JSON.parse(body);
-                        // startPayload has title, description, supportingStatement, lat, lng, etc.
-                        console.log("[ContribOverlay] Detected submit/start via XHR:", payload);
-                        handleSubmitStartPayload(payload);
+                        console.log("[ContribOverlay] Detected submit/now via XHR:", payload);
+                        this._wfmapmodsSubmitNowPayload = payload;
                     } else {
-                        console.log("[ContribOverlay] submit/start body is not a string:", body);
+                        console.log("[ContribOverlay] submit/now body is not a string:", body);
                     }
                 } catch (e) {
-                    console.warn("[ContribOverlay] Failed to parse submit/start payload:", e);
+                    console.warn("[ContribOverlay] Failed to parse submit/now payload:", e);
                 }
             }
 
@@ -1039,21 +1070,22 @@
     }
 
     /**
-     * Record a new pending submission from the /submit/start payload.
-     * This is called by the fetch instrumentation when a Wayspot is submitted via API.
+     * Record a new pending submission from the successful /submit/now payload.
+     * This is called only after the XHR response confirms result === "DONE".
      */
-    function handleSubmitStartPayload(startPayload) {
-        // Defensive checks: rely on the plugin's validation but re-validate here
-        if (!startPayload) return;
+    function handleSubmitNowPayload(nowPayload) {
+        if (!nowPayload) return;
 
-        const title = (startPayload.title || "").trim();
-        const description = (startPayload.description || "").trim();
-        const supportingStatement = (startPayload.supportingStatement || "").trim();
-        const lat = startPayload.lat;
-        const lng = startPayload.lng;
+        const title = (nowPayload.title || "").trim();
+        const description = (nowPayload.description || "").trim();
+        const supportingStatement = (nowPayload.supportingStatement || "").trim();
+        const lat = nowPayload.lat;
+        const lng = nowPayload.lng;
 
-        if (typeof lat !== "number" || typeof lng !== "number" ||
-            !Number.isFinite(lat) || !Number.isFinite(lng)) {
+        if (
+            typeof lat !== "number" || typeof lng !== "number" ||
+            !Number.isFinite(lat) || !Number.isFinite(lng)
+        ) {
             return;
         }
 
@@ -1066,6 +1098,7 @@
             id,
             title,
             description,
+            supportingStatement,
             lat,
             lng,
             submittedAt
