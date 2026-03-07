@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.4.10
+// @version      3.5.0
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
+// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
 // @run-at       document-start
@@ -2280,6 +2281,32 @@
         });
     }
 
+    function getJson(url) {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("GET", url, true);
+            xhr.withCredentials = true;
+
+            xhr.onload = function () {
+                if (xhr.status < 200 || xhr.status >= 300) {
+                    return reject(new Error("HTTP " + xhr.status + " for " + url));
+                }
+
+                try {
+                    resolve(JSON.parse(xhr.responseText || "{}"));
+                } catch (e) {
+                    reject(e);
+                }
+            };
+
+            xhr.onerror = function () {
+                reject(new Error("Network error for " + url));
+            };
+
+            xhr.send();
+        });
+    }
+
     async function submitWayspotViaApi(submitData, options = {}) {
         const { poi, images } = submitData || {};
         if (!poi) return;
@@ -2294,6 +2321,7 @@
             alert("Title and description are required.");
             return;
         }
+
         if (typeof lat !== "number" || typeof lng !== "number" || !Number.isFinite(lat) || !Number.isFinite(lng)) {
             alert("Submission is missing valid coordinates.");
             return;
@@ -2306,6 +2334,7 @@
             alert("Submission is missing a main image.");
             return;
         }
+
         if (supportingStates.length < 1 || supportingStates.length > 5) {
             alert("Submission must have between 1 and 5 supporting images.");
             return;
@@ -2313,19 +2342,18 @@
 
         const confirmText =
               "This will submit a new nomination with the provided details.\n\n" +
-              "This will consume one of your available nominations.\n\n" +
+              "This will consume one of your available nominations only when the final submit step succeeds.\n\n" +
               "Do you want to continue?";
+
         if (!window.confirm(confirmText)) {
             return;
         }
 
-        // User confirmed → begin critical operation
         wfMapmodsIsUploading = true;
 
-        // 0–20% = prep work
+        // 0–20% = prep + signed URL request
         wfmapmodsSetSubmitProgress("Starting nomination…", 5);
 
-        // Helper for image-upload range: 20–90%
         function imageUploadPercent(done, total) {
             const start = 20;
             const end = 90;
@@ -2339,10 +2367,15 @@
 
             async function resolveBlobFromState(state) {
                 if (!state) return null;
+
                 if (state.sourceType === "file" && state.file instanceof Blob) {
                     return state.file;
                 }
-                if (state.url) return await fetchImageBlobForSubmit(state.url);
+
+                if (state.url) {
+                    return await fetchImageBlobForSubmit(state.url);
+                }
+
                 return null;
             }
 
@@ -2357,64 +2390,55 @@
             const supportingBlobs = [];
             for (const s of supportingStates) {
                 const b = await resolveBlobFromState(s);
-                if (b) supportingBlobs.push(b);
+                if (!b) {
+                    wfmapmodsHideSubmitProgress();
+                    wfMapmodsIsUploading = false;
+                    alert("Could not load one of the supporting image files.");
+                    return;
+                }
+                supportingBlobs.push(b);
             }
 
-            wfmapmodsSetSubmitProgress("Contacting Wayfarer…", 20);
+            const totalSupporting = supportingBlobs.length;
+            const totalImages = 1 + totalSupporting;
 
-            const startPayload = {
-                title,
-                description,
-                lat,
-                lng,
-                supportingStatement,
-                supportingImageCount: supportingBlobs.length
-            };
+            // ==========================================
+            // 1) GET signed upload URLs
+            // ==========================================
+            wfmapmodsSetSubmitProgress("Requesting upload URLs…", 15);
 
-            console.log("[WFMM - Base] /submit/start payload:", startPayload);
+            const uploadUrl =
+                  "/api/v1/vault/submit/upload?supportingImageCount=" + encodeURIComponent(totalSupporting);
 
-            const startResp = await postJsonWithCsrf("/api/v1/vault/submit/start", startPayload);
+            console.log("[WFMM - Base] GET upload URL:", uploadUrl);
 
-            console.log("[WFMM - Base] /submit/start response raw:", startResp);
+            const uploadPrepResp = await getJson(uploadUrl);
 
-            if (!startResp || startResp.captcha) {
+            console.log("[WFMM - Base] /submit/upload response raw:", uploadPrepResp);
+
+            if (!uploadPrepResp || uploadPrepResp.captcha) {
                 wfmapmodsHideSubmitProgress();
                 wfMapmodsIsUploading = false;
-                alert("Submit/start failed or requires captcha. Please submit manually.");
+                alert("Submit/upload failed or requires captcha. Please submit manually.");
                 return;
             }
 
-            const result = startResp.result || {};
-            const imageUrlMap = result.imageUrlMap || result.uploadUrlMap || {};
-            const submissionId = result.submissionId || result.nominationId;
+            const imageUrlMap =
+                  (uploadPrepResp.result && uploadPrepResp.result.imageUrlMap) || {};
 
-            console.log("[WFMM - Base] submissionId:", submissionId);
             console.log("[WFMM - Base] imageUrlMap:", imageUrlMap);
 
-            if (!submissionId) {
-                wfmapmodsHideSubmitProgress();
-                wfMapmodsIsUploading = false;
-                alert("Submit/start did not return a submissionId.");
-                return;
-            }
-
-            // === Main image URL ===
             const mainUploadUrl = imageUrlMap.main || null;
-
             if (!mainUploadUrl) {
                 wfmapmodsHideSubmitProgress();
                 wfMapmodsIsUploading = false;
-                alert("Submit/start did not return main image URL.");
+                alert("Submit/upload did not return a main image URL.");
                 return;
             }
 
-            // =====================================================
-            // Build supporting URLs
-            // =====================================================
-
             let supportingUploadUrls = [];
 
-            // Collect supporting, supporting1, supporting2, ...
+            // supporting, supporting1, supporting2, supporting3, supporting4...
             const supportingKeys = Object.keys(imageUrlMap)
             .filter(k => k === "supporting" || /^supporting\d+$/.test(k))
             .sort((a, b) => {
@@ -2429,16 +2453,12 @@
                 .map(k => imageUrlMap[k])
                 .filter(Boolean);
 
-            const totalSupporting = supportingBlobs.length;
-            const totalImages = 1 + totalSupporting; // main + supporting
-            let uploadedImages = 0;
-
-            // Hard fail if Wayfarer didn't give us a URL for every supporting image.
             if (totalSupporting > 0 && supportingUploadUrls.length < totalSupporting) {
                 const msg =
                       "[WFMM - Base] MISMATCH: Need " + totalSupporting +
                       " supporting URLs but only got " + supportingUploadUrls.length;
-                console.warn(msg, { supportingUploadUrls, supportingBlobs });
+
+                console.warn(msg, { supportingUploadUrls, supportingBlobs, imageUrlMap });
 
                 wfmapmodsHideSubmitProgress();
                 wfMapmodsIsUploading = false;
@@ -2451,28 +2471,37 @@
                 return;
             }
 
-            // === Upload main image (first of totalImages) ===
-            uploadedImages = 0;
-            uploadedImages++;
+            // ==========================================
+            // 2) Upload images to signed URLs
+            // ==========================================
+            let uploadedImages = 0;
 
-            const mainPct = imageUploadPercent(uploadedImages, totalImages);
-            wfmapmodsSetSubmitProgress(
-                `Uploading main photo…`,
-                mainPct
-            );
-            console.log("[WFMM - Base] PUT main image to:", mainUploadUrl);
-            await putImageToSignedUrlForSubmit(mainUploadUrl, mainBlob);
+            function updateParallelUploadProgress() {
+                const pct = imageUploadPercent(uploadedImages, totalImages);
 
-            // === Upload supporting ===
-            if (totalSupporting > 0) {
-                wfmapmodsSetSubmitProgress(
-                    `Uploading supporting photos (0 of ${totalSupporting})…`,
-                    imageUploadPercent(uploadedImages, totalImages)
-                );
+                if (uploadedImages === 0) {
+                    wfmapmodsSetSubmitProgress(`Uploading photos (0 of ${totalImages})…`, pct);
+                } else if (uploadedImages < totalImages) {
+                    wfmapmodsSetSubmitProgress(`Uploading photos (${uploadedImages} of ${totalImages})…`, pct);
+                } else {
+                    wfmapmodsSetSubmitProgress(`Uploading photos (${totalImages} of ${totalImages})…`, pct);
+                }
             }
 
-            let uploadedSupportingCount = 0;
+            updateParallelUploadProgress();
 
+            const uploadTasks = [];
+
+            // Main image task
+            uploadTasks.push(
+                putImageToSignedUrlForSubmit(mainUploadUrl, mainBlob).then(() => {
+                    uploadedImages++;
+                    console.log("[WFMM - Base] Uploaded main image");
+                    updateParallelUploadProgress();
+                })
+            );
+
+            // Supporting image tasks
             for (let i = 0; i < totalSupporting; i++) {
                 const blob = supportingBlobs[i];
                 const url = supportingUploadUrls[i];
@@ -2491,75 +2520,97 @@
                         "Error uploading supporting photos:\n\n" +
                         "One of the supporting images could not be prepared for upload.\n" +
                         "The nomination has NOT been submitted.\n\n" +
+                        "No nomination quota should have been consumed.\n\n" +
                         "Please screenshot console log and share on WDD #tools."
                     );
                     return;
                 }
 
-                uploadedSupportingCount++;
-                uploadedImages++;
+                const displayIndex = i + 1;
+                console.log(`[WFMM - Base] Starting supporting image #${displayIndex} upload to:`, url);
 
-                const pct = imageUploadPercent(uploadedImages, totalImages);
-                const label = `Uploading supporting photos (${uploadedSupportingCount} of ${totalSupporting})…`;
-
-                wfmapmodsSetSubmitProgress(label, pct);
-
-                console.log(`[WFMM - Base] PUT supporting image #${uploadedSupportingCount} to:`, url);
-                await putImageToSignedUrlForSubmit(url, blob);
+                uploadTasks.push(
+                    putImageToSignedUrlForSubmit(url, blob).then(() => {
+                        uploadedImages++;
+                        console.log(`[WFMM - Base] Uploaded supporting image #${displayIndex}`);
+                        updateParallelUploadProgress();
+                    })
+                );
             }
 
-            // === Complete submission ===
+            // Wait for all uploads to finish
+            await Promise.all(uploadTasks);
+
+            // ==========================================
+            // 3) Final POST /submit/now
+            // ==========================================
             wfmapmodsSetSubmitProgress("Finalising nomination…", 95);
 
-            const completePayload = submissionId;
-            const completeUrl =
-                  "/api/v1/vault/submit/complete?submissionId=" + encodeURIComponent(submissionId);
+            const nowPayload = {
+                title,
+                description,
+                lat,
+                lng,
+                supportingStatement,
+                supportingImageCount: totalSupporting,
+                contextToGsImageMap: {}
+            };
 
-            console.log("[WFMM - Base] /submit/complete URL:", completeUrl);
-            console.log("[WFMM - Base] /submit/complete payload:", completePayload);
+            console.log("[WFMM - Base] /submit/now payload:", nowPayload);
 
-            const completeResp = await postJsonWithCsrf(completeUrl, completePayload);
+            const nowResp = await postJsonWithCsrf("/api/v1/vault/submit/now", nowPayload);
 
-            console.log("[WFMM - Base] /submit/complete response raw:", completeResp);
+            console.log("[WFMM - Base] /submit/now response raw:", nowResp);
 
-            if (!completeResp || completeResp.captcha) {
+            if (!nowResp || nowResp.captcha) {
                 wfmapmodsHideSubmitProgress();
                 wfMapmodsIsUploading = false;
-                alert("Submit/complete failed or requires captcha.");
+                alert("Submit/now failed or requires captcha.");
                 return;
             }
 
-            if (completeResp.result !== "DONE") {
+            if (nowResp.result !== "DONE") {
                 wfmapmodsHideSubmitProgress();
                 wfMapmodsIsUploading = false;
-                alert("Submit/complete did not succeed: " + (completeResp.code || completeResp.result));
+
+                let msg = "Submit/now did not succeed";
+                if (nowResp.code || nowResp.result) {
+                    msg += ": " + (nowResp.code || nowResp.result);
+                }
+
+                if (Array.isArray(nowResp.fieldErrors) && nowResp.fieldErrors.length) {
+                    msg += "\n\nField errors:\n" + nowResp.fieldErrors.join("\n");
+                }
+
+                alert(msg);
                 return;
             }
 
-            // ONLY delete draft after complete succeeded
+            // Only delete draft after final submit succeeded
             if (options.draftIdToDelete) {
                 try {
                     await deleteDraftSubmissionFromIDB(options.draftIdToDelete);
                 } catch (e) {
                     console.warn("[WFMM - Base] Draft deletion failed:", e);
-                    // don't fail the submission UI just because cleanup failed
                 }
             }
 
             wfmapmodsSetSubmitProgress("Nomination submitted!", 100);
-            console.log("[WFMM - Base] DONE for submissionId:", submissionId);
+            console.log("[WFMM - Base] DONE");
 
             wfMapmodsIsUploading = false;
-
             wfmapmodsHideSubmitProgress(1500);
 
         } catch (err) {
             console.error("Wayfarer Map: submitWayspotViaApi failed:", err);
             wfmapmodsHideSubmitProgress();
             wfMapmodsIsUploading = false;
-            alert("Error while submitting nomination — see console for details.");
+            alert(
+                "Error while submitting nomination.\n\n" +
+                "If this failed before the final /submit/now step, no nomination quota should have been consumed.\n" +
+                "See console for details."
+            );
         } finally {
-            // Refresh quotas regardless of success/failure/early-return
             updateAvailability({ force: true }).catch(() => {});
         }
     }
