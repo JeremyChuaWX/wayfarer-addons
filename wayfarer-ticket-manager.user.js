@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.0.9
+// @version      0.1.0
 // @description  Support for simultaneous tickets
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
@@ -8,10 +8,6 @@
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
 // @match        https://webchat.helpshift.com/*
-// @grant        GM_setValue
-// @grant        GM_getValue
-// @grant        GM_deleteValue
-// @grant        GM_addValueChangeListener
 // ==/UserScript==
 
 // Copyright 2025 tntnnbltn
@@ -28,11 +24,15 @@
 
 function init() {
 
-    const uuid = 'aff6f55e-004d-4100-abee-f6f93c108eb5'; // randomly generated, unique to this userscript, please don't re-use in other scripts
-
     const ORIGIN_WAYFARER = 'https://wayfarer.nianticlabs.com';
     const ORIGIN_HELPSHIFT = 'https://webchat.helpshift.com';
     const OBJECT_STORE_NAME = 'helpChatSessions';
+
+    const WFTM_SOURCE = 'wftm';
+
+    function isSafeObject(value) {
+        return value && typeof value === 'object';
+    }
 
     function initHelp() {
 
@@ -54,10 +54,27 @@ function init() {
             };
         })(XMLHttpRequest.prototype.open);
 
+        function handleParentMessage(event) {
+            if (event.origin !== ORIGIN_WAYFARER) return;
+            if (!isSafeObject(event.data)) return;
+            if (event.data.source !== WFTM_SOURCE) return;
+
+            const { type, payload } = event.data;
+
+            if (type === 'clearSession') {
+                clearLocalStorage();
+            } else if (type === 'restoreSession' && payload && payload.aui) {
+                updateLocalStorage(payload);
+            }
+        }
+
+        window.addEventListener('message', handleParentMessage);
+
         function parseResponse() {
             try {
                 const json = JSON.parse(this.responseText);
                 if (!json) return;
+                console.log(json);
                 sendTicketHistory(json);
             } catch (ex) {
                 console.error('Error parsing JSON:', ex);
@@ -69,17 +86,21 @@ function init() {
             const asi = localStorage.getItem('asi:niantic-4d50991f7c85c5b');
             const aui = localStorage.getItem('aui:niantic-4d50991f7c85c5b');
 
-            const values = { di, asi, aui };
-
-            // Send the values to the parent window (Wayfarer page)
-            window.parent.postMessage(values, 'https://wayfarer.nianticlabs.com');
+            window.parent.postMessage({
+                source: WFTM_SOURCE,
+                type: 'sessionValues',
+                payload: { di, asi, aui }
+            }, ORIGIN_WAYFARER);
         }
 
         loadAndSendSessionValues();
 
         function sendTicketHistory(data) {
-            GM_setValue(uuid, data);
-            GM_deleteValue(uuid);
+            window.parent.postMessage({
+                source: WFTM_SOURCE,
+                type: 'ticketHistory',
+                payload: data
+            }, ORIGIN_WAYFARER);
         }
 
         function clearLocalStorage() {
@@ -104,16 +125,6 @@ function init() {
                 localStorage.setItem(configKey, JSON.stringify(configData));
             }
         }
-
-        GM_addValueChangeListener(uuid, (label, data) => {
-            if (label === uuid && data) {
-                if (data === 'clear') {
-                    clearLocalStorage();
-                } else if (data.aui) {
-                    updateLocalStorage(data);
-                }
-            }
-        });
     }
 
 
@@ -126,13 +137,25 @@ function init() {
 
         const awaitElement = get => new Promise((resolve, reject) => {
             let triesLeft = 20;
+
             const queryLoop = () => {
                 const ref = get();
-                if (ref) resolve(ref);
-                else if (!triesLeft) reject();
-                else setTimeout(queryLoop, 1000);
-                triesLeft;
-            }
+
+                if (ref) {
+                    resolve(ref);
+                    return;
+                }
+
+                triesLeft -= 1;
+
+                if (triesLeft <= 0) {
+                    reject(new Error('Element not found'));
+                    return;
+                }
+
+                setTimeout(queryLoop, 1000);
+            };
+
             queryLoop();
         });
 
@@ -167,31 +190,54 @@ function init() {
         };
 
         window.addEventListener('message', function(event) {
-            if (event.origin === 'https://webchat.helpshift.com') {
-                const data = event.data;
+            if (event.origin !== ORIGIN_HELPSHIFT) return;
+            if (!isSafeObject(event.data)) return;
+            if (event.data.source !== WFTM_SOURCE) return;
 
-                if (data.di && data.aui) {
-                    currentSession = data.aui
+            const { type, payload } = event.data;
 
-                    if (!helpChatSessions[data.aui]) {
-                        helpChatSessions[data.aui] = { di: data.di, asi: data.asi };
-                        saveDataToLocalStorage();
-                    }
+            if (type === 'sessionValues' && payload && payload.di && payload.aui) {
+                currentSession = payload.aui;
+
+                if (!helpChatSessions[payload.aui]) {
+                    helpChatSessions[payload.aui] = {
+                        di: payload.di,
+                        asi: payload.asi
+                    };
+                    saveDataToLocalStorage();
                 }
+            } else if (type === 'ticketHistory' && payload) {
+                processTicketData(payload);
             }
         });
 
+        function postToHelp(type, payload = null) {
+            const iframe = document.getElementById('hs-web-sdk-iframe');
+            if (!iframe || !iframe.contentWindow) {
+                console.warn('Ticket Manager: Helpshift iframe not available');
+                return false;
+            }
+
+            iframe.contentWindow.postMessage({
+                source: WFTM_SOURCE,
+                type,
+                payload
+            }, ORIGIN_HELPSHIFT);
+
+            return true;
+        }
+
         function restoreOldTicket(data) {
-            GM_setValue(uuid, data);
-            GM_deleteValue(uuid);
+            const sent = postToHelp('restoreSession', data);
+            if (!sent) return;
 
             saveDataToLocalStorage();
             refreshPage();
         }
 
         function generateNewTicket() {
-            GM_setValue(uuid, 'clear');
-            GM_deleteValue(uuid);
+            const sent = postToHelp('clearSession');
+            if (!sent) return;
 
             saveDataToLocalStorage();
             refreshPage();
@@ -208,12 +254,6 @@ function init() {
                 location.reload();
             }, 50);
         }
-
-        GM_addValueChangeListener(uuid, (label, data) => {
-            if (label === uuid && data) {
-                processTicketData(data);
-            }
-        });
 
         function processTicketData(data) {
             if (data.body) {
