@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Report Wayspots
-// @version      3.1.3
+// @version      3.1.4
 // @description  Displays Reported Wayspots history on the map and adds additional reporting mechanisms.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
+// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
 // @match        https://niantic.helpshift.com/hc/en/5-report-an-issue-with-a-pokestop-gym/contact-us/*
@@ -1141,7 +1142,12 @@
 
         link.addEventListener('click', (ev) => {
             ev.preventDefault();
-            handleReportWayspotClick();
+
+            // Open immediately while the click gesture is still active
+            const popup = window.open('about:blank', '_blank');
+
+            // Then do async work
+            handleReportWayspotClick(popup);
         });
     }
 
@@ -1739,7 +1745,7 @@
     // Wayfarer: report click flow
     // ======================================================================
 
-    async function handleReportWayspotClick() {
+    async function handleReportWayspotClick(popup) {
         const wayspotData = collectCurrentWayspotData();
 
         loadSettings();
@@ -1749,18 +1755,17 @@
             ...wayspotData,
             name: reporting.name || null,
             email: reporting.email || null,
-
-            propertyOwner: (typeof reporting.propertyOwner === "boolean") ? reporting.propertyOwner : false,
-
-            preferredLanguage: (typeof reporting.preferredLanguage === "string" && reporting.preferredLanguage.trim())
+            propertyOwner: typeof reporting.propertyOwner === "boolean" ? reporting.propertyOwner : false,
+            preferredLanguage:
+            (typeof reporting.preferredLanguage === "string" && reporting.preferredLanguage.trim())
             ? reporting.preferredLanguage.trim()
             : "English",
-
-            typeOfLocation: (typeof reporting.typeOfLocation === "string" && reporting.typeOfLocation.trim())
+            typeOfLocation:
+            (typeof reporting.typeOfLocation === "string" && reporting.typeOfLocation.trim())
             ? reporting.typeOfLocation.trim()
             : null,
-
-            reasonForRemovalRequest: (typeof reporting.reasonForRemovalRequest === "string" && reporting.reasonForRemovalRequest.trim())
+            reasonForRemovalRequest:
+            (typeof reporting.reasonForRemovalRequest === "string" && reporting.reasonForRemovalRequest.trim())
             ? reporting.reasonForRemovalRequest.trim()
             : null,
         };
@@ -1770,34 +1775,28 @@
                 const geoResults = await pageReverseGeocode(basePayload.lat, basePayload.lng);
                 const geo = extractBestAddress(geoResults);
 
-                // Address components for the Helpshift form
                 basePayload.address  ||= geo.street1;
                 basePayload.city     ||= geo.city;
                 basePayload.state    ||= geo.state;
                 basePayload.country  ||= geo.country;
                 basePayload.postcode ||= geo.postcode;
-
-                // Single address string field for storing in the IDB
                 basePayload.addressString ||= geo.formatted || [geo.street1, geo.city, geo.state, geo.postcode, geo.country]
                     .filter(Boolean)
                     .join(", ");
             } catch (e) {
                 console.warn("[Report Wayspot] Reverse geocode failed:", e);
-
                 basePayload.address  ||= "Unknown";
                 basePayload.city     ||= "Unknown";
                 basePayload.state    ||= "Unknown";
                 basePayload.country  ||= "Unknown";
                 basePayload.postcode ||= "-";
-
                 basePayload.addressString ||= "Unknown";
             }
         }
 
-        console.log('base payload');
-        console.log(basePayload);
-        openHelpshiftWithData(basePayload);
+        openHelpshiftWithData(basePayload, popup);
     }
+
 
     function collectCurrentWayspotData() {
         let guid = null;
@@ -1871,10 +1870,16 @@
     }
 
     // If you decide to use this later, it now just reuses the same pattern
-    function openHelpshiftWithData(data) {
+    function openHelpshiftWithData(data, popup) {
         const payload = Object.assign({ timestamp: Date.now() }, data || {});
         lastReportPayload = payload;
-        window.open(REPORT_URL, '_blank');
+
+        if (popup) {
+            popup.location.href = REPORT_URL;
+        } else {
+            // fallback if popup was blocked or null
+            window.location.href = REPORT_URL;
+        }
     }
 
     // ======================================================================
