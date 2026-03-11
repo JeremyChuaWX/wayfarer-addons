@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.5.0
+// @version      3.6.0
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -137,9 +137,13 @@
     let lastFetchLat = null;
     let lastFetchLng = null;
 
-    // ----- Draft submissions -----
+    // ----- Local draft submissions -----
     let draftSubmissions = [];
     let draftMarkers = [];
+
+    // ----- Remote draft submissions -----
+    let remoteDraftSubmissions = [];
+    let remoteDraftMarkers = [];
 
     // ----- Select Wayspot after deep link or search -----
     let deepLinkTarget = null;
@@ -316,6 +320,7 @@
             showAddress: false,
             showPowerSpotRadiusAroundPokestopsAndGyms: false,
             displayInactivePowerSpotsAsActive: false,
+            defaultDraftSaveLocation: "remote",
             nearbyRadius: { enabled: true, strokeColor: "#4285F4", strokeOpacity: 0.8, strokeWidth: 2, fillColor: "#4285F4", fillOpacity: 0 },
             submitRadius: { enabled: true, strokeColor: "#e13cff", strokeOpacity: 0.8, strokeWidth: 4, fillColor: "#e13cff", fillOpacity: 0 },
             interactRadius: { enabled: true, strokeColor: "#ffcc33", strokeOpacity: 0.9, strokeWidth: 2, fillColor: "#ffed24", fillOpacity: 0.05 },
@@ -811,13 +816,22 @@
 
     function applyDraftVisibilityToAllMarkers() {
         const enabled = isDraftLayerEnabled();
-        if (!Array.isArray(draftMarkers)) return;
 
-        draftMarkers.forEach(m => {
-            if (m && typeof m.setVisible === "function") {
-                m.setVisible(enabled);
-            }
-        });
+        if (Array.isArray(draftMarkers)) {
+            draftMarkers.forEach(m => {
+                if (m && typeof m.setVisible === "function") {
+                    m.setVisible(enabled);
+                }
+            });
+        }
+
+        if (Array.isArray(remoteDraftMarkers)) {
+            remoteDraftMarkers.forEach(m => {
+                if (m && typeof m.setVisible === "function") {
+                    m.setVisible(enabled);
+                }
+            });
+        }
     }
 
     function isWayspotsLayerEnabled() {
@@ -1322,12 +1336,17 @@
             linkMarkers.textContent = "Markers";
             linkMarkers.href = "#";
 
+            const draftSettings = document.createElement("a");
+            draftSettings.textContent = "Drafts";
+            draftSettings.href = "#";
+
             const linkNearby = document.createElement("a");
             linkNearby.href = "#";
             linkNearby.textContent = "Nearby Wayspots";
 
             settingsBody.appendChild(linkMapOptions);
             settingsBody.appendChild(linkMarkers);
+            settingsBody.appendChild(draftSettings);
             settingsBody.appendChild(linkNearby);
 
             linkMapOptions.addEventListener("click", (e) => {
@@ -1338,6 +1357,11 @@
             linkMarkers.addEventListener("click", (e) => {
                 e.preventDefault();
                 openMarkerSettingsWindow();
+            });
+
+            draftSettings.addEventListener("click", (e) => {
+                e.preventDefault();
+                openDraftSettingsWindow();
             });
 
             linkNearby.addEventListener("click", (ev) => {
@@ -2307,6 +2331,22 @@
         });
     }
 
+    function getSubmitSupportingSlotName(index) {
+        return index === 0 ? "supporting" : "supporting" + index;
+    }
+
+    function sortSupportingSlotKeys(keys) {
+        return keys
+            .filter(k => k === "supporting" || /^supporting\d+$/.test(k))
+            .sort((a, b) => {
+            if (a === "supporting") return -1;
+            if (b === "supporting") return 1;
+            const na = parseInt(a.replace("supporting", ""), 10);
+            const nb = parseInt(b.replace("supporting", ""), 10);
+            return na - nb;
+        });
+    }
+
     async function submitWayspotViaApi(submitData, options = {}) {
         const { poi, images } = submitData || {};
         if (!poi) return;
@@ -2350,8 +2390,6 @@
         }
 
         wfMapmodsIsUploading = true;
-
-        // 0–20% = prep + signed URL request
         wfmapmodsSetSubmitProgress("Starting nomination…", 5);
 
         function imageUploadPercent(done, total) {
@@ -2379,31 +2417,55 @@
                 return null;
             }
 
-            const mainBlob = await resolveBlobFromState(mainState);
-            if (!mainBlob) {
-                wfmapmodsHideSubmitProgress();
-                wfMapmodsIsUploading = false;
-                alert("Could not load main image data.");
-                return;
+            const totalSupporting = supportingStates.length;
+
+            // ==========================================
+            // Build final slot plan
+            // ==========================================
+            const finalSlots = [];
+            const contextToGsImageMap = {};
+            const uploadSlots = [];
+            const uploadSlotToState = {};
+
+            // Main
+            if (mainState.gcsPath) {
+                contextToGsImageMap.main = mainState.gcsPath;
+            } else {
+                uploadSlots.push("main");
+                uploadSlotToState.main = mainState;
             }
 
-            const supportingBlobs = [];
-            for (const s of supportingStates) {
-                const b = await resolveBlobFromState(s);
-                if (!b) {
+            // Supporting in final order
+            supportingStates.forEach((img, idx) => {
+                const slotName = getSubmitSupportingSlotName(idx);
+                finalSlots.push(slotName);
+
+                if (img && img.gcsPath) {
+                    contextToGsImageMap[slotName] = img.gcsPath;
+                } else if (img) {
+                    uploadSlots.push(slotName);
+                    uploadSlotToState[slotName] = img;
+                }
+            });
+
+            // Resolve blobs only for slots that actually need upload
+            const uploadSlotToBlob = {};
+            for (const slotName of uploadSlots) {
+                const blob = await resolveBlobFromState(uploadSlotToState[slotName]);
+
+                if (!blob) {
                     wfmapmodsHideSubmitProgress();
                     wfMapmodsIsUploading = false;
-                    alert("Could not load one of the supporting image files.");
+                    alert(`Could not load image data for ${slotName}.`);
                     return;
                 }
-                supportingBlobs.push(b);
-            }
 
-            const totalSupporting = supportingBlobs.length;
-            const totalImages = 1 + totalSupporting;
+                uploadSlotToBlob[slotName] = blob;
+            }
 
             // ==========================================
             // 1) GET signed upload URLs
+            // Always required by native flow, even if 0 images need upload
             // ==========================================
             wfmapmodsSetSubmitProgress("Requesting upload URLs…", 15);
 
@@ -2436,80 +2498,66 @@
                 return;
             }
 
-            let supportingUploadUrls = [];
+            const supportingKeys = sortSupportingSlotKeys(Object.keys(imageUrlMap));
+            const supportingUploadUrlsBySlot = {};
 
-            // supporting, supporting1, supporting2, supporting3, supporting4...
-            const supportingKeys = Object.keys(imageUrlMap)
-            .filter(k => k === "supporting" || /^supporting\d+$/.test(k))
-            .sort((a, b) => {
-                if (a === "supporting") return -1;
-                if (b === "supporting") return 1;
-                const na = parseInt(a.replace("supporting", ""), 10);
-                const nb = parseInt(b.replace("supporting", ""), 10);
-                return na - nb;
+            supportingKeys.forEach((key) => {
+                supportingUploadUrlsBySlot[key] = imageUrlMap[key];
             });
 
-            supportingUploadUrls = supportingKeys
-                .map(k => imageUrlMap[k])
-                .filter(Boolean);
+            // Validate that any supporting slot needing upload has a URL
+            for (const slotName of uploadSlots) {
+                if (slotName === "main") continue;
 
-            if (totalSupporting > 0 && supportingUploadUrls.length < totalSupporting) {
-                const msg =
-                      "[WFMM - Base] MISMATCH: Need " + totalSupporting +
-                      " supporting URLs but only got " + supportingUploadUrls.length;
-
-                console.warn(msg, { supportingUploadUrls, supportingBlobs, imageUrlMap });
-
-                wfmapmodsHideSubmitProgress();
-                wfMapmodsIsUploading = false;
-                alert(
-                    "Error preparing your nomination:\n\n" +
-                    "Wayfarer did not return upload URLs for all supporting photos.\n" +
-                    "The nomination has NOT been submitted.\n\n" +
-                    "Please screenshot console log and share on WDD #tools."
-                );
-                return;
-            }
-
-            // ==========================================
-            // 2) Upload images to signed URLs
-            // ==========================================
-            let uploadedImages = 0;
-
-            function updateParallelUploadProgress() {
-                const pct = imageUploadPercent(uploadedImages, totalImages);
-
-                if (uploadedImages === 0) {
-                    wfmapmodsSetSubmitProgress(`Uploading photos (0 of ${totalImages})…`, pct);
-                } else if (uploadedImages < totalImages) {
-                    wfmapmodsSetSubmitProgress(`Uploading photos (${uploadedImages} of ${totalImages})…`, pct);
-                } else {
-                    wfmapmodsSetSubmitProgress(`Uploading photos (${totalImages} of ${totalImages})…`, pct);
+                if (!supportingUploadUrlsBySlot[slotName]) {
+                    wfmapmodsHideSubmitProgress();
+                    wfMapmodsIsUploading = false;
+                    alert(
+                        "Error preparing your nomination:\n\n" +
+                        `Wayfarer did not return an upload URL for ${slotName}.\n` +
+                        "The nomination has NOT been submitted."
+                    );
+                    return;
                 }
             }
 
-            updateParallelUploadProgress();
+            // ==========================================
+            // 2) Upload only images that are NOT already in remote draft
+            // ==========================================
+            let uploadedImages = 0;
+            const totalUploadsNeeded = uploadSlots.length;
+
+            function updateUploadProgress() {
+                const pct = imageUploadPercent(uploadedImages, totalUploadsNeeded);
+
+                if (totalUploadsNeeded === 0) {
+                    wfmapmodsSetSubmitProgress("Using existing draft photos…", 90);
+                    return;
+                }
+
+                if (uploadedImages === 0) {
+                    wfmapmodsSetSubmitProgress(`Uploading photos (0 of ${totalUploadsNeeded})…`, pct);
+                } else if (uploadedImages < totalUploadsNeeded) {
+                    wfmapmodsSetSubmitProgress(`Uploading photos (${uploadedImages} of ${totalUploadsNeeded})…`, pct);
+                } else {
+                    wfmapmodsSetSubmitProgress(`Uploading photos (${totalUploadsNeeded} of ${totalUploadsNeeded})…`, pct);
+                }
+            }
+
+            updateUploadProgress();
 
             const uploadTasks = [];
 
-            // Main image task
-            uploadTasks.push(
-                putImageToSignedUrlForSubmit(mainUploadUrl, mainBlob).then(() => {
-                    uploadedImages++;
-                    console.log("[WFMM - Base] Uploaded main image");
-                    updateParallelUploadProgress();
-                })
-            );
-
-            // Supporting image tasks
-            for (let i = 0; i < totalSupporting; i++) {
-                const blob = supportingBlobs[i];
-                const url = supportingUploadUrls[i];
+            for (const slotName of uploadSlots) {
+                const blob = uploadSlotToBlob[slotName];
+                const url = slotName === "main"
+                ? mainUploadUrl
+                : supportingUploadUrlsBySlot[slotName];
 
                 if (!blob || !url) {
                     console.warn(
-                        "[WFMM - Base] Missing blob/url for supporting image index",
-                        i,
+                        "[WFMM - Base] Missing blob/url for upload slot",
+                        slotName,
                         "blob:", !!blob,
                         "url:", url
                     );
@@ -2517,28 +2565,25 @@
                     wfmapmodsHideSubmitProgress();
                     wfMapmodsIsUploading = false;
                     alert(
-                        "Error uploading supporting photos:\n\n" +
-                        "One of the supporting images could not be prepared for upload.\n" +
+                        "Error uploading photos:\n\n" +
+                        `One of the images (${slotName}) could not be prepared for upload.\n` +
                         "The nomination has NOT been submitted.\n\n" +
-                        "No nomination quota should have been consumed.\n\n" +
-                        "Please screenshot console log and share on WDD #tools."
+                        "No nomination quota should have been consumed."
                     );
                     return;
                 }
 
-                const displayIndex = i + 1;
-                console.log(`[WFMM - Base] Starting supporting image #${displayIndex} upload to:`, url);
+                console.log(`[WFMM - Base] Starting upload for slot ${slotName} to:`, url);
 
                 uploadTasks.push(
                     putImageToSignedUrlForSubmit(url, blob).then(() => {
                         uploadedImages++;
-                        console.log(`[WFMM - Base] Uploaded supporting image #${displayIndex}`);
-                        updateParallelUploadProgress();
+                        console.log(`[WFMM - Base] Uploaded image for slot ${slotName}`);
+                        updateUploadProgress();
                     })
                 );
             }
 
-            // Wait for all uploads to finish
             await Promise.all(uploadTasks);
 
             // ==========================================
@@ -2553,7 +2598,7 @@
                 lng,
                 supportingStatement,
                 supportingImageCount: totalSupporting,
-                contextToGsImageMap: {}
+                contextToGsImageMap
             };
 
             console.log("[WFMM - Base] /submit/now payload:", nowPayload);
@@ -2591,7 +2636,17 @@
                 try {
                     await deleteDraftSubmissionFromIDB(options.draftIdToDelete);
                 } catch (e) {
-                    console.warn("[WFMM - Base] Draft deletion failed:", e);
+                    console.warn("[WFMM - Base] Local draft deletion failed:", e);
+                }
+            }
+
+            if (options.remoteDraftIdToDelete) {
+                try {
+                    // After successful nomination submit: delete the draft record,
+                    // but keep the already-uploaded images.
+                    await deleteRemoteDraftSubmission(options.remoteDraftIdToDelete, false);
+                } catch (e) {
+                    console.warn("[WFMM - Base] Remote draft deletion failed:", e);
                 }
             }
 
@@ -2734,7 +2789,7 @@
 
                 // Case 1: draft-style structure { main, supporting[] }
                 if (originalImages.main) {
-                    imageState.main = originalImages.main;
+                    imageState.main = Object.assign({}, originalImages.main);
                 } else if (originalImages.mainUrl) {
                     imageState.main = {
                         sourceType: "url",
@@ -2744,7 +2799,7 @@
                 }
 
                 if (Array.isArray(originalImages.supporting)) {
-                    imageState.supporting = originalImages.supporting.slice();
+                    imageState.supporting = originalImages.supporting.map(img => Object.assign({}, img));
                 } else if (Array.isArray(originalImages.supportingUrls)) {
                     originalImages.supportingUrls.forEach((u) => {
                         if (!u) return;
@@ -3221,75 +3276,106 @@
                         footer.insertBefore(saveBtn, footer.firstChild);
 
                         saveBtn.addEventListener("click", async () => {
-                            const title = titleInput.value.trim();
-                            const description = descInput.value.trim();
-                            const supportingStatement = suppInput.value.trim();
+                            try {
+                                const title = titleInput.value.trim();
+                                const description = descInput.value.trim();
+                                const supportingStatement = suppInput.value.trim();
 
-                            let lat = null;
-                            let lng = null;
+                                let lat = null;
+                                let lng = null;
 
-                            if (
-                                submitData.poi &&
-                                typeof submitData.poi.lat === "number" && Number.isFinite(submitData.poi.lat) &&
-                                typeof submitData.poi.lng === "number" && Number.isFinite(submitData.poi.lng)
-                            ) {
-                                lat = submitData.poi.lat;
-                                lng = submitData.poi.lng;
-                            } else if (
-                                typeof currentLat === "number" && Number.isFinite(currentLat) &&
-                                typeof currentLng === "number" && Number.isFinite(currentLng)
-                            ) {
-                                // Fallback to initial snapshot if poi didn’t get updated for some reason
-                                lat = currentLat;
-                                lng = currentLng;
-                            }
-
-                            if (
-                                typeof lat !== "number" || typeof lng !== "number" ||
-                                !Number.isFinite(lat) || !Number.isFinite(lng)
-                            ) {
-                                alert("Cannot save draft: submission is missing a valid location.");
-                                return;
-                            }
-
-                            const now = Date.now();
-                            const draftId = submitData.draftId ||
-                                  ("draft-" + now + "-" + Math.random().toString(36).slice(2));
-
-                            submitData.draftId = draftId;
-
-                            const draft = {
-                                id: draftId,
-                                createdAt: submitData.createdAt || now,
-                                updatedAt: now,
-                                poi: {
-                                    lat,
-                                    lng,
-                                    title,
-                                    description,
-                                    supportingStatement
-                                },
-                                images: {
-                                    main: imageState.main || null,
-                                    supporting: imageState.supporting.slice()
+                                if (
+                                    submitData.poi &&
+                                    typeof submitData.poi.lat === "number" && Number.isFinite(submitData.poi.lat) &&
+                                    typeof submitData.poi.lng === "number" && Number.isFinite(submitData.poi.lng)
+                                ) {
+                                    lat = submitData.poi.lat;
+                                    lng = submitData.poi.lng;
+                                } else if (
+                                    typeof currentLat === "number" && Number.isFinite(currentLat) &&
+                                    typeof currentLng === "number" && Number.isFinite(currentLng)
+                                ) {
+                                    lat = currentLat;
+                                    lng = currentLng;
                                 }
-                            };
 
-                            await saveDraftSubmissionToIDB(draft);
-                            closeModal();
+                                if (
+                                    typeof lat !== "number" || typeof lng !== "number" ||
+                                    !Number.isFinite(lat) || !Number.isFinite(lng)
+                                ) {
+                                    alert("Cannot save draft: submission is missing a valid location.");
+                                    return;
+                                }
+
+                                const mode = getDraftSaveLocationMode(submitData);
+                                const now = Date.now();
+
+                                closeModal();
+
+                                if (mode === "remote") {
+                                    const remoteDraft = await saveDraftSubmissionToWayfarer({
+                                        id: submitData.remoteDraftId || null,
+                                        remoteDraftId: submitData.remoteDraftId || null,
+                                        poi: {
+                                            lat,
+                                            lng,
+                                            title,
+                                            description,
+                                            supportingStatement
+                                        },
+                                        images: {
+                                            main: imageState.main || null,
+                                            supporting: imageState.supporting.slice()
+                                        }
+                                    });
+
+                                    submitData.remoteDraftId = remoteDraft.id;
+                                    return;
+                                }
+
+                                // Local / IDB path unchanged
+                                const draftId = submitData.draftId ||
+                                      ("draft-" + now + "-" + Math.random().toString(36).slice(2));
+
+                                submitData.draftId = draftId;
+
+                                const draft = {
+                                    id: draftId,
+                                    createdAt: submitData.createdAt || now,
+                                    updatedAt: now,
+                                    poi: {
+                                        lat,
+                                        lng,
+                                        title,
+                                        description,
+                                        supportingStatement
+                                    },
+                                    images: {
+                                        main: imageState.main || null,
+                                        supporting: imageState.supporting.slice()
+                                    }
+                                };
+
+                                await saveDraftSubmissionToIDB(draft);
+
+                            } catch (err) {
+                                console.error("[WFMM - Draft Save] Failed:", err);
+                                alert(err?.message || "Could not save draft. See console for details.");
+                            }
                         });
 
                     }
 
                     // Delete draft button (only if opened from a draft)
-                    if (submitData.fromDraft && submitData.draftId && !footer.querySelector(".wfmapmods-btn-delete-draft")) {
+                    const canDeleteLocalDraft = submitData.fromDraft && submitData.draftId;
+                    const canDeleteRemoteDraft = submitData.fromRemoteDraft && submitData.remoteDraftId;
+
+                    if ((canDeleteLocalDraft || canDeleteRemoteDraft) && !footer.querySelector(".wfmapmods-btn-delete-draft")) {
                         const deleteBtn = document.createElement("button");
                         deleteBtn.type = "button";
                         deleteBtn.textContent = "Delete draft";
                         deleteBtn.className = "wfmapmods-modal-btn wfmapmods-btn-delete-draft";
 
-                        // Place Delete Draft to the left of Save Draft (if present),
-                        // or as first child otherwise
                         const firstButton = footer.firstChild;
                         footer.insertBefore(deleteBtn, firstButton || null);
 
@@ -3297,8 +3383,18 @@
                             const confirmed = window.confirm("Delete this draft submission?");
                             if (!confirmed) return;
 
-                            await deleteDraftSubmissionFromIDB(submitData.draftId);
-                            closeModal();
+                            try {
+                                if (canDeleteRemoteDraft) {
+                                    await deleteRemoteDraftSubmission(submitData.remoteDraftId, true);
+                                } else if (canDeleteLocalDraft) {
+                                    await deleteDraftSubmissionFromIDB(submitData.draftId);
+                                }
+
+                                closeModal();
+                            } catch (err) {
+                                console.error("[WFMM - Draft Delete] Failed:", err);
+                                alert(err?.message || "Could not delete draft. See console for details.");
+                            }
                         });
                     }
                 }, 0);
@@ -3340,7 +3436,11 @@
                     supporting: ctx.imageState.supporting
                 };
 
-                submitWayspotViaApi(merged, { draftIdToDelete: merged.draftId });
+                submitWayspotViaApi(merged, {
+                    draftIdToDelete: merged.draftId || null,
+                    remoteDraftIdToDelete: merged.remoteDraftId || null
+                });
+
                 closeModal();
             }
         });
@@ -3610,8 +3710,611 @@
         throw new Error("Unhandled file format.");
     }
 
+
+
+    // ==================================
+    // Remote draft helpers (Wayfarer)
+    // ==================================
+
+    function getDraftSaveLocationMode(submitData) {
+        // If editing a remote draft, always keep it remote
+        if (submitData && (submitData.fromRemoteDraft || submitData.remoteDraftId)) {
+            return "remote";
+        }
+
+        const mode = userSettings?.map?.defaultDraftSaveLocation;
+        return mode === "local" ? "local" : "remote";
+    }
+
+    function getRemoteDraftUserLatLng() {
+        if (
+            !submitterLocation ||
+            typeof submitterLocation.lat !== "number" || !Number.isFinite(submitterLocation.lat) ||
+            typeof submitterLocation.lng !== "number" || !Number.isFinite(submitterLocation.lng)
+        ) {
+            throw new Error("Cannot save remote draft: submitter location is not available.");
+        }
+
+        return {
+            userLat: submitterLocation.lat,
+            userLng: submitterLocation.lng
+        };
+    }
+
+    function cloneRemoteImageState(img) {
+        if (!img) return null;
+        return {
+            sourceType: img.sourceType || "remote",
+            url: img.url || img.servingUrl || null,
+            file: null,
+            gcsPath: img.gcsPath || null,
+            servingUrl: img.servingUrl || img.url || null
+        };
+    }
+
+    function normalizeRemoteDraftFromApi(apiDraft) {
+        if (!apiDraft) return null;
+
+        const mainHasImage = !!(apiDraft.mainImageGcsPath || apiDraft.mainImageServingUrl);
+
+        const mainImage = mainHasImage ? {
+            sourceType: "remote",
+            url: apiDraft.mainImageServingUrl || null,
+            file: null,
+            gcsPath: apiDraft.mainImageGcsPath || null,
+            servingUrl: apiDraft.mainImageServingUrl || null
+        } : null;
+
+        const supportingGcs = Array.isArray(apiDraft.supportingImageGcsPaths)
+        ? apiDraft.supportingImageGcsPaths
+        : [];
+
+        const supportingServing = Array.isArray(apiDraft.supportingImageServingUrls)
+        ? apiDraft.supportingImageServingUrls
+        : [];
+
+        const supporting = [];
+        const maxLen = Math.max(supportingGcs.length, supportingServing.length);
+
+        for (let i = 0; i < maxLen; i++) {
+            const gcsPath = supportingGcs[i] || null;
+            const servingUrl = supportingServing[i] || null;
+
+            if (!gcsPath && !servingUrl) continue;
+
+            supporting.push({
+                sourceType: "remote",
+                url: servingUrl || null,
+                file: null,
+                gcsPath: gcsPath || null,
+                servingUrl: servingUrl || null
+            });
+        }
+
+        return {
+            id: apiDraft.id,
+            remoteDraftId: apiDraft.id,
+            lastModified: apiDraft.lastModified || Date.now(),
+            poi: {
+                lat: apiDraft.lat,
+                lng: apiDraft.lng,
+                title: apiDraft.title || "",
+                description: apiDraft.description || "",
+                supportingStatement: apiDraft.supportingStatement || ""
+            },
+            images: {
+                main: mainImage,
+                supporting
+            }
+        };
+    }
+
+    function upsertRemoteDraftSubmission(remoteDraft) {
+        if (!remoteDraft || !remoteDraft.id) return;
+
+        const idx = remoteDraftSubmissions.findIndex(d => d.id === remoteDraft.id);
+        if (idx >= 0) {
+            remoteDraftSubmissions[idx] = remoteDraft;
+        } else {
+            remoteDraftSubmissions.push(remoteDraft);
+        }
+    }
+
+    function removeRemoteDraftSubmissionById(id) {
+        remoteDraftSubmissions = remoteDraftSubmissions.filter(d => d.id !== id);
+    }
+
+    function getRemoteSupportingSlotName(index) {
+        return index === 0 ? "supporting" : "supporting" + index;
+    }
+
+    async function resolveBlobFromDraftImageState(state) {
+        if (!state) return null;
+
+        if (state.sourceType === "file" && state.file instanceof Blob) {
+            return state.file;
+        }
+
+        if (state.url) {
+            return await fetchImageBlobForSubmit(state.url);
+        }
+
+        return null;
+    }
+
+    async function createRemoteDraftShell() {
+        const resp = await postJsonWithCsrf("/api/v1/vault/submit/draft/create", {});
+        if (!resp || resp.captcha) {
+            throw new Error("Remote draft create failed or requires captcha.");
+        }
+
+        const draftId = resp?.result?.submissionId || null;
+        if (!draftId) {
+            throw new Error("Remote draft create did not return submissionId.");
+        }
+
+        return draftId;
+    }
+
+    async function requestRemoteDraftUploadUrls(draftId, slotNames) {
+        if (!draftId) throw new Error("Missing draftId for remote draft upload.");
+        if (!Array.isArray(slotNames) || !slotNames.length) return {};
+
+        const url = "/api/v1/vault/submit/draft/upload?draftId=" + encodeURIComponent(draftId);
+        const resp = await postJsonWithCsrf(url, slotNames);
+
+        if (!resp || resp.captcha) {
+            throw new Error("Remote draft upload URL request failed or requires captcha.");
+        }
+
+        const imageUrlMap = resp?.result?.imageUrlMap || {};
+        return imageUrlMap;
+    }
+
+    async function postRemoteDraftPayload(payload, userLat, userLng) {
+        if (typeof userLat !== "number" || !Number.isFinite(userLat) ||
+            typeof userLng !== "number" || !Number.isFinite(userLng)) {
+            throw new Error("Missing valid userLat/userLng for remote draft save.");
+        }
+
+        const url =
+              "/api/v1/vault/submit/draft?userLat=" + encodeURIComponent(userLat) +
+              "&userLng=" + encodeURIComponent(userLng);
+
+        const resp = await postJsonWithCsrf(url, payload);
+
+        if (!resp || resp.captcha) {
+            throw new Error("Remote draft save failed or requires captcha.");
+        }
+
+        const savedApiDraft = resp?.result?.poiSubmissionDraft || null;
+        if (!savedApiDraft) {
+            throw new Error("Remote draft save did not return poiSubmissionDraft.");
+        }
+
+        return savedApiDraft;
+    }
+
+    async function deleteRemoteDraftSubmission(remoteDraftId, deleteImages) {
+        if (!remoteDraftId) return;
+
+        const url =
+              "/api/v1/vault/submit/draft/delete?draftId=" + encodeURIComponent(remoteDraftId) +
+              "&deleteImages=" + encodeURIComponent(deleteImages ? "true" : "false");
+
+        const resp = await postJsonWithCsrf(url, {});
+
+        if (!resp || resp.captcha) {
+            throw new Error("Remote draft delete failed or requires captcha.");
+        }
+
+        if (resp.result !== "DONE") {
+            throw new Error("Remote draft delete did not return DONE.");
+        }
+
+        removeRemoteDraftSubmissionById(remoteDraftId);
+        refreshRemoteDraftMarkers();
+    }
+
+    async function loadRemoteDraftSubmissionsFromWayfarer() {
+        try {
+            const all = [];
+            let cursor = null;
+            let safety = 0;
+
+            do {
+                let url = "/api/v1/vault/submit/get/drafts";
+                if (cursor) {
+                    url += "?cursor=" + encodeURIComponent(cursor);
+                }
+
+                const resp = await getJson(url);
+                if (!resp || resp.captcha) {
+                    throw new Error("Remote draft list failed or requires captcha.");
+                }
+
+                const resultObj = resp?.result || {};
+                const items = Array.isArray(resultObj.result) ? resultObj.result : [];
+
+                items.forEach(item => {
+                    const norm = normalizeRemoteDraftFromApi(item);
+                    if (norm) all.push(norm);
+                });
+
+                const nextCursor = resultObj.cursor || null;
+                if (!nextCursor || nextCursor === cursor) {
+                    cursor = null;
+                } else {
+                    cursor = nextCursor;
+                }
+
+                safety++;
+                if (safety > 50) {
+                    console.warn("[WFMM - Remote Drafts] Pagination safety stop triggered.");
+                    break;
+                }
+            } while (cursor);
+
+            remoteDraftSubmissions = all;
+            refreshRemoteDraftMarkers();
+        } catch (err) {
+            console.warn("[WFMM - Remote Drafts] Failed to load remote drafts:", err);
+        }
+    }
+
+    async function saveDraftSubmissionToWayfarer(draftInput, options = {}) {
+        const showProgress = options.showProgress !== false;
+        const poi = draftInput?.poi || {};
+        const images = draftInput?.images || {};
+        const mainState = images.main || null;
+        const supportingStates = Array.isArray(images.supporting) ? images.supporting : [];
+
+        const lat = poi.lat;
+        const lng = poi.lng;
+        const title = (poi.title || "").trim();
+        const description = (poi.description || "").trim();
+        const supportingStatement = (poi.supportingStatement || "").trim();
+
+        if (
+            typeof lat !== "number" || !Number.isFinite(lat) ||
+            typeof lng !== "number" || !Number.isFinite(lng)
+        ) {
+            throw new Error("Cannot save remote draft: missing valid location.");
+        }
+
+        const hasMain = !!mainState && !mainState._pending;
+        const hasTitle = !!title;
+
+        if (!hasMain && !hasTitle) {
+            throw new Error("Cannot save remote draft: a title or a main photo is required.");
+        }
+
+        if (mainState && mainState._pending) {
+            throw new Error("Cannot save remote draft while main photo is still processing.");
+        }
+
+        if (supportingStates.some(img => img && img._pending)) {
+            throw new Error("Cannot save remote draft while supporting photos are still processing.");
+        }
+
+        const { userLat, userLng } = getRemoteDraftUserLatLng();
+
+        let draftId = draftInput.remoteDraftId || draftInput.id || null;
+        const isNewRemoteDraft = !draftId;
+
+        function imageUploadPercent(done, total) {
+            const start = 30;
+            const end = 90;
+            if (total <= 0) return start;
+            const frac = done / total;
+            return start + Math.floor(frac * (end - start));
+        }
+
+        try {
+            if (showProgress) {
+                wfmapmodsSetSubmitProgress(
+                    isNewRemoteDraft ? "Creating draft…" : "Saving draft…",
+                    5
+                );
+            }
+
+            if (!draftId) {
+                draftId = await createRemoteDraftShell();
+            }
+
+            // Figure out which images need upload
+            const uploadPlan = [];
+            const uploadSlotToState = {};
+
+            if (mainState && !mainState.gcsPath) {
+                uploadPlan.push("main");
+                uploadSlotToState.main = mainState;
+            }
+
+            supportingStates.forEach((img, idx) => {
+                if (!img) return;
+                if (!img.gcsPath) {
+                    const slotName = getRemoteSupportingSlotName(idx);
+                    uploadPlan.push(slotName);
+                    uploadSlotToState[slotName] = img;
+                }
+            });
+
+            const uploadedSlotMeta = {};
+
+            if (uploadPlan.length) {
+                if (showProgress) {
+                    wfmapmodsSetSubmitProgress("Requesting draft upload URLs…", 20);
+                }
+
+                const imageUrlMap = await requestRemoteDraftUploadUrls(draftId, uploadPlan);
+
+                let uploadedImages = 0;
+                const totalImages = uploadPlan.length;
+
+                function updateUploadProgress() {
+                    if (!showProgress) return;
+
+                    const pct = imageUploadPercent(uploadedImages, totalImages);
+                    if (uploadedImages === 0) {
+                        wfmapmodsSetSubmitProgress(`Uploading draft photos (0 of ${totalImages})…`, pct);
+                    } else if (uploadedImages < totalImages) {
+                        wfmapmodsSetSubmitProgress(`Uploading draft photos (${uploadedImages} of ${totalImages})…`, pct);
+                    } else {
+                        wfmapmodsSetSubmitProgress(`Uploading draft photos (${totalImages} of ${totalImages})…`, pct);
+                    }
+                }
+
+                updateUploadProgress();
+
+                for (const slotName of uploadPlan) {
+                    const slotInfo = imageUrlMap[slotName];
+                    if (!slotInfo || !slotInfo.uploadUrl || !slotInfo.gcsPath) {
+                        throw new Error("Missing uploadUrl/gcsPath for remote draft slot: " + slotName);
+                    }
+
+                    const blob = await resolveBlobFromDraftImageState(uploadSlotToState[slotName]);
+                    if (!blob) {
+                        throw new Error("Could not resolve image blob for remote draft slot: " + slotName);
+                    }
+
+                    await putImageToSignedUrlForSubmit(slotInfo.uploadUrl, blob);
+
+                    uploadedSlotMeta[slotName] = {
+                        gcsPath: slotInfo.gcsPath
+                    };
+
+                    uploadedImages++;
+                    updateUploadProgress();
+                }
+            }
+
+            if (showProgress) {
+                wfmapmodsSetSubmitProgress("Finalising draft…", 95);
+            }
+
+            // Build final payload
+            const payload = {
+                id: draftId,
+                lat,
+                lng,
+                title,
+                description,
+                supportingStatement
+            };
+
+            if (mainState) {
+                if (uploadedSlotMeta.main?.gcsPath) {
+                    payload.mainImageGcsPath = uploadedSlotMeta.main.gcsPath;
+                } else if (mainState.gcsPath) {
+                    payload.mainImageGcsPath = mainState.gcsPath;
+
+                    if (mainState.servingUrl) {
+                        payload.mainImageServingUrl = mainState.servingUrl;
+                    }
+                }
+            }
+
+            const supportingImageGcsPaths = [];
+            const supportingImageServingUrls = [];
+
+            supportingStates.forEach((img, idx) => {
+                if (!img) return;
+
+                const slotName = getRemoteSupportingSlotName(idx);
+
+                if (uploadedSlotMeta[slotName]?.gcsPath) {
+                    supportingImageGcsPaths.push(uploadedSlotMeta[slotName].gcsPath);
+                } else if (img.gcsPath) {
+                    supportingImageGcsPaths.push(img.gcsPath);
+
+                    if (img.servingUrl) {
+                        supportingImageServingUrls.push(img.servingUrl);
+                    }
+                }
+            });
+
+            if (supportingImageGcsPaths.length) {
+                payload.supportingImageGcsPaths = supportingImageGcsPaths;
+            }
+
+            if (supportingImageServingUrls.length) {
+                payload.supportingImageServingUrls = supportingImageServingUrls;
+            }
+
+            const savedApiDraft = await postRemoteDraftPayload(payload, userLat, userLng);
+            const normalized = normalizeRemoteDraftFromApi(savedApiDraft);
+
+            upsertRemoteDraftSubmission(normalized);
+            refreshRemoteDraftMarkers();
+
+            if (showProgress) {
+                wfmapmodsSetSubmitProgress("Draft saved!", 100);
+                wfmapmodsHideSubmitProgress(1200);
+            }
+
+            return normalized;
+
+        } catch (err) {
+            if (showProgress) {
+                wfmapmodsHideSubmitProgress();
+            }
+            throw err;
+        }
+    }
+
+    async function migrateLocalDraftsToRemoteQueue(onProgress) {
+        const localMetas = Array.isArray(draftSubmissions) ? draftSubmissions.slice() : [];
+
+        let successCount = 0;
+        let failCount = 0;
+        const failures = [];
+
+        for (let i = 0; i < localMetas.length; i++) {
+            const meta = localMetas[i];
+            const index = i + 1;
+
+            try {
+                if (typeof onProgress === "function") {
+                    onProgress({
+                        phase: "starting",
+                        index,
+                        total: localMetas.length,
+                        draftId: meta.id,
+                        successCount,
+                        failCount
+                    });
+                }
+
+                const fullDraft = await loadDraftByIdFromIDB(meta.id);
+                if (!fullDraft) {
+                    throw new Error("Could not load local draft from IndexedDB.");
+                }
+
+                const poi = fullDraft.poi || {};
+                const images = fullDraft.images || {};
+
+                await saveDraftSubmissionToWayfarer({
+                    poi: {
+                        lat: poi.lat,
+                        lng: poi.lng,
+                        title: poi.title || "",
+                        description: poi.description || "",
+                        supportingStatement: poi.supportingStatement || ""
+                    },
+                    images: {
+                        main: images.main || null,
+                        supporting: Array.isArray(images.supporting) ? images.supporting.slice() : []
+                    }
+                }, {
+                    showProgress: false
+                });
+
+                await deleteDraftSubmissionFromIDB(meta.id);
+
+                successCount++;
+
+                if (typeof onProgress === "function") {
+                    onProgress({
+                        phase: "success",
+                        index,
+                        total: localMetas.length,
+                        draftId: meta.id,
+                        successCount,
+                        failCount
+                    });
+                }
+            } catch (err) {
+                console.warn("[WFMM - Draft Migration] Failed migrating local draft:", meta?.id, err);
+
+                failCount++;
+                failures.push({
+                    id: meta?.id || null,
+                    error: err?.message || String(err)
+                });
+
+                if (typeof onProgress === "function") {
+                    onProgress({
+                        phase: "error",
+                        index,
+                        total: localMetas.length,
+                        draftId: meta?.id || null,
+                        successCount,
+                        failCount,
+                        error: err
+                    });
+                }
+            }
+        }
+
+        return {
+            total: localMetas.length,
+            successCount,
+            failCount,
+            failures
+        };
+    }
+
+    function refreshRemoteDraftMarkers() {
+        if (!wfMap || typeof google === "undefined" || !google.maps) return;
+
+        remoteDraftMarkers.forEach(m => {
+            if (m && typeof m.setMap === "function") {
+                m.setMap(null);
+            }
+        });
+        remoteDraftMarkers = [];
+
+        remoteDraftSubmissions.forEach(draft => {
+            const poi = draft.poi || {};
+            const lat = poi.lat;
+            const lng = poi.lng;
+
+            if (typeof lat !== "number" || typeof lng !== "number" || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+                return;
+            }
+
+            const position = new google.maps.LatLng(lat, lng);
+
+            const marker = new google.maps.Marker({
+                position,
+                map: wfMap,
+                title: poi.title || "Remote draft nomination",
+                optimized: false
+                // icon: "..." // optional: use a different icon/color for remote drafts
+            });
+
+            marker.setVisible(isDraftLayerEnabled());
+
+            marker.addListener("click", () => {
+                flyToLatLngAndPlaceSubmission(position);
+
+                openSubmissionEditModal({
+                    poi: {
+                        lat,
+                        lng,
+                        title: poi.title || "",
+                        description: poi.description || "",
+                        supportingStatement: poi.supportingStatement || ""
+                    },
+                    images: {
+                        main: cloneRemoteImageState(draft.images?.main),
+                        supporting: (draft.images?.supporting || []).map(cloneRemoteImageState)
+                    },
+                    remoteDraftId: draft.id,
+                    fromRemoteDraft: true,
+                    lastModified: draft.lastModified
+                });
+            });
+
+            remoteDraftMarkers.push(marker);
+        });
+    }
+
+
+
     // ======================================
-    // Draft submissions
+    // Local draft submissions
     // ======================================
 
     // Opens an IDB database connection for wayfarer-tools-db, ensuring DRAFT_STORE_NAME exists.
@@ -3936,44 +4639,6 @@
         };
 
         return draft;
-    }
-
-    function wfmapmodsInjectNativeSubmitSaveDraftButton() {
-        const container = document.querySelector("app-submit-wayspot .submit-wayspot-container");
-        if (!container) return;
-
-        const buttonContainer = container.querySelector(".submit-button-container");
-        if (!buttonContainer) return;
-
-        // Avoid adding multiple times
-        if (buttonContainer.querySelector(".wfmapmods-btn-native-save-draft")) return;
-
-        const saveBtn = document.createElement("button");
-        saveBtn.type = "button";
-        saveBtn.textContent = "Save draft";
-        saveBtn.className = "wf-button wfmapmods-btn-native-save-draft";
-        saveBtn.style.marginLeft = "8px";
-
-        saveBtn.addEventListener("click", async () => {
-            try {
-                const draft = wfmapmodsBuildDraftFromNativeSubmitForm();
-                if (!draft) return;
-
-                await saveDraftSubmissionToIDB(draft);
-                alert("Draft saved. It will appear as a draft pin on the map.");
-            } catch (err) {
-                console.error("[WFMM - Base] Failed to save native form draft:", err);
-                alert("Could not save draft – see console for details.");
-            }
-        });
-
-        // Insert after the native Submit button
-        const nativeSubmit = buttonContainer.querySelector("button[type='submit']");
-        if (nativeSubmit && nativeSubmit.parentNode === buttonContainer) {
-            nativeSubmit.insertAdjacentElement("afterend", saveBtn);
-        } else {
-            buttonContainer.appendChild(saveBtn);
-        }
     }
 
     // ==============================
@@ -5974,6 +6639,192 @@
         return row;
     }
 
+    function openDraftSettingsWindow() {
+        openModal({
+            id: "wfmapmods-draft-settings-backdrop",
+            title: "Draft settings",
+            width: 430,
+            buildContent(dialog, okBtn, closeModal) {
+                const mapCfg = userSettings.map;
+                const localCount = Array.isArray(draftSubmissions) ? draftSubmissions.length : 0;
+                const remoteCount = Array.isArray(remoteDraftSubmissions) ? remoteDraftSubmissions.length : 0;
+
+                // -------------------------
+                // Section: intro / overview
+                // -------------------------
+                const introSection = document.createElement("div");
+                introSection.className = "wfmapmods-modal-section";
+
+                const introHeader = document.createElement("div");
+                introHeader.className = "wfmapmods-modal-section-header";
+                introHeader.textContent = "Draft storage";
+                introSection.appendChild(introHeader);
+
+                const introText = document.createElement("div");
+                introText.className = "wfmapmods-modal-hint";
+                introText.style.whiteSpace = "normal";
+                introText.style.lineHeight = "1.5";
+                introText.innerHTML = `
+                There are two possible locations where drafts can be stored:<br>
+                • Local on the device<br>
+                • Remotely on the Wayfarer website<br><br>
+                Remote drafts can be accessed from any device and can be viewed and managed from the
+                <a href="https://wayfarer.nianticlabs.com/new/submit" target="_blank" rel="noopener noreferrer">Wayfarer submission page</a>.<br><br>
+                Currently, you have <strong>${localCount}</strong> local draft${localCount === 1 ? "" : "s"} and
+                <strong>${remoteCount}</strong> remote draft${remoteCount === 1 ? "" : "s"}.
+            `;
+                introSection.appendChild(introText);
+
+                dialog.appendChild(introSection);
+
+                // -------------------------
+                // Section: default save location
+                // -------------------------
+                const defaultsSection = document.createElement("div");
+                defaultsSection.className = "wfmapmods-modal-section";
+
+                const defaultsHeader = document.createElement("div");
+                defaultsHeader.className = "wfmapmods-modal-section-header";
+                defaultsHeader.textContent = "Preferred storage location";
+                defaultsSection.appendChild(defaultsHeader);
+
+                const defaultSaveLabel = document.createElement("div");
+                defaultSaveLabel.className = "wfmapmods-modal-hint";
+                defaultSaveLabel.style.whiteSpace = "normal";
+                defaultSaveLabel.style.lineHeight = "1.5";
+                defaultSaveLabel.style.marginBottom = "10px";
+                defaultSaveLabel.textContent = "Where should new drafts be stored?";
+                defaultsSection.appendChild(defaultSaveLabel);
+
+                const defaultSaveSelect = document.createElement("select");
+                defaultSaveSelect.className = "wfmapmods-modal-select";
+                defaultSaveSelect.style.width = "100%";
+                defaultSaveSelect.style.maxWidth = "320px";
+                defaultSaveSelect.style.background = "#ffffff";
+                defaultSaveSelect.style.border = "1px solid #c8ccd1";
+                defaultSaveSelect.style.borderRadius = "4px";
+                defaultSaveSelect.style.padding = "6px 8px";
+                defaultSaveSelect.style.fontSize = "12px";
+                defaultSaveSelect.style.cursor = "pointer";
+
+                const optRemote = document.createElement("option");
+                optRemote.value = "remote";
+                optRemote.textContent = "Wayfarer website (remote)";
+
+                const optLocal = document.createElement("option");
+                optLocal.value = "local";
+                optLocal.textContent = "This device only (local)";
+
+                defaultSaveSelect.appendChild(optRemote);
+                defaultSaveSelect.appendChild(optLocal);
+                defaultSaveSelect.value = mapCfg.defaultDraftSaveLocation === "local" ? "local" : "remote";
+
+                defaultsSection.appendChild(defaultSaveSelect);
+                dialog.appendChild(defaultsSection);
+
+                // -------------------------
+                // Section: migrate local drafts
+                // Only show if local drafts exist
+                // -------------------------
+                let migrationStatus = null;
+                let migrateBtn = null;
+                let migrationRunning = false;
+
+                if (localCount > 0) {
+                    const migrationSection = document.createElement("div");
+                    migrationSection.className = "wfmapmods-modal-section";
+
+                    const migrationHeader = document.createElement("div");
+                    migrationHeader.className = "wfmapmods-modal-section-header";
+                    migrationHeader.textContent = "Migrate local drafts to Wayfarer";
+                    migrationSection.appendChild(migrationHeader);
+
+                    const migrationText = document.createElement("div");
+                    migrationText.className = "wfmapmods-modal-hint";
+                    migrationText.style.whiteSpace = "normal";
+                    migrationText.style.lineHeight = "1.5";
+                    migrationText.textContent =
+                        `${localCount} local draft${localCount === 1 ? "" : "s"} can be migrated to remote drafts on Wayfarer.`;
+                    migrationSection.appendChild(migrationText);
+
+                    migrationStatus = document.createElement("div");
+                    migrationStatus.className = "wfmapmods-modal-hint";
+                    migrationStatus.style.marginTop = "8px";
+                    migrationStatus.style.whiteSpace = "normal";
+                    migrationStatus.style.lineHeight = "1.5";
+                    migrationSection.appendChild(migrationStatus);
+
+                    migrateBtn = document.createElement("button");
+                    migrateBtn.type = "button";
+                    migrateBtn.textContent = "Migrate local drafts to Wayfarer";
+                    migrateBtn.className = "wfmapmods-modal-btn wfmapmods-modal-btn-primary";
+                    migrateBtn.style.marginTop = "10px";
+
+                    migrateBtn.addEventListener("click", async () => {
+                        const currentLocalCount = Array.isArray(draftSubmissions) ? draftSubmissions.length : 0;
+                        if (!currentLocalCount || migrationRunning) return;
+
+                        migrationRunning = true;
+                        closeModal();
+
+                        wfmapmodsSetSubmitProgress(`Moving drafts to Wayfarer… 0 of ${currentLocalCount}`, 0);
+
+                        try {
+                            const result = await migrateLocalDraftsToRemoteQueue((progress) => {
+                                const total = progress.total || 0;
+                                const index = progress.index || 0;
+                                const successCount = progress.successCount || 0;
+                                const failCount = progress.failCount || 0;
+
+                                let completed = 0;
+
+                                if (progress.phase === "starting") {
+                                    completed = Math.max(0, index - 1);
+                                } else {
+                                    completed = index;
+                                }
+
+                                const percent = total > 0 ? Math.floor((completed / total) * 100) : 100;
+
+                                wfmapmodsSetSubmitProgress(
+                                    `Moving drafts to Wayfarer… ${completed} of ${total}`,
+                                    percent
+                                );
+                            });
+
+                            const finalText = result.failCount > 0
+                            ? `Migration finished. ${result.successCount} moved, ${result.failCount} failed.`
+                            : `Migration finished. ${result.successCount} moved.`;
+
+                            wfmapmodsSetSubmitProgress(finalText, 100);
+                            wfmapmodsHideSubmitProgress(2000);
+
+                        } catch (err) {
+                            console.error("[WFMM - Draft Migration] Unexpected migration error:", err);
+                            wfmapmodsSetSubmitProgress("Migration failed.", 100);
+                            wfmapmodsHideSubmitProgress(2500);
+                        } finally {
+                            migrationRunning = false;
+                        }
+                    });
+
+                    migrationSection.appendChild(migrateBtn);
+                    dialog.appendChild(migrationSection);
+                }
+
+                return {
+                    defaultSaveSelect
+                };
+            },
+            onOk(ctx, closeModal) {
+                userSettings.map.defaultDraftSaveLocation =
+                    ctx.defaultSaveSelect.value === "local" ? "local" : "remote";
+
+                saveSettings();
+                closeModal();
+            }
+        });
+    }
 
     function wfmmGetModalStack() {
         const k = "__wfmmModalStack";
@@ -7836,11 +8687,9 @@
         ensureMapTopRightControls();
         refreshAllPoiMarkers();
         loadDraftSubmissionsFromIDB();
+        loadRemoteDraftSubmissionsFromWayfarer();
 
         if (isOnSubmitRoute()) {
-            // As a 'save draft' button to the submit webform
-            wfmapmodsInjectNativeSubmitSaveDraftButton();
-
             // Code for modifying the pin on the Submit map
             if (currentMapMode === MAP_MODE.MOBILE) {
                 hideNativeCenterPin();
@@ -7924,6 +8773,8 @@
             }
         } catch {}
         submissionPinButton = null;
+
+        disableSubmissionPinMode();
 
         // Remove route-specific Niantic css
         removeInjectedCss("wfmapmods-submit-route-css");
