@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.6.0
+// @version      3.6.1
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -3207,6 +3207,9 @@
                           supportingCount <= 5 &&
                           !hasPendingSupporting;
 
+                    // --- Quota validity ---
+                    const nominationsRemaining = getNominationsAvailableToday();
+                    const quotaValid = nominationsRemaining > 0;
 
                     // --- Figure out the marker location ---
                     let markerLat = null;
@@ -3223,7 +3226,6 @@
                         typeof currentLat === "number" && Number.isFinite(currentLat) &&
                         typeof currentLng === "number" && Number.isFinite(currentLng)
                     ) {
-                        // Fallback to initial snapshot if poi hasn't got coords for some reason
                         markerLat = currentLat;
                         markerLng = currentLng;
                     }
@@ -3246,14 +3248,17 @@
 
                         if (dMeters > submitRadius) {
                             distanceValid = false;
-                            distanceValid = false;
                             showWarning(`Submission disabled: The submission pin is ${distanceKm.toFixed(1)} km from your current location (max ${(submitRadius/1000).toFixed(1)} km).`);
+                        } else if (!quotaValid) {
+                            showWarning("Submission disabled: You have 0 nominations available today. You can still save a draft.");
                         } else {
                             showWarning("");
                         }
+                    } else if (!quotaValid) {
+                        showWarning("Submission disabled: You have 0 nominations available today. You can still save a draft.");
                     }
 
-                    const valid = textValid && imageValid && distanceValid;
+                    const valid = textValid && imageValid && distanceValid && quotaValid;
                     setOkButtonState(valid);
                 }
 
@@ -3417,9 +3422,16 @@
                     return;
                 }
 
-                const hasMain = !!ctx.imageState.main;
+                if (getNominationsAvailableToday() <= 0) {
+                    alert("You have 0 nominations available today. You can still save this as a draft.");
+                    return;
+                }
+
+                const hasMain = !!ctx.imageState.main && !ctx.imageState.main._pending;
                 const supportingCount = ctx.imageState.supporting.length;
-                if (!hasMain || supportingCount < 1 || supportingCount > 5) {
+                const hasPendingSupporting = ctx.imageState.supporting.some(img => img && img._pending);
+
+                if (!hasMain || supportingCount < 1 || supportingCount > 5 || hasPendingSupporting) {
                     return;
                 }
 
