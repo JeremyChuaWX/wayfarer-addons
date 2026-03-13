@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.6.1
+// @version      3.6.2
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -9362,6 +9362,10 @@
     const MAP_VIEW_KEY = "wfmapmods-map-view";
 
     function saveMapView() {
+        // Don't do this on Submit page.
+        // Map view permanence not used here because it affects drafts.
+        if (isOnSubmitRoute()) return;
+
         try {
             if (!wfMap || typeof google === "undefined" || !google.maps) return;
 
@@ -9390,6 +9394,9 @@
     function restoreMapView() {
         // If we have a deep-link for this load, do not restore the saved map view
         if (skipRestoreMapViewForThisLoad) return;
+
+        // Don't restore on the Submit page. It messes with loading location pin of Drafts.
+        if (isOnSubmitRoute()) return;
 
         if (!userSettings.map || !userSettings.map.rememberLastView) return;
         if (!wfMap) return;
