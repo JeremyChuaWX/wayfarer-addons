@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - s2 Cells
-// @version      3.1.0
+// @version      3.1.1
 // @description  Adds s2 cell grids and shading to the Wayfarer Map, and allows manual addition of PokéStops and Gyms
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-s2-cells.user.js
+// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-s2-cells.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
 // @run-at       document-start
@@ -943,7 +944,7 @@
         const menu = document.querySelector(".wfmapmods-layers-menu");
         if (!menu) return;
 
-        if (menu.querySelector("#wfmapmods-layers-s2cells")) return;
+        if (menu.querySelector("#wfmapmods-s2-layers-s2cells")) return;
 
         const label = document.createElement("label");
         label.className = "wfmapmods-layers-option";
