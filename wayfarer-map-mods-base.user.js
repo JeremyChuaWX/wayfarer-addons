@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.6.2
+// @version      3.7.0
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -986,25 +986,16 @@
     }
 
     function syncFiltersMenuUI() {
-        // Radios
         const mode = getSelectedSourceModeFromSettings();
         if (filterSourceRadioAllEl) filterSourceRadioAllEl.checked = (mode === "all");
         if (filterSourceRadioCommunityEl) filterSourceRadioCommunityEl.checked = (mode === "community");
         if (filterSourceRadioOtherEl) filterSourceRadioOtherEl.checked = (mode === "other");
 
-        // Checkboxes
         const go = userSettings.poi.filters.gameObject;
         if (filterChkPokestopEl) filterChkPokestopEl.checked = !!go.pokestop;
         if (filterChkGymEl) filterChkGymEl.checked = !!go.gym;
         if (filterChkPowerspotEl) filterChkPowerspotEl.checked = !!go.powerspot;
         if (filterChkNoneEl) filterChkNoneEl.checked = !!go.none;
-
-        // Enforce coupling rule + persist if it changes
-        const before = userSettings.layers.wayspots.enabled;
-        enforceWayspotsLayerBasedOnEntities();
-        if (userSettings.layers.wayspots.enabled !== before) {
-            saveSettings();
-        }
     }
 
     // ==================================
@@ -8501,9 +8492,16 @@
     }
 
     function currentMapRouteKey() {
-        return (window.location.pathname || "") + (window.location.search || "");
-    }
+        const path = window.location.pathname || "";
 
+        // On mapview, Niantic now mutates ?z=... as the user zooms.
+        // That should not count as a real route change.
+        if (path.startsWith(MAPVIEW_ROUTE)) {
+            return path;
+        }
+
+        return path + (window.location.search || "");
+    }
     function scheduleMapRouteChange() {
         if (routeChangeTimer) clearTimeout(routeChangeTimer);
         // Small delay to collapse rapid replaceState/pushState bursts during Angular boot
