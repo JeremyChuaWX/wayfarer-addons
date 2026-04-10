@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Map Tiles
-// @version      3.0.0
+// @version      3.1.0
 // @description  Adds extra base map providers (Bing, Esri, OSM, etc.) to the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-map-tiles.user.js
+// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-map-tiles.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
 // @run-at       document-start
@@ -235,6 +236,19 @@
     function teardownMap() {
         if (!mapAttached) return;
 
+        if (wfMap) {
+            // Restore original setOptions if we patched it
+            if (wfMap._wfmapmodsOriginalSetOptions) {
+                wfMap.setOptions = wfMap._wfmapmodsOriginalSetOptions;
+            }
+
+            wfMap._wfmapmodsBasemapsInitialised = false;
+            wfMap._wfmapmodsLastUsedListenerAttached = false;
+            wfMap._wfmapmodsControlRepairAttached = false;
+            wfMap._wfmapmodsSetOptionsPatched = false;
+            wfMap._wfmapmodsOriginalSetOptions = null;
+        }
+
         wfMap = null;
         mapAttached = false;
     }
@@ -251,7 +265,11 @@
     async function attachBasemapsToMapIfNeeded() {
         // If we think we're attached but the underlying map is gone, reset and reattach
         if (mapAttached) {
-            if (wfMap && !isMapStale(wfMap)) return;
+            if (wfMap && !isMapStale(wfMap)) {
+                // Map still exists; just make sure the control options haven't been reset
+                ensureMapTypeControlOptions();
+                return;
+            }
 
             teardownMap();
         }
@@ -267,6 +285,7 @@
         // Important: new map instance => allow init on this new object
         wfMap._wfmapmodsBasemapsInitialised = false;
         wfMap._wfmapmodsLastUsedListenerAttached = false;
+        wfMap._wfmapmodsControlRepairAttached = false;
 
         initCustomBaseMaps();
         mapAttached = true;
@@ -530,6 +549,122 @@
     // Add base maps
     // -----------------------------
 
+    function getDesiredMapTypeIds() {
+        if (!userSettings.map) userSettings.map = {};
+        if (!userSettings.map.providers) userSettings.map.providers = {};
+
+        const ids = ["roadmap", "satellite", "hybrid"];
+        const isEnabled = (name) => userSettings.map.providers?.[name] !== false;
+
+        if (isEnabled("Bing")) ids.push("Bing");
+        if (isEnabled("Esri")) ids.push("Esri");
+        if (isEnabled("Esri Clarity")) ids.push("Esri Clarity");
+        if (isEnabled("OSM")) ids.push("OSM");
+        if (isEnabled("CartoDB DarkMatter")) ids.push("CartoDB DarkMatter");
+        if (isEnabled("CartoDB Positron")) ids.push("CartoDB Positron");
+
+        return ids;
+    }
+
+    function arraysEqual(a, b) {
+        if (!Array.isArray(a) || !Array.isArray(b)) return false;
+        if (a.length !== b.length) return false;
+        return a.every((v, i) => v === b[i]);
+    }
+
+    function ensureMapTypeControlOptions() {
+        if (!wfMap) return;
+
+        const existing = wfMap.get("mapTypeControlOptions") || {};
+        const currentIds = Array.isArray(existing.mapTypeIds) ? existing.mapTypeIds.slice() : [];
+        const mergedIds = getMergedDesiredMapTypeIds(currentIds);
+
+        if (arraysEqual(currentIds, mergedIds)) return;
+
+        wfMap.setOptions({
+            mapTypeControl: true,
+            mapTypeControlOptions: Object.assign({}, existing, {
+                style: google.maps.MapTypeControlStyle.DROPDOWN_MENU,
+                position: google.maps.ControlPosition.TOP_LEFT,
+                mapTypeIds: mergedIds
+            })
+        });
+    }
+
+    function getMergedDesiredMapTypeIds(existingIds = []) {
+        const builtinIds = ["roadmap", "satellite", "hybrid"];
+        const ownIds = getDesiredMapTypeIds();
+
+        const merged = [];
+
+        // Always keep built-ins first
+        builtinIds.forEach(id => {
+            if (!merged.includes(id)) merged.push(id);
+        });
+
+        // Then this plugin's enabled providers
+        ownIds.forEach(id => {
+            if (!merged.includes(id)) merged.push(id);
+        });
+
+        // Then preserve any other plugin/provider ids already present
+        existingIds.forEach(id => {
+            if (!merged.includes(id)) merged.push(id);
+        });
+
+        return merged;
+    }
+
+    function patchMapSetOptions() {
+        if (!wfMap) return;
+        if (wfMap._wfmapmodsSetOptionsPatched) return;
+
+        const originalSetOptions = wfMap.setOptions;
+        if (typeof originalSetOptions !== "function") return;
+
+        wfMap._wfmapmodsOriginalSetOptions = originalSetOptions;
+
+        wfMap.setOptions = function (options) {
+            if (options && typeof options === "object") {
+                const patchedOptions = Object.assign({}, options);
+
+                if (patchedOptions.mapTypeControlOptions && typeof patchedOptions.mapTypeControlOptions === "object") {
+                    const incoming = patchedOptions.mapTypeControlOptions;
+                    const incomingIds = Array.isArray(incoming.mapTypeIds) ? incoming.mapTypeIds.slice() : [];
+
+                    const existing = wfMap.get("mapTypeControlOptions") || {};
+                    const existingIds = Array.isArray(existing.mapTypeIds) ? existing.mapTypeIds.slice() : [];
+
+                    const mergedIds = getMergedDesiredMapTypeIds([
+                        ...existingIds,
+                        ...incomingIds
+                    ]);
+
+                    patchedOptions.mapTypeControlOptions = Object.assign({}, incoming, {
+                        style: google.maps.MapTypeControlStyle.DROPDOWN_MENU,
+                        position: google.maps.ControlPosition.TOP_LEFT,
+                        mapTypeIds: mergedIds
+                    });
+                } else if (patchedOptions.mapTypeControl === true) {
+                    const existing = wfMap.get("mapTypeControlOptions") || {};
+                    const existingIds = Array.isArray(existing.mapTypeIds) ? existing.mapTypeIds.slice() : [];
+                    const mergedIds = getMergedDesiredMapTypeIds(existingIds);
+
+                    patchedOptions.mapTypeControlOptions = Object.assign({}, existing, {
+                        style: google.maps.MapTypeControlStyle.DROPDOWN_MENU,
+                        position: google.maps.ControlPosition.TOP_LEFT,
+                        mapTypeIds: mergedIds
+                    });
+                }
+
+                return originalSetOptions.call(this, patchedOptions);
+            }
+
+            return originalSetOptions.call(this, options);
+        };
+
+        wfMap._wfmapmodsSetOptionsPatched = true;
+    }
 
     function initCustomBaseMaps() {
         if (!wfMap) return;
@@ -542,71 +677,60 @@
 
         const isEnabled = (name) => userSettings.map.providers?.[name] !== false;
 
-        const existing = wfMap.get("mapTypeControlOptions") || {};
-        const baseIds = Array.isArray(existing.mapTypeIds) ? existing.mapTypeIds.slice()
-        : ["roadmap", "satellite", "hybrid"];
+        // Patch setOptions BEFORE Wayfarer gets a chance to overwrite the control
+        patchMapSetOptions();
 
-        let mapTypeControlOptions = Object.assign({}, existing, {
-            style: google.maps.MapTypeControlStyle.DROPDOWN_MENU,
-            position: google.maps.ControlPosition.TOP_LEFT,
-            mapTypeIds: baseIds
-        });
-
-        // Add extra services
+        // Register extra services
         if (isEnabled("Bing")) {
-            mapTypeControlOptions = setupMapLayer(
-                wfMap, mapTypeControlOptions,
+            setupMapLayer(
+                wfMap, { mapTypeIds: [] },
                 "Bing", 20, 0,
                 "https://t0.tiles.virtualearth.net/tiles/a{quadKey}.jpeg?g=1398"
             );
         }
 
         if (isEnabled("Esri")) {
-            mapTypeControlOptions = setupMapLayer(
-                wfMap, mapTypeControlOptions,
+            setupMapLayer(
+                wfMap, { mapTypeIds: [] },
                 "Esri", 19, 0,
                 "https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
             );
         }
 
         if (isEnabled("Esri Clarity")) {
-            mapTypeControlOptions = setupMapLayer(
-                wfMap, mapTypeControlOptions,
+            setupMapLayer(
+                wfMap, { mapTypeIds: [] },
                 "Esri Clarity", 19, 0,
                 "https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
             );
         }
 
         if (isEnabled("OSM")) {
-            mapTypeControlOptions = setupMapLayer(
-                wfMap, mapTypeControlOptions,
+            setupMapLayer(
+                wfMap, { mapTypeIds: [] },
                 "OSM", 19, 0,
                 "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
             );
         }
 
         if (isEnabled("CartoDB DarkMatter")) {
-            mapTypeControlOptions = setupMapLayer(
-                wfMap, mapTypeControlOptions,
+            setupMapLayer(
+                wfMap, { mapTypeIds: [] },
                 "CartoDB DarkMatter", 20, 0,
                 "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
             );
         }
 
         if (isEnabled("CartoDB Positron")) {
-            mapTypeControlOptions = setupMapLayer(
-                wfMap, mapTypeControlOptions,
+            setupMapLayer(
+                wfMap, { mapTypeIds: [] },
                 "CartoDB Positron", 20, 0,
                 "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
             );
         }
 
-        wfMap.setOptions({
-            mapTypeControl: true,
-            mapTypeControlOptions,
-            tilt: 0,
-            heading: 0
-        });
+        // Apply once in case the control already exists
+        ensureMapTypeControlOptions();
 
         // Start tracking "last used"
         attachLastUsedListener();
