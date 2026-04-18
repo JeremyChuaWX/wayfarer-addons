@@ -1,16 +1,13 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Wayfarer App Submissions
-// @version      3.0.0
-// @description  Import Wayfarer App submissions from Lightship Geospatial Browser and show them as markers on the submission map
+// @version      4.0.0
+// @description  Show Wayfarer App submissions on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-wayfarer-app-submissions.user.js
+// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-wayfarer-app-submissions.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
-// @match        https://lightship.dev/*
 // @run-at       document-start
-// @grant        GM_xmlhttpRequest
-// @connect      lh3.googleusercontent.com
-// @connect      storage.googleapis.com
 // ==/UserScript==
 
 // Copyright 2026 tntnnbltn
@@ -39,251 +36,17 @@
 
     const SETTINGS_KEY = "wfmap_wayfarerApp_settings";
     const OBJECT_STORE_NAME = "wayfarerAppSubmissions";
-
-    // postMessage channel
-    const POSTMESSAGE_TYPE_IMPORT = "wfmap-wayfarerapp-import";
-
-    const WFAPPSUB_CHILD_NAME = "wf-lightship-geospatial";
+    const EXPORT_FORMAT = "wfmap-wayfarerapp-submissions";
+    const EXPORT_VERSION = 1;
 
     const ORIGIN_WAYFARER = "wayfarer.nianticlabs.com";
-    const ORIGIN_LIGHTSHIP = "lightship.dev"
 
     // -----------------------------
     // Branch based on hostname
     // -----------------------------
 
-    if (location.hostname === ORIGIN_LIGHTSHIP) {
-        // Child tab: intercept getSubmittedPois and send to parent
-        setupLightshipInterceptor();
-    } else if (location.hostname === ORIGIN_WAYFARER) {
-        // Main Wayfarer tab: map overlay + settings + import handler
+    if (location.hostname === ORIGIN_WAYFARER) {
         setupWayfarerOverlay();
-    }
-    return;
-
-    // =====================================================================
-    // LIGHTSHIP CHILD TAB
-    // =====================================================================
-
-    function setupLightshipInterceptor() {
-        // Use the real page context if available (Tampermonkey/Violentmonkey)
-        const global = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
-
-        // Only run in the child window that was opened by the App Submissions plugin
-        if (global.name !== WFAPPSUB_CHILD_NAME) {
-            console.log(
-                "[WFAppSub] Not App Submissions child window (name =",
-                global.name,
-                ") – skipping interceptors"
-            );
-            return;
-        }
-
-        // ---------- XHR INTERCEPTOR ----------
-        (function (open) {
-            if (!global.XMLHttpRequest) return;
-
-            global.XMLHttpRequest.prototype.open = function (method, url) {
-                try {
-                    const cleanUrl = typeof url === "string" ? url : "";
-                    const isTarget =
-                          method === "GET" &&
-                          cleanUrl.indexOf("/v1/vps/getSubmittedPois/") !== -1;
-
-                    if (isTarget) {
-                        console.log("[WFAppSub] XHR getSubmittedPois detected:", cleanUrl);
-
-                        this.addEventListener(
-                            "load",
-                            function () {
-                                try {
-                                    const raw = this.responseText || this.response;
-                                    if (!raw) return;
-
-                                    let json;
-                                    try {
-                                        json = JSON.parse(raw);
-                                    } catch (e) {
-                                        console.warn(
-                                            "[WFAppSub] XHR: failed to parse JSON",
-                                            e
-                                        );
-                                        return;
-                                    }
-
-                                    if (!json || !Array.isArray(json.submittedPois)) {
-                                        console.warn(
-                                            "[WFAppSub] XHR: no submittedPois array"
-                                        );
-                                        return;
-                                    }
-
-                                    const opener = global.opener;
-                                    if (opener && !opener.closed) {
-                                        try {
-                                            opener.postMessage(
-                                                {
-                                                    type: POSTMESSAGE_TYPE_IMPORT,
-                                                    submittedPois: json.submittedPois,
-                                                },
-                                                ORIGIN_WAYFARER
-                                            );
-                                        } catch (e) {
-                                            console.warn(
-                                                "[WFAppSub] XHR: strict postMessage failed, retry with *",
-                                                e
-                                            );
-                                            opener.postMessage(
-                                                {
-                                                    type: POSTMESSAGE_TYPE_IMPORT,
-                                                    submittedPois: json.submittedPois,
-                                                },
-                                                "*"
-                                            );
-                                        }
-                                    } else {
-                                        console.warn(
-                                            "[WFAppSub] XHR: no opener to send data to"
-                                        );
-                                    }
-
-                                    try {
-                                        global.close();
-                                    } catch (e) {
-                                        console.warn(
-                                            "[WFAppSub] XHR: failed to close window",
-                                            e
-                                        );
-                                    }
-                                } catch (err) {
-                                    console.warn(
-                                        "[WFAppSub] XHR handler error",
-                                        err
-                                    );
-                                }
-                            },
-                            false
-                        );
-                    }
-                } catch (err) {
-                    console.warn(
-                        "[WFAppSub] Error in XHR open interceptor",
-                        err
-                    );
-                }
-
-                return open.apply(this, arguments);
-            };
-        })(global.XMLHttpRequest && global.XMLHttpRequest.prototype.open);
-
-        // ---------- FETCH INTERCEPTOR ----------
-        if (global.fetch) {
-            const origFetch = global.fetch;
-
-            global.fetch = function (input, init) {
-                let url = "";
-                if (typeof input === "string") {
-                    url = input;
-                } else if (input && typeof input.url === "string") {
-                    url = input.url;
-                }
-
-                const method = (init && init.method) || "GET";
-
-                const isTarget =
-                      method.toUpperCase() === "GET" &&
-                      url.indexOf("/v1/vps/getSubmittedPois/") !== -1;
-
-                if (!isTarget) {
-                    return origFetch.apply(this, arguments);
-                }
-
-                console.log("[WFAppSub] fetch getSubmittedPois detected:", url);
-
-                return origFetch.apply(this, arguments).then((response) => {
-                    const clone = response.clone();
-
-                    clone
-                        .text()
-                        .then((raw) => {
-                        try {
-                            if (!raw) return;
-                            let json;
-                            try {
-                                json = JSON.parse(raw);
-                            } catch (e) {
-                                console.warn(
-                                    "[WFAppSub] fetch: failed to parse JSON",
-                                    e
-                                );
-                                return;
-                            }
-
-                            if (
-                                !json ||
-                                !Array.isArray(json.submittedPois)
-                            ) {
-                                console.warn(
-                                    "[WFAppSub] fetch: no submittedPois array"
-                                );
-                                return;
-                            }
-
-                            const opener = global.opener;
-                            if (opener && !opener.closed) {
-                                try {
-                                    opener.postMessage(
-                                        {
-                                            type: POSTMESSAGE_TYPE_IMPORT,
-                                            submittedPois: json.submittedPois,
-                                        },
-                                        ORIGIN_WAYFARER
-                                    );
-                                } catch (e) {
-                                    console.warn(
-                                        "[WFAppSub] fetch: strict postMessage failed, retry with *",
-                                        e
-                                    );
-                                    opener.postMessage(
-                                        {
-                                            type: POSTMESSAGE_TYPE_IMPORT,
-                                            submittedPois: json.submittedPois,
-                                        },
-                                        "*"
-                                    );
-                                }
-                            } else {
-                                console.warn(
-                                    "[WFAppSub] fetch: no opener to send data to"
-                                );
-                            }
-
-                            try {
-                                global.close();
-                            } catch (e) {
-                                console.warn(
-                                    "[WFAppSub] fetch: failed to close window",
-                                    e
-                                );
-                            }
-                        } catch (err) {
-                            console.warn(
-                                "[WFAppSub] fetch handler error",
-                                err
-                            );
-                        }
-                    })
-                        .catch((e) => {
-                        console.warn(
-                            "[WFAppSub] fetch: error reading body",
-                            e
-                        );
-                    });
-
-                    return response;
-                });
-            };
-        }
     }
 
     // =====================================================================
@@ -304,7 +67,7 @@
 
         const PERFORMANCE_MAX_VISIBLE_MARKERS = 400;
 
-        const LIGHTSHIP_LOGO_SVG = '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" fill-rule="evenodd"><path d="M32 8c3.812 0 7.465.874 10.856 2.598a.208.208 0 01.037.348l-.04.026-4.591 2.256a.208.208 0 01-.158.01A19.714 19.714 0 0032 12.273a19.598 19.598 0 00-13.95 5.779A19.598 19.598 0 0012.27 32c0 1.53.518 2.646 1.539 3.316 2.098 1.379 5.996.795 9.625-.252l.656-.195.647-.203.637-.21.313-.106.613-.215.596-.217.852-.322.537-.21.51-.205.923-.385.408-.175a.939.939 0 011.054.199.938.938 0 01.2 1.053l-.362.854-.297.73-.313.796-.214.563-.215.586-.215.605-.213.622-.105.317-.206.643-.199.652-.19.66c-.982 3.535-1.487 7.264-.151 9.296.667 1.016 1.777 1.53 3.299 1.53a19.6 19.6 0 0013.95-5.778A19.599 19.599 0 0051.73 32c0-2.234-.376-4.434-1.115-6.54a.208.208 0 01-.008-.11l.017-.051 2.22-4.517a.209.209 0 01.183-.116c.07-.002.15.041.188.11A24.05 24.05 0 0156 32.002c0 13.233-10.767 24-24 24S8 45.234 8 32C8 18.767 18.767 8 32 8zm19.336 2.399c1.257-.618 2.58.653 2.069 1.913l-.048.108-11.31 23.018c-.57 1.161-2.22 1.104-2.73-.04l-.05-.122-2.574-7.293a1.509 1.509 0 00-.794-.87l-.127-.051-7.292-2.574c-1.22-.43-1.356-2.075-.279-2.717l.116-.062 23.019-11.31z"/></svg>';
+        const WAYFARER_APP_LOGO_SVG = '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" fill-rule="evenodd"><path d="M32 8c3.812 0 7.465.874 10.856 2.598a.208.208 0 01.037.348l-.04.026-4.591 2.256a.208.208 0 01-.158.01A19.714 19.714 0 0032 12.273a19.598 19.598 0 00-13.95 5.779A19.598 19.598 0 0012.27 32c0 1.53.518 2.646 1.539 3.316 2.098 1.379 5.996.795 9.625-.252l.656-.195.647-.203.637-.21.313-.106.613-.215.596-.217.852-.322.537-.21.51-.205.923-.385.408-.175a.939.939 0 011.054.199.938.938 0 01.2 1.053l-.362.854-.297.73-.313.796-.214.563-.215.586-.215.605-.213.622-.105.317-.206.643-.199.652-.19.66c-.982 3.535-1.487 7.264-.151 9.296.667 1.016 1.777 1.53 3.299 1.53a19.6 19.6 0 0013.95-5.778A19.599 19.599 0 0051.73 32c0-2.234-.376-4.434-1.115-6.54a.208.208 0 01-.008-.11l.017-.051 2.22-4.517a.209.209 0 01.183-.116c.07-.002.15.041.188.11A24.05 24.05 0 0156 32.002c0 13.233-10.767 24-24 24S8 45.234 8 32C8 18.767 18.767 8 32 8zm19.336 2.399c1.257-.618 2.58.653 2.069 1.913l-.048.108-11.31 23.018c-.57 1.161-2.22 1.104-2.73-.04l-.05-.122-2.574-7.293a1.509 1.509 0 00-.794-.87l-.127-.051-7.292-2.574c-1.22-.43-1.356-2.075-.279-2.717l.116-.062 23.019-11.31z"/></svg>';
 
         // -----------------------------
         // Runtime state – submissions
@@ -374,12 +137,6 @@
 
                         // centre map
                         wfMap.setCenter(targetLatLng);
-
-                        // simulate a click on that location
-                        // (this will trigger any map 'click' listeners used by the base plugin)
-                        google.maps.event.trigger(wfMap, "click", {
-                            latLng: targetLatLng
-                        });
                     }
 
                     sendResubmitToBase(poiForResubmit);
@@ -390,17 +147,13 @@
                 resubmitLink.dataset.id = recordId || "";
             }
 
-            // Show Resubmit only for REJECTED
-            if (status === "REJECTED") {
+
                 resubmitLink.style.display = "inline-block";
                 resubmitLink.style.cursor = "pointer";
                 resubmitLink.style.opacity = "1";
                 resubmitLink.style.color = "";
                 resubmitLink.title = "Resubmit this nomination";
-            } else {
-                resubmitLink.style.display = "none";
-                resubmitLink.title = "";
-            }
+
         }
 
         // -----------------------------
@@ -537,9 +290,9 @@
         }
 
         function saveAppSubmissionsToIDB(submittedPois) {
-            if (!Array.isArray(submittedPois)) return;
+            if (!Array.isArray(submittedPois)) return Promise.resolve();
 
-            getIDBInstance().then(db => {
+            return getIDBInstance().then(db => new Promise((resolve, reject) => {
                 const tx = db.transaction(OBJECT_STORE_NAME, "readwrite");
                 const store = tx.objectStore(OBJECT_STORE_NAME);
 
@@ -554,18 +307,98 @@
 
                 clearReq.onerror = () => {
                     console.warn("[WFAppSub] Failed to clear Wayfarer App submissions store", clearReq.error);
+                    reject(clearReq.error);
                 };
 
                 tx.oncomplete = () => {
                     db.close();
+                    resolve();
                 };
 
                 tx.onerror = () => {
                     console.warn("[WFAppSub] Transaction error while saving Wayfarer App submissions", tx.error);
                     db.close();
+                    reject(tx.error);
                 };
-            }).catch(err => {
+            })).catch(err => {
                 console.warn("[WFAppSub] IndexedDB not available (save)", err);
+                throw err;
+            });
+        }
+
+        function exportAppSubmissionsFromIDB() {
+            return getIDBInstance().then(db => new Promise((resolve, reject) => {
+                const tx = db.transaction(OBJECT_STORE_NAME, "readonly");
+                const store = tx.objectStore(OBJECT_STORE_NAME);
+                const req = store.getAll();
+
+                req.onsuccess = () => {
+                    const submittedPois = Array.isArray(req.result) ? req.result : [];
+                    const payload = {
+                        format: EXPORT_FORMAT,
+                        version: EXPORT_VERSION,
+                        exportedAt: new Date().toISOString(),
+                        submittedPois
+                    };
+                    db.close();
+                    resolve(payload);
+                };
+
+                req.onerror = () => {
+                    db.close();
+                    reject(req.error || new Error("Failed to export Wayfarer App submissions"));
+                };
+
+                tx.onerror = () => {
+                    db.close();
+                    reject(tx.error || new Error("Failed to export Wayfarer App submissions"));
+                };
+            }));
+        }
+
+        function triggerJsonDownload(filename, content) {
+            const blob = new Blob([content], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        function parseImportedSubmissionsJson(text) {
+            let parsed;
+            try {
+                parsed = JSON.parse(text);
+            } catch (e) {
+                throw new Error("The selected file is not valid JSON.");
+            }
+
+            if (Array.isArray(parsed)) {
+                return parsed;
+            }
+
+            if (
+                parsed &&
+                typeof parsed === "object" &&
+                Array.isArray(parsed.submittedPois)
+            ) {
+                return parsed.submittedPois;
+            }
+
+            throw new Error("The JSON file does not contain a valid submittedPois array.");
+        }
+
+        function importAppSubmissionsFromFile(file) {
+            if (!file) {
+                return Promise.reject(new Error("No file selected."));
+            }
+
+            return file.text().then(text => {
+                const submittedPois = parseImportedSubmissionsJson(text);
+                return saveAppSubmissionsToIDB(submittedPois).then(() => submittedPois);
             });
         }
 
@@ -816,7 +649,6 @@
             lastSelectedSubmissionId = null;
         }
 
-
         function selectSubmissionMarker(marker) {
             clearSubmissionSelection();
             if (!marker || !marker.getIcon) return;
@@ -866,8 +698,8 @@
             if (!bounds) return;
 
             const maxVisibleMarkers = typeof mapCfg.performanceMaxVisibleMarkers === "number"
-            ? mapCfg.performanceMaxVisibleMarkers
-            : PERFORMANCE_MAX_VISIBLE_MARKERS;
+                ? mapCfg.performanceMaxVisibleMarkers
+                : PERFORMANCE_MAX_VISIBLE_MARKERS;
 
             const candidateIds = [];
             const candidatePoisById = {};
@@ -901,7 +733,6 @@
                 if (withoutAccepted.length <= maxVisibleMarkers) {
                     finalCandidateIds = withoutAccepted;
                 } else {
-                    // with only ACCEPTED/REJECTED, second pass is likely removing both → hide all
                     const excludeBoth = new Set(["ACCEPTED", "REJECTED"]);
                     const withoutBoth = filterCandidateIdsByStatus(candidateIds, candidatePoisById, excludeBoth);
                     if (withoutBoth.length <= maxVisibleMarkers) {
@@ -1251,47 +1082,149 @@
                     const container = document.createElement("div");
                     container.className = "wfmapmods-modal-section";
 
-                    // Import section
-                    const importSection = document.createElement("div");
-                    importSection.style.marginBottom = "10px";
-                    importSection.style.padding = "6px 8px";
-                    importSection.style.borderRadius = "4px";
-                    importSection.style.background = "#eff6ff";
-                    importSection.style.border = "1px solid #bfdbfe";
+                    const statusBox = document.createElement("div");
+                    statusBox.style.display = "none";
+                    statusBox.style.fontSize = "11px";
+                    statusBox.style.marginBottom = "10px";
+                    statusBox.style.padding = "6px 8px";
+                    statusBox.style.borderRadius = "4px";
+                    statusBox.style.border = "1px solid #d1d5db";
+                    container.appendChild(statusBox);
 
-                    const importTitle = document.createElement("div");
-                    importTitle.style.fontSize = "11px";
-                    importTitle.style.fontWeight = "bold";
-                    importTitle.style.marginBottom = "4px";
-                    importTitle.textContent = "Import Wayfarer App submissions from Geospatial Browser";
+                    function setStatusMessage(text, type) {
+                        statusBox.style.display = text ? "block" : "none";
+                        statusBox.textContent = text || "";
 
-                    const importDesc = document.createElement("div");
-                    importDesc.style.fontSize = "11px";
-                    importDesc.style.marginBottom = "6px";
-                    importDesc.textContent = "Click this button to open Lightship Geospatial Browser in a new tab. Once it loads your submitted POIs, they will be sent back to this page and displayed on the map.";
+                        if (type === "error") {
+                            statusBox.style.background = "#fef2f2";
+                            statusBox.style.borderColor = "#fecaca";
+                            statusBox.style.color = "#991b1b";
+                        } else if (type === "success") {
+                            statusBox.style.background = "#f0fdf4";
+                            statusBox.style.borderColor = "#bbf7d0";
+                            statusBox.style.color = "#166534";
+                        } else {
+                            statusBox.style.background = "#eff6ff";
+                            statusBox.style.borderColor = "#bfdbfe";
+                            statusBox.style.color = "#1d4ed8";
+                        }
+                    }
+
+                    const noticeSection = document.createElement("div");
+                    noticeSection.style.marginBottom = "10px";
+                    noticeSection.style.padding = "8px 10px";
+                    noticeSection.style.borderRadius = "4px";
+                    noticeSection.style.background = "#fff7ed";
+                    noticeSection.style.border = "1px solid #fed7aa";
+
+                    const noticeTitle = document.createElement("div");
+                    noticeTitle.style.fontSize = "11px";
+                    noticeTitle.style.fontWeight = "bold";
+                    noticeTitle.style.marginBottom = "4px";
+                    noticeTitle.textContent = "Important";
+
+                    const noticeDesc = document.createElement("div");
+                    noticeDesc.style.fontSize = "11px";
+                    noticeDesc.style.lineHeight = "1.4";
+                    noticeDesc.innerHTML =
+                        "The Lightship Geospatial Browser at lightship.dev is now defunct, so it is no longer possible to obtain Wayfarer App submission data from there.<br><br>" +
+                        "This plugin can now only use data that already exists in this browser's local IndexedDB storage, or data imported from a JSON backup exported from another device/browser.<br><br>" +
+                        "If you do not already have a copy of your Wayfarer App submission data, this plugin serves no function and can be uninstalled.";
+                    noticeSection.appendChild(noticeTitle);
+                    noticeSection.appendChild(noticeDesc);
+                    container.appendChild(noticeSection);
+
+                    const transferSection = document.createElement("div");
+                    transferSection.style.marginBottom = "10px";
+                    transferSection.style.padding = "8px 10px";
+                    transferSection.style.borderRadius = "4px";
+                    transferSection.style.background = "#eff6ff";
+                    transferSection.style.border = "1px solid #bfdbfe";
+
+                    const transferTitle = document.createElement("div");
+                    transferTitle.style.fontSize = "11px";
+                    transferTitle.style.fontWeight = "bold";
+                    transferTitle.style.marginBottom = "4px";
+                    transferTitle.textContent = "Backup / transfer your saved submissions";
+
+                    const transferDesc = document.createElement("div");
+                    transferDesc.style.fontSize = "11px";
+                    transferDesc.style.marginBottom = "8px";
+                    transferDesc.style.lineHeight = "1.4";
+                    transferDesc.textContent = "Use Export to save a JSON backup of the submissions currently stored in this browser. Use Import to restore a previously exported JSON backup on this or another device/browser.";
+
+                    const buttonRow = document.createElement("div");
+                    buttonRow.style.display = "flex";
+                    buttonRow.style.flexWrap = "wrap";
+                    buttonRow.style.gap = "8px";
+                    buttonRow.style.alignItems = "center";
+
+                    const exportBtn = document.createElement("button");
+                    exportBtn.type = "button";
+                    exportBtn.textContent = "Export to JSON";
+                    exportBtn.style.fontSize = "11px";
+                    exportBtn.style.padding = "4px 8px";
+                    exportBtn.style.cursor = "pointer";
 
                     const importBtn = document.createElement("button");
                     importBtn.type = "button";
-                    importBtn.textContent = "Import from Geospatial Browser";
+                    importBtn.textContent = "Import from JSON";
                     importBtn.style.fontSize = "11px";
                     importBtn.style.padding = "4px 8px";
                     importBtn.style.cursor = "pointer";
 
-                    importBtn.addEventListener("click", () => {
-                        try {
-                            window.open(
-                                "https://lightship.dev/account/geospatial-browser/",
-                                WFAPPSUB_CHILD_NAME
-                            );
-                        } catch (e) {
-                            console.warn("[WFAppSub] Failed to open Lightship Geospatial Browser", e);
-                        }
+                    const importInput = document.createElement("input");
+                    importInput.type = "file";
+                    importInput.accept = "application/json,.json";
+                    importInput.style.display = "none";
+
+                    exportBtn.addEventListener("click", () => {
+                        setStatusMessage("Preparing export…", "info");
+                        exportAppSubmissionsFromIDB()
+                            .then(payload => {
+                                const count = Array.isArray(payload.submittedPois) ? payload.submittedPois.length : 0;
+                                const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+                                triggerJsonDownload(`wayfarer-app-submissions-${stamp}.json`, JSON.stringify(payload, null, 2));
+                                setStatusMessage(`Exported ${count} submission${count === 1 ? "" : "s"} to JSON.`, "success");
+                            })
+                            .catch(err => {
+                                console.warn("[WFAppSub] Failed to export JSON", err);
+                                setStatusMessage("Failed to export submissions to JSON.", "error");
+                            });
                     });
 
-                    importSection.appendChild(importTitle);
-                    importSection.appendChild(importDesc);
-                    importSection.appendChild(importBtn);
-                    container.appendChild(importSection);
+                    importBtn.addEventListener("click", () => {
+                        importInput.value = "";
+                        importInput.click();
+                    });
+
+                    importInput.addEventListener("change", () => {
+                        const file = importInput.files && importInput.files[0];
+                        if (!file) return;
+
+                        setStatusMessage("Importing JSON backup…", "info");
+                        importAppSubmissionsFromFile(file)
+                            .then(submittedPois => {
+                                appSubmissions = submittedPois;
+                                clearSubmissionMarkers();
+                                clearSubmissionSelection();
+                                refreshSubmissionMarkers();
+                                const count = Array.isArray(submittedPois) ? submittedPois.length : 0;
+                                setStatusMessage(`Imported ${count} submission${count === 1 ? "" : "s"} from JSON.`, "success");
+                            })
+                            .catch(err => {
+                                console.warn("[WFAppSub] Failed to import JSON", err);
+                                setStatusMessage(err && err.message ? err.message : "Failed to import JSON backup.", "error");
+                            });
+                    });
+
+                    buttonRow.appendChild(exportBtn);
+                    buttonRow.appendChild(importBtn);
+                    transferSection.appendChild(transferTitle);
+                    transferSection.appendChild(transferDesc);
+                    transferSection.appendChild(buttonRow);
+                    transferSection.appendChild(importInput);
+                    container.appendChild(transferSection);
 
                     // Performance section
                     const mapCfg = userSettings.map || (userSettings.map = {});
@@ -1506,7 +1439,7 @@
             Object.assign(dialog.style, {
                 background: "#fff",
                 color: "#000",
-                minWidth: "350px",
+                minWidth: "450px",
                 maxWidth: "500px",
                 maxHeight: "80vh",
                 borderRadius: "4px",
@@ -1647,7 +1580,7 @@
                 imageUrl: poi.imageServingUrl || "",
                 status: poi.curationState || "",
                 source: POI_BRIDGE_SOURCE,
-                dataSourceLogo: LIGHTSHIP_LOGO_SVG,
+                dataSourceLogo: WAYFARER_APP_LOGO_SVG,
                 dataSourceText: "Wayfarer App submission",
             };
 
@@ -1713,8 +1646,8 @@
             const mainUrl = normalizeImageUrl(poi.imageServingUrl || "");
 
             const supportingUrls = poi.supportingImageServingUrl
-            ? [normalizeImageUrl(poi.supportingImageServingUrl)]
-            : [];
+                ? [normalizeImageUrl(poi.supportingImageServingUrl)]
+                : [];
 
             const payload = {
                 source: POI_BRIDGE_SOURCE,
@@ -1775,41 +1708,6 @@
         }
 
         // -----------------------------
-        // postMessage import handler
-        // -----------------------------
-
-        function setupImportMessageListener() {
-            window.addEventListener("message", (event) => {
-                try {
-                    const origin = event.origin || "";
-                    if (
-                        origin !== "https://lightship.dev" &&
-                        origin !== "https://www.lightship.dev" &&
-                        origin !== ""
-                    ) {
-                        return;
-                    }
-
-                    const data = event.data;
-                    if (!data || data.type !== POSTMESSAGE_TYPE_IMPORT) return;
-
-                    const submittedPois = Array.isArray(data.submittedPois) ? data.submittedPois : null;
-                    if (!submittedPois) {
-                        console.warn("[WFAppSub] Import message missing submittedPois");
-                        return;
-                    }
-
-                    console.log("[WFAppSub] Received", submittedPois.length, "Wayfarer App submissions from Lightship");
-                    appSubmissions = submittedPois;
-                    saveAppSubmissionsToIDB(submittedPois);
-                    refreshSubmissionMarkers();
-                } catch (e) {
-                    console.warn("[WFAppSub] Error handling import postMessage", e);
-                }
-            });
-        }
-
-        // -----------------------------
         // Bootstrap
         // -----------------------------
 
@@ -1817,7 +1715,6 @@
             loadSettings();
             loadAppSubmissionsFromIDB();
             setupMapRouteWatcher();
-            setupImportMessageListener();
         }
 
         bootstrap();
