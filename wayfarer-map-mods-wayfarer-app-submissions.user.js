@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Wayfarer App Submissions
-// @version      4.0.0
+// @version      4.0.1
 // @description  Show Wayfarer App submissions on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-wayfarer-app-submissions.user.js
@@ -1077,7 +1077,7 @@
 
             openSettingsModal({
                 id: "wf-wayfarerapp-marker-backdrop",
-                title: "Wayfarer App submissions – marker options",
+                title: "Wayfarer App Submissions - Settings",
                 buildContent(dialog) {
                     const container = document.createElement("div");
                     container.className = "wfmapmods-modal-section";
