@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Community Header Layout
-// @version      1.2.8
+// @version      1.2.9
 // @description  Changes the header links on Wayfarer Community Forum
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-community-header.user.js
@@ -39,23 +39,23 @@
 
         const style = document.createElement("style");
         style.id = "wayfarer-header-tweaks-style";
-        style.textContent = `
+style.textContent = `
   .wayfarer-flag-switcher {
     display: inline-flex !important;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0;
-    line-height: 0.8;
+    gap: 2px;
+    line-height: 1;
   }
 
   .wayfarer-flag-switcher a {
     display: block;
     text-decoration: none !important;
     font-size: 18px;
-    line-height: 0.8;
+    line-height: 1;
     padding: 0;
-    margin: -1px 0;
+    margin: 0;
   }
 
   .wayfarer-flag-switcher a:hover {
@@ -63,10 +63,73 @@
   }
 
   @media (max-width: 800px) {
+    html,
+    body {
+      max-width: 100vw !important;
+      overflow-x: hidden !important;
+    }
+
+    header.d-header,
+    header.d-header .wrap,
+    header.d-header .contents {
+      max-width: 100vw !important;
+      min-width: 0 !important;
+      overflow-x: clip !important;
+    }
+
+    header.d-header .contents {
+      display: flex !important;
+      align-items: center !important;
+      gap: 0.15rem !important;
+    }
+
+    header.d-header .home-logo-wrapper-outlet {
+      display: flex !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      flex: 0 1 38px !important;
+      min-width: 34px !important;
+      max-width: 38px !important;
+      overflow: visible !important;
+    }
+
+    header.d-header .title,
+    header.d-header .title a {
+      display: flex !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      width: auto !important;
+      min-width: 0 !important;
+      overflow: visible !important;
+    }
+
+    header.d-header #site-logo.logo-mobile {
+      display: block !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      width: auto !important;
+      max-width: 38px !important;
+      height: auto !important;
+    }
+
+    header.d-header .before-header-panel-outlet {
+      flex: 1 1 auto !important;
+      min-width: 0 !important;
+      overflow: hidden !important;
+    }
+
     header.d-header .custom-header-links {
       display: flex !important;
       align-items: center !important;
-      gap: 0.45rem !important;
+      gap: 0.25rem !important;
+      min-width: 0 !important;
+      max-width: 100% !important;
+      overflow: hidden !important;
+    }
+
+    header.d-header .custom-header-links li {
+      min-width: 0 !important;
+      flex: 0 1 auto !important;
     }
 
     header.d-header .help-center-custom-header-links,
@@ -94,37 +157,8 @@
       display: list-item !important;
       visibility: visible !important;
       width: auto !important;
-      max-width: none !important;
-      overflow: visible !important;
-    }
-
-    header.d-header .home-logo-wrapper-outlet {
-      display: flex !important;
-      visibility: visible !important;
-      opacity: 1 !important;
-      flex: 0 0 auto !important;
-      width: auto !important;
-      min-width: 42px !important;
-      max-width: none !important;
-      overflow: visible !important;
-    }
-
-    header.d-header .title,
-    header.d-header .title a {
-      display: flex !important;
-      visibility: visible !important;
-      opacity: 1 !important;
-      width: auto !important;
-      overflow: visible !important;
-    }
-
-    header.d-header #site-logo.logo-mobile {
-      display: block !important;
-      visibility: visible !important;
-      opacity: 1 !important;
-      width: auto !important;
-      max-width: 42px !important;
-      height: auto !important;
+      max-width: 4.1rem !important;
+      overflow: hidden !important;
     }
 
     header.d-header .custom-header-links li a {
@@ -135,40 +169,45 @@
       white-space: normal !important;
       line-height: 1.05 !important;
       font-size: 0.86rem !important;
-      max-width: 4.5rem !important;
+      max-width: 4.1rem !important;
+      padding: 0 0.08rem !important;
+      box-sizing: border-box !important;
     }
 
     header.d-header .wayfarer-flag-switcher a {
       font-size: 16px !important;
-      line-height: 0.75 !important;
-      margin: -2px 0 !important;
+      line-height: 1 !important;
+      margin: 0 !important;
+      padding: 0 !important;
       max-width: none !important;
     }
 
-    header.d-header.wayfarer-logged-in .contents {
-      gap: 0.2rem !important;
+    header.d-header .panel {
+      flex: 0 0 auto !important;
+      min-width: 0 !important;
+      overflow: visible !important;
     }
 
-    header.d-header.wayfarer-logged-in .custom-header-links {
-      gap: 0.3rem !important;
+    header.d-header .d-header-icons {
+      display: flex !important;
+      align-items: center !important;
+      gap: 0 !important;
+      margin: 0 !important;
+      padding: 0 !important;
     }
 
-    header.d-header.wayfarer-logged-in .custom-header-links li a {
-      padding: 0 0.15rem !important;
-      max-width: 4.2rem !important;
-    }
-
-    header.d-header.wayfarer-logged-in .d-header-icons li {
-      margin: 0 0.1rem !important;
+    header.d-header .d-header-icons li {
+      margin: 0 !important;
+      padding: 0 !important;
     }
 
     header.d-header.wayfarer-logged-in .btn-icon {
-      padding: 0.25rem !important;
+      padding: 0.2rem !important;
     }
 
     header.d-header.wayfarer-logged-in .d-header-icons svg,
     header.d-header.wayfarer-logged-in .d-header-icons img.avatar {
-      transform: scale(0.80);
+      transform: scale(0.95);
       transform-origin: center;
     }
 
@@ -176,20 +215,6 @@
       display: flex;
       align-items: center;
       justify-content: center;
-    }
-
-    header.d-header .wayfarer-flag-switcher {
-      display: inline-flex !important;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 2px !important;
-    }
-
-    header.d-header .wayfarer-flag-switcher a {
-      margin: 0 !important;
-      padding: 0 !important;
-      line-height: 1 !important;
     }
   }
 `;
