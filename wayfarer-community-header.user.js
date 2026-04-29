@@ -1,34 +1,12 @@
 // ==UserScript==
-// @name         Wayfarer Community Header Layout
-// @version      1.0.0
-// @description  Changes the header links on Wayfarer Community Forum
-// @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-community-header.user.js
-// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-community-header.user.js
-// @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
+// @name         Niantic Wayfarer Header Tweaks
+// @namespace    https://community.wayfarer.nianticlabs.com/
+// @version      1.1.0
+// @description  Replace Japanese forum text link with US/JP flags, remove Wayfarer link, and show extra links on mobile.
 // @match        https://community.wayfarer.nianticlabs.com/*
-// @run-at       document-start
 // @grant        none
+// @run-at       document-start
 // ==/UserScript==
-
-// Copyright 2026 tntnnbltn
-
-// This script is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-
-// This script is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-
-// You can find a copy of the GNU General Public License in the root
-// directory of this script's GitLab repository:
-// <https://gitlab.com/Tntnnbltn/wayfarer-addons/-/blob/main/LICENSE>
-// If not, see <https://www.gnu.org/licenses/>.
-
-
 
 (function () {
   "use strict";
@@ -42,6 +20,7 @@
     const style = document.createElement("style");
     style.id = "wayfarer-header-tweaks-style";
     style.textContent = `
+      /* ===== FLAG STACK ===== */
       .wayfarer-flag-switcher {
         display: inline-flex !important;
         flex-direction: column;
@@ -64,7 +43,71 @@
         transform: scale(1.08);
       }
 
+      /* ===== MOBILE FIXES ===== */
+      @media (max-width: 767px) {
+        header.d-header .contents {
+          display: flex !important;
+          align-items: center;
+          width: 100%;
+          overflow: hidden !important;
+        }
 
+        .before-header-panel-outlet {
+          flex: 1 1 auto !important;
+          min-width: 0 !important;
+          overflow: visible !important;
+        }
+
+        .custom-header-links {
+          display: flex !important;
+          align-items: center;
+          flex-wrap: wrap !important;
+          gap: 0.15rem 0.45rem;
+          max-width: 100%;
+          overflow: visible !important;
+        }
+
+        .custom-header-links li {
+          flex: 0 1 auto;
+          max-width: 4.8rem;
+          text-align: center;
+        }
+
+        .custom-header-links li a {
+          display: inline-block !important;
+          font-size: 0.82rem !important;
+          line-height: 1.05 !important;
+          white-space: normal !important;
+          text-align: center;
+        }
+
+        /* Force desktop-only links to show on mobile */
+        .custom-header-links .reporting-abuse-custom-header-links,
+        .custom-header-links .wayspot-removals-custom-header-links {
+          display: list-item !important;
+          visibility: visible !important;
+        }
+
+        .panel {
+          flex: 0 0 auto !important;
+        }
+
+        .icons.d-header-icons {
+          display: flex !important;
+          align-items: center;
+          gap: 0.15rem;
+        }
+
+        .wayfarer-flag-switcher {
+          width: 1.5rem;
+        }
+
+        .wayfarer-flag-switcher a {
+          font-size: 15px;
+          line-height: 0.75;
+          margin: -2px 0;
+        }
+      }
     `;
 
     document.documentElement.appendChild(style);
@@ -74,12 +117,12 @@
     const header = document.querySelector("header.d-header");
     if (!header) return;
 
-    // Remove the external "Wayfarer" text link.
+    // Remove "Wayfarer" link
     header
       .querySelectorAll(".wayfarer-custom-header-links")
       .forEach((el) => el.remove());
 
-    // Replace the Japanese community text link with stacked US/JP flags.
+    // Replace Japanese link with flags
     const japaneseLinkItem =
       header.querySelector(".日本コミュニティ-custom-header-links") ||
       [...header.querySelectorAll(".custom-header-links li")].find((li) =>
@@ -89,14 +132,14 @@
     if (japaneseLinkItem && !japaneseLinkItem.classList.contains("wayfarer-flags-applied")) {
       japaneseLinkItem.classList.add("wayfarer-flags-applied");
       japaneseLinkItem.innerHTML = `
-        <span class="wayfarer-flag-switcher" aria-label="Community language links">
-          <a href="${HOME_URL}" title="English & Worldwide Community" aria-label="English & Worldwide Community">🇺🇸</a>
-          <a href="${JP_URL}" title="日本コミュニティ" aria-label="日本コミュニティ">🇯🇵</a>
+        <span class="wayfarer-flag-switcher">
+          <a href="${HOME_URL}" title="English Community">🇺🇸</a>
+          <a href="${JP_URL}" title="日本コミュニティ">🇯🇵</a>
         </span>
       `;
     }
 
-    // Ensure these desktop links are visible on mobile too.
+    // Ensure mobile visibility for extra links
     const reporting = header.querySelector(".reporting-abuse-custom-header-links");
     const removals = header.querySelector(".wayspot-removals-custom-header-links");
 
