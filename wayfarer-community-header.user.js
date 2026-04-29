@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Community Header Layout
-// @version      1.2.10
+// @version      1.2.11
 // @description  Changes the header links on Wayfarer Community Forum
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-community-header.user.js
@@ -34,6 +34,16 @@
     const HOME_URL = "https://community.wayfarer.nianticlabs.com/";
     const JP_URL = "https://community.wayfarer.nianticlabs.com/c/japan/56";
 
+    function updateMobileClass() {
+        const isMobile =
+              window.matchMedia("(pointer: coarse)").matches ||
+              window.innerWidth <= 900 ||
+              document.documentElement.clientWidth <= 900;
+
+        document.documentElement.classList.toggle("wayfarer-mobile", isMobile);
+        document.documentElement.classList.toggle("wayfarer-desktop", !isMobile);
+    }
+
     function addStyles() {
         if (document.getElementById("wayfarer-header-tweaks-style")) return;
 
@@ -62,167 +72,82 @@
     transform: scale(1.08);
   }
 
-  @media (max-width: 767px) {
-    html,
-    body {
-      max-width: 100vw !important;
-      overflow-x: hidden !important;
-    }
-
-    header.d-header,
-    header.d-header .wrap,
-    header.d-header .contents {
-      max-width: 100vw !important;
-      min-width: 0 !important;
-      overflow-x: clip !important;
-    }
-
-    header.d-header .contents {
-      display: flex !important;
-      align-items: center !important;
-      gap: 0.15rem !important;
-    }
-
-    header.d-header .home-logo-wrapper-outlet {
-      display: flex !important;
-      visibility: visible !important;
-      opacity: 1 !important;
-      flex: 0 1 38px !important;
-      min-width: 34px !important;
-      max-width: 38px !important;
-      overflow: visible !important;
-    }
-
-    header.d-header .title,
-    header.d-header .title a {
-      display: flex !important;
-      visibility: visible !important;
-      opacity: 1 !important;
-      width: auto !important;
-      min-width: 0 !important;
-      overflow: visible !important;
-    }
-
-    header.d-header #site-logo.logo-mobile {
-      display: block !important;
-      visibility: visible !important;
-      opacity: 1 !important;
-      width: auto !important;
-      max-width: 38px !important;
-      height: auto !important;
-    }
-
-    header.d-header .before-header-panel-outlet {
-      flex: 1 1 auto !important;
-      min-width: 0 !important;
-      overflow: hidden !important;
-    }
-
-    header.d-header .custom-header-links {
-      display: flex !important;
-      align-items: center !important;
-      gap: 0.25rem !important;
-      min-width: 0 !important;
-      max-width: 100% !important;
-      overflow: hidden !important;
-    }
-
-    header.d-header .custom-header-links li {
-      min-width: 0 !important;
-      flex: 0 1 auto !important;
-    }
-
-    header.d-header .help-center-custom-header-links,
-    header.d-header .help-center-custom-header-links.headerLink--keep,
-    header.d-header .help-center-custom-header-links.headerLink--vdm,
-    header.d-header .help-center-custom-header-links.headerLink--en {
-      display: none !important;
-      visibility: hidden !important;
-      width: 0 !important;
-      max-width: 0 !important;
-      overflow: hidden !important;
-    }
-
-    header.d-header.wayfarer-logged-out .reporting-abuse-custom-header-links,
-    header.d-header.wayfarer-logged-out .wayspot-removals-custom-header-links {
-      display: none !important;
-      visibility: hidden !important;
-      width: 0 !important;
-      max-width: 0 !important;
-      overflow: hidden !important;
-    }
-
-    header.d-header.wayfarer-logged-in .reporting-abuse-custom-header-links,
-    header.d-header.wayfarer-logged-in .wayspot-removals-custom-header-links {
-      display: list-item !important;
-      visibility: visible !important;
-      width: auto !important;
-      max-width: 4.1rem !important;
-      overflow: hidden !important;
-    }
-
-    header.d-header .custom-header-links li a {
-      display: inline-flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      text-align: center !important;
-      white-space: normal !important;
-      line-height: 1.05 !important;
-      font-size: 0.86rem !important;
-      max-width: 4.1rem !important;
-      padding: 0 0.08rem !important;
-      box-sizing: border-box !important;
-    }
-
-    header.d-header .wayfarer-flag-switcher a {
-      font-size: 16px !important;
-      line-height: 1 !important;
-      margin: 0 !important;
-      padding: 0 !important;
-      max-width: none !important;
-    }
-
-    header.d-header .panel {
-      flex: 0 0 auto !important;
-      min-width: 0 !important;
-      overflow: visible !important;
-    }
-
-    header.d-header .d-header-icons {
-      display: flex !important;
-      align-items: center !important;
-      gap: 0 !important;
-      margin: 0 !important;
-      padding: 0 !important;
-    }
-
-    header.d-header .d-header-icons li {
-      margin: 0 !important;
-      padding: 0 !important;
-    }
-
-    header.d-header.wayfarer-logged-in .btn-icon {
-      padding: 0.2rem !important;
-    }
-
-    header.d-header.wayfarer-logged-in .d-header-icons svg,
-    header.d-header.wayfarer-logged-in .d-header-icons img.avatar {
-      transform: scale(0.95);
-      transform-origin: center;
-    }
-
-    header.d-header.wayfarer-logged-in .header-dropdown-toggle button {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
+  html.wayfarer-mobile,
+  html.wayfarer-mobile body {
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
   }
 
-  @media (max-width: 767px) {
-  header.d-header li.help-center-custom-header-links,
-  header.d-header li[class*="help-center-custom-header-links"],
-  header.d-header li:has(a[title="Help Center"]),
-  header.d-header a[title="Help Center"] {
+  html.wayfarer-mobile header.d-header,
+  html.wayfarer-mobile header.d-header .wrap,
+  html.wayfarer-mobile header.d-header .contents {
+    max-width: 100vw !important;
+    min-width: 0 !important;
+    overflow-x: clip !important;
+  }
+
+  html.wayfarer-mobile header.d-header .contents {
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.15rem !important;
+  }
+
+  html.wayfarer-mobile header.d-header .home-logo-wrapper-outlet {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    flex: 0 1 38px !important;
+    min-width: 34px !important;
+    max-width: 38px !important;
+    overflow: visible !important;
+  }
+
+  html.wayfarer-mobile header.d-header .title,
+  html.wayfarer-mobile header.d-header .title a {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    width: auto !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+  }
+
+  html.wayfarer-mobile header.d-header #site-logo.logo-mobile {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    width: auto !important;
+    max-width: 38px !important;
+    height: auto !important;
+  }
+
+  html.wayfarer-mobile header.d-header .before-header-panel-outlet {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+  }
+
+  html.wayfarer-mobile header.d-header .custom-header-links {
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.25rem !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+  }
+
+  html.wayfarer-mobile header.d-header .custom-header-links li {
+    min-width: 0 !important;
+    flex: 0 1 auto !important;
+  }
+
+  html.wayfarer-mobile header.d-header .help-center-custom-header-links,
+  html.wayfarer-mobile header.d-header .help-center-custom-header-links.headerLink--keep,
+  html.wayfarer-mobile header.d-header .help-center-custom-header-links.headerLink--vdm,
+  html.wayfarer-mobile header.d-header .help-center-custom-header-links.headerLink--en,
+  html.wayfarer-mobile header.d-header li[class*="help-center-custom-header-links"],
+  html.wayfarer-mobile header.d-header li:has(a[title="Help Center"]),
+  html.wayfarer-mobile header.d-header a[title="Help Center"] {
     display: none !important;
     visibility: hidden !important;
     width: 0 !important;
@@ -235,7 +160,80 @@
     overflow: hidden !important;
     pointer-events: none !important;
   }
-}
+
+  html.wayfarer-mobile header.d-header.wayfarer-logged-out .reporting-abuse-custom-header-links,
+  html.wayfarer-mobile header.d-header.wayfarer-logged-out .wayspot-removals-custom-header-links {
+    display: none !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    max-width: 0 !important;
+    overflow: hidden !important;
+  }
+
+  html.wayfarer-mobile header.d-header.wayfarer-logged-in .reporting-abuse-custom-header-links,
+  html.wayfarer-mobile header.d-header.wayfarer-logged-in .wayspot-removals-custom-header-links {
+    display: list-item !important;
+    visibility: visible !important;
+    width: auto !important;
+    max-width: 4.1rem !important;
+    overflow: hidden !important;
+  }
+
+  html.wayfarer-mobile header.d-header .custom-header-links li a {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+    white-space: normal !important;
+    line-height: 1.05 !important;
+    font-size: 0.86rem !important;
+    max-width: 4.1rem !important;
+    padding: 0 0.08rem !important;
+    box-sizing: border-box !important;
+  }
+
+  html.wayfarer-mobile header.d-header .wayfarer-flag-switcher a {
+    font-size: 16px !important;
+    line-height: 1 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: none !important;
+  }
+
+  html.wayfarer-mobile header.d-header .panel {
+    flex: 0 0 auto !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+  }
+
+  html.wayfarer-mobile header.d-header .d-header-icons {
+    display: flex !important;
+    align-items: center !important;
+    gap: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  html.wayfarer-mobile header.d-header .d-header-icons li {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  html.wayfarer-mobile header.d-header.wayfarer-logged-in .btn-icon {
+    padding: 0.2rem !important;
+  }
+
+  html.wayfarer-mobile header.d-header.wayfarer-logged-in .d-header-icons svg,
+  html.wayfarer-mobile header.d-header.wayfarer-logged-in .d-header-icons img.avatar {
+    transform: scale(0.9) !important;
+    transform-origin: center !important;
+  }
+
+  html.wayfarer-mobile header.d-header.wayfarer-logged-in .header-dropdown-toggle button {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
 `;
         document.documentElement.appendChild(style);
     }
@@ -285,11 +283,21 @@
         });
     }
 
+
     function start() {
+        updateMobileClass();
         addStyles();
         tweakHeader();
 
-        const observer = new MutationObserver(() => tweakHeader());
+        window.addEventListener("resize", updateMobileClass, { passive: true });
+        window.addEventListener("orientationchange", updateMobileClass, { passive: true });
+        window.addEventListener("pageshow", updateMobileClass);
+
+        const observer = new MutationObserver(() => {
+            updateMobileClass();
+            tweakHeader();
+        });
+
         observer.observe(document.documentElement, {
             childList: true,
             subtree: true,
