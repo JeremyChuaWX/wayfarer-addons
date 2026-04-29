@@ -1,12 +1,33 @@
 // ==UserScript==
-// @name         Niantic Wayfarer Header Tweaks
-// @namespace    https://community.wayfarer.nianticlabs.com/
-// @version      1.1.0
-// @description  Replace Japanese forum text link with US/JP flags, remove Wayfarer link, and show extra links on mobile.
+// @name         Wayfarer Community Header Layout
+// @version      1.2.0
+// @description  Changes the header links on Wayfarer Community Forum
+// @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
+// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-community-header.user.js
+// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-community-header.user.js
+// @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://community.wayfarer.nianticlabs.com/*
-// @grant        none
 // @run-at       document-start
+// @grant        none
 // ==/UserScript==
+
+// Copyright 2026 tntnnbltn
+
+// This script is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+// This script is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+
+// You can find a copy of the GNU General Public License in the root
+// directory of this script's GitLab repository:
+// <https://gitlab.com/Tntnnbltn/wayfarer-addons/-/blob/main/LICENSE>
+// If not, see <https://www.gnu.org/licenses/>.
+
 
 (function () {
   "use strict";
@@ -20,7 +41,6 @@
     const style = document.createElement("style");
     style.id = "wayfarer-header-tweaks-style";
     style.textContent = `
-      /* ===== FLAG STACK ===== */
       .wayfarer-flag-switcher {
         display: inline-flex !important;
         flex-direction: column;
@@ -43,69 +63,95 @@
         transform: scale(1.08);
       }
 
-      /* ===== MOBILE FIXES ===== */
       @media (max-width: 767px) {
         header.d-header .contents {
           display: flex !important;
-          align-items: center;
-          width: 100%;
-          overflow: hidden !important;
+          align-items: center !important;
+          gap: clamp(0.25rem, 1.1vw, 0.55rem);
         }
 
-        .before-header-panel-outlet {
+        header.d-header .before-header-panel-outlet {
           flex: 1 1 auto !important;
           min-width: 0 !important;
-          overflow: visible !important;
         }
 
-        .custom-header-links {
+        header.d-header .custom-header-links {
           display: flex !important;
-          align-items: center;
-          flex-wrap: wrap !important;
-          gap: 0.15rem 0.45rem;
-          max-width: 100%;
-          overflow: visible !important;
-        }
-
-        .custom-header-links li {
-          flex: 0 1 auto;
-          max-width: 4.8rem;
-          text-align: center;
-        }
-
-        .custom-header-links li a {
-          display: inline-block !important;
-          font-size: 0.82rem !important;
-          line-height: 1.05 !important;
+          align-items: center !important;
+          justify-content: flex-start !important;
+          gap: clamp(0.35rem, 1.6vw, 0.8rem);
+          min-width: 0 !important;
+          max-width: 100% !important;
+          overflow: hidden !important;
           white-space: normal !important;
-          text-align: center;
         }
 
-        /* Force desktop-only links to show on mobile */
-        .custom-header-links .reporting-abuse-custom-header-links,
-        .custom-header-links .wayspot-removals-custom-header-links {
-          display: list-item !important;
+        header.d-header .custom-header-links li {
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          min-width: 0 !important;
+          flex: 0 1 auto !important;
           visibility: visible !important;
         }
 
-        .panel {
+        header.d-header .custom-header-links li a {
+          display: block !important;
+          font-size: clamp(0.66rem, 2.35vw, 1rem) !important;
+          line-height: 1.05 !important;
+          white-space: normal !important;
+          text-align: center !important;
+          word-break: normal !important;
+          overflow-wrap: normal !important;
+          padding: 0 !important;
+        }
+
+        header.d-header .help-center-custom-header-links,
+        header.d-header .reporting-abuse-custom-header-links,
+        header.d-header .wayspot-removals-custom-header-links {
+          flex: 1 1 0 !important;
+        }
+
+        header.d-header .reporting-abuse-custom-header-links,
+        header.d-header .wayspot-removals-custom-header-links {
+          display: flex !important;
+          visibility: visible !important;
+        }
+
+        header.d-header .wayfarer-flag-link {
           flex: 0 0 auto !important;
         }
 
-        .icons.d-header-icons {
-          display: flex !important;
-          align-items: center;
-          gap: 0.15rem;
+        header.d-header .wayfarer-flag-switcher a {
+          font-size: clamp(14px, 3.3vw, 18px) !important;
+          line-height: 0.75 !important;
+          margin: -2px 0 !important;
         }
 
-        .wayfarer-flag-switcher {
-          width: 1.5rem;
+        header.d-header .panel {
+          flex: 0 0 auto !important;
         }
 
-        .wayfarer-flag-switcher a {
-          font-size: 15px;
-          line-height: 0.75;
-          margin: -2px 0;
+        header.d-header .d-header-icons {
+          gap: 0 !important;
+        }
+
+        header.d-header #search-button,
+        header.d-header #toggle-hamburger-menu,
+        header.d-header #toggle-current-user {
+          padding-left: clamp(0.15rem, 0.8vw, 0.4rem) !important;
+          padding-right: clamp(0.15rem, 0.8vw, 0.4rem) !important;
+        }
+      }
+
+      @media (max-width: 430px) {
+        header.d-header .custom-header-links {
+          gap: 0.32rem !important;
+        }
+
+        header.d-header .custom-header-links li a {
+          font-size: clamp(0.58rem, 2.6vw, 0.82rem) !important;
+          line-height: 1.02 !important;
         }
       }
     `;
@@ -117,12 +163,10 @@
     const header = document.querySelector("header.d-header");
     if (!header) return;
 
-    // Remove "Wayfarer" link
     header
       .querySelectorAll(".wayfarer-custom-header-links")
       .forEach((el) => el.remove());
 
-    // Replace Japanese link with flags
     const japaneseLinkItem =
       header.querySelector(".日本コミュニティ-custom-header-links") ||
       [...header.querySelectorAll(".custom-header-links li")].find((li) =>
@@ -130,26 +174,62 @@
       );
 
     if (japaneseLinkItem && !japaneseLinkItem.classList.contains("wayfarer-flags-applied")) {
-      japaneseLinkItem.classList.add("wayfarer-flags-applied");
+      japaneseLinkItem.classList.add("wayfarer-flags-applied", "wayfarer-flag-link");
       japaneseLinkItem.innerHTML = `
-        <span class="wayfarer-flag-switcher">
-          <a href="${HOME_URL}" title="English Community">🇺🇸</a>
-          <a href="${JP_URL}" title="日本コミュニティ">🇯🇵</a>
+        <span class="wayfarer-flag-switcher" aria-label="Community language links">
+          <a href="${HOME_URL}" title="English Community" aria-label="English Community">🇺🇸</a>
+          <a href="${JP_URL}" title="日本コミュニティ" aria-label="日本コミュニティ">🇯🇵</a>
         </span>
       `;
     }
 
-    // Ensure mobile visibility for extra links
-    const reporting = header.querySelector(".reporting-abuse-custom-header-links");
-    const removals = header.querySelector(".wayspot-removals-custom-header-links");
+    const links = header.querySelector(".custom-header-links");
+    if (!links) return;
 
-    [reporting, removals].forEach((el) => {
-      if (!el) return;
-      el.classList.remove("headerLink--vdo");
-      el.classList.add("headerLink--keep");
-      el.style.display = "";
-      el.style.visibility = "";
-    });
+    ensureLink(
+      links,
+      "reporting-abuse-custom-header-links",
+      "Reporting Abuse",
+      "https://niantic.helpshift.com/hc/en/21-wayfarer/faq/2190-reporting-abuse-in-wayfarer/?l=en&p=web"
+    );
+
+    ensureLink(
+      links,
+      "wayspot-removals-custom-header-links",
+      "Wayspot Removals",
+      "https://niantic.helpshift.com/hc/en/21-wayfarer/faq/4212-reporting-a-wayspot/?l=en&p=web"
+    );
+
+    [".help-center-custom-header-links", ".reporting-abuse-custom-header-links", ".wayspot-removals-custom-header-links"].forEach(
+      (selector) => {
+        const item = header.querySelector(selector);
+        if (!item) return;
+
+        item.classList.remove("headerLink--vdo");
+        item.classList.add("headerLink--keep");
+        item.style.display = "";
+        item.style.visibility = "";
+      }
+    );
+  }
+
+  function ensureLink(parent, className, text, href) {
+    let item = parent.querySelector(`.${className}`);
+
+    if (!item) {
+      item = document.createElement("li");
+      item.className = `headerLink headerLink--en headerLink--keep ${className}`;
+      item.innerHTML = `<a title="${text}" href="${href}" target="_blank">${text}</a>`;
+      parent.appendChild(item);
+    }
+
+    const a = item.querySelector("a");
+    if (a) {
+      a.textContent = text;
+      a.title = text;
+      a.href = href;
+      a.target = "_blank";
+    }
   }
 
   function start() {
