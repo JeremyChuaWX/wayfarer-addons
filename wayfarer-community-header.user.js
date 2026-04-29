@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Community Header Layout
-// @version      1.2.9
+// @version      1.2.10
 // @description  Changes the header links on Wayfarer Community Forum
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-community-header.user.js
@@ -39,7 +39,7 @@
 
         const style = document.createElement("style");
         style.id = "wayfarer-header-tweaks-style";
-style.textContent = `
+        style.textContent = `
   .wayfarer-flag-switcher {
     display: inline-flex !important;
     flex-direction: column;
@@ -62,7 +62,7 @@ style.textContent = `
     transform: scale(1.08);
   }
 
-  @media (max-width: 800px) {
+  @media (max-width: 767px) {
     html,
     body {
       max-width: 100vw !important;
@@ -217,6 +217,25 @@ style.textContent = `
       justify-content: center;
     }
   }
+
+  @media (max-width: 767px) {
+  header.d-header li.help-center-custom-header-links,
+  header.d-header li[class*="help-center-custom-header-links"],
+  header.d-header li:has(a[title="Help Center"]),
+  header.d-header a[title="Help Center"] {
+    display: none !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    max-width: 0 !important;
+    min-width: 0 !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+  }
+}
 `;
         document.documentElement.appendChild(style);
     }
