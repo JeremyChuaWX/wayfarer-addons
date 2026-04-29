@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Community Header Layout
-// @version      1.2.5
+// @version      1.2.6
 // @description  Changes the header links on Wayfarer Community Forum
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-community-header.user.js
@@ -143,6 +143,39 @@
       line-height: 0.75 !important;
       margin: -2px 0 !important;
       max-width: none !important;
+    }
+
+    header.d-header.wayfarer-logged-in .contents {
+      gap: 0.2rem !important;
+    }
+
+    header.d-header.wayfarer-logged-in .custom-header-links {
+      gap: 0.3rem !important;
+    }
+
+    header.d-header.wayfarer-logged-in .custom-header-links li a {
+      padding: 0 0.15rem !important;
+      max-width: 4.2rem !important;
+    }
+
+    header.d-header.wayfarer-logged-in .d-header-icons li {
+      margin: 0 0.1rem !important;
+    }
+
+    header.d-header.wayfarer-logged-in .btn-icon {
+      padding: 0.25rem !important;
+    }
+
+    header.d-header.wayfarer-logged-in .d-header-icons svg,
+    header.d-header.wayfarer-logged-in .d-header-icons img.avatar {
+      transform: scale(0.95);
+      transform-origin: center;
+    }
+
+    header.d-header.wayfarer-logged-in .header-dropdown-toggle button {
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
   }
 `;
