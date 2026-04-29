@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Community Header Layout
-// @version      1.2.11
+// @version      1.2.12
 // @description  Changes the header links on Wayfarer Community Forum
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-community-header.user.js
@@ -35,10 +35,16 @@
     const JP_URL = "https://community.wayfarer.nianticlabs.com/c/japan/56";
 
     function updateMobileClass() {
-        const isMobile =
-              window.matchMedia("(pointer: coarse)").matches ||
-              window.innerWidth <= 900 ||
-              document.documentElement.clientWidth <= 900;
+        const width =
+              window.visualViewport?.width ||
+              document.documentElement.clientWidth ||
+              window.innerWidth;
+
+        const isTouchDevice =
+              navigator.maxTouchPoints > 0 ||
+              navigator.msMaxTouchPoints > 0;
+
+        const isMobile = isTouchDevice && width <= 1000;
 
         document.documentElement.classList.toggle("wayfarer-mobile", isMobile);
         document.documentElement.classList.toggle("wayfarer-desktop", !isMobile);
@@ -291,10 +297,11 @@
 
         window.addEventListener("resize", updateMobileClass, { passive: true });
         window.addEventListener("orientationchange", updateMobileClass, { passive: true });
-        window.addEventListener("pageshow", updateMobileClass);
+        window.addEventListener("pageshow", () => {
+            setTimeout(updateMobileClass, 50);
+        });
 
         const observer = new MutationObserver(() => {
-            updateMobileClass();
             tweakHeader();
         });
 
