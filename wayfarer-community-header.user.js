@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Community Header Layout
-// @version      1.2.3
+// @version      1.2.4
 // @description  Changes the header links on Wayfarer Community Forum
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-community-header.user.js
@@ -76,6 +76,35 @@
         header.d-header.wayfarer-logged-out .reporting-abuse-custom-header-links,
         header.d-header.wayfarer-logged-out .wayspot-removals-custom-header-links {
           display: none !important;
+        }
+
+        header.d-header .home-logo-wrapper-outlet {
+          display: flex !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+          flex: 0 0 auto !important;
+          width: auto !important;
+          min-width: 42px !important;
+          max-width: none !important;
+          overflow: visible !important;
+        }
+
+        header.d-header .title,
+        header.d-header .title a {
+          display: flex !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+          width: auto !important;
+          overflow: visible !important;
+        }
+
+        header.d-header #site-logo.logo-mobile {
+          display: block !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+          width: auto !important;
+          max-width: 42px !important;
+          height: auto !important;
         }
 
         header.d-header .custom-header-links li a {
