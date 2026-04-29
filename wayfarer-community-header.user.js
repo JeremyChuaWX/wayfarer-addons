@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Community Header Layout
-// @version      1.2.4
+// @version      1.2.5
 // @description  Changes the header links on Wayfarer Community Forum
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-community-header.user.js
@@ -29,164 +29,185 @@
 // If not, see <https://www.gnu.org/licenses/>.
 
 (function () {
-  "use strict";
+    "use strict";
 
-  const HOME_URL = "https://community.wayfarer.nianticlabs.com/";
-  const JP_URL = "https://community.wayfarer.nianticlabs.com/c/japan/56";
+    const HOME_URL = "https://community.wayfarer.nianticlabs.com/";
+    const JP_URL = "https://community.wayfarer.nianticlabs.com/c/japan/56";
 
-  function addStyles() {
-    if (document.getElementById("wayfarer-header-tweaks-style")) return;
+    function addStyles() {
+        if (document.getElementById("wayfarer-header-tweaks-style")) return;
 
-    const style = document.createElement("style");
-    style.id = "wayfarer-header-tweaks-style";
-    style.textContent = `
-      .wayfarer-flag-switcher {
-        display: inline-flex !important;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 0;
-        line-height: 0.8;
-      }
-
-      .wayfarer-flag-switcher a {
-        display: block;
-        text-decoration: none !important;
-        font-size: 18px;
-        line-height: 0.8;
-        padding: 0;
-        margin: -1px 0;
-      }
-
-      .wayfarer-flag-switcher a:hover {
-        transform: scale(1.08);
-      }
-
-      @media (max-width: 767px) {
-        header.d-header .custom-header-links {
-          display: flex !important;
-          align-items: center !important;
-          gap: 0.45rem !important;
-        }
-
-        header.d-header .help-center-custom-header-links {
-          display: none !important;
-        }
-
-        header.d-header.wayfarer-logged-out .reporting-abuse-custom-header-links,
-        header.d-header.wayfarer-logged-out .wayspot-removals-custom-header-links {
-          display: none !important;
-        }
-
-        header.d-header .home-logo-wrapper-outlet {
-          display: flex !important;
-          visibility: visible !important;
-          opacity: 1 !important;
-          flex: 0 0 auto !important;
-          width: auto !important;
-          min-width: 42px !important;
-          max-width: none !important;
-          overflow: visible !important;
-        }
-
-        header.d-header .title,
-        header.d-header .title a {
-          display: flex !important;
-          visibility: visible !important;
-          opacity: 1 !important;
-          width: auto !important;
-          overflow: visible !important;
-        }
-
-        header.d-header #site-logo.logo-mobile {
-          display: block !important;
-          visibility: visible !important;
-          opacity: 1 !important;
-          width: auto !important;
-          max-width: 42px !important;
-          height: auto !important;
-        }
-
-        header.d-header .custom-header-links li a {
-          display: inline-flex !important;
-          align-items: center !important;
-          justify-content: center !important;
-          text-align: center !important;
-          white-space: normal !important;
-          line-height: 1.05 !important;
-          font-size: 0.86rem !important;
-          max-width: 4.5rem !important;
-        }
-
-        header.d-header .wayfarer-flag-switcher a {
-          font-size: 16px !important;
-          line-height: 0.75 !important;
-          margin: -2px 0 !important;
-          max-width: none !important;
-        }
-      }
-    `;
-
-    document.documentElement.appendChild(style);
+        const style = document.createElement("style");
+        style.id = "wayfarer-header-tweaks-style";
+        style.textContent = `
+  .wayfarer-flag-switcher {
+    display: inline-flex !important;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    line-height: 0.8;
   }
 
-  function isLoggedOut(header) {
-    return !![...header.querySelectorAll("button, a")].find(
-      (el) => el.textContent.trim().toLowerCase() === "log in"
-    );
+  .wayfarer-flag-switcher a {
+    display: block;
+    text-decoration: none !important;
+    font-size: 18px;
+    line-height: 0.8;
+    padding: 0;
+    margin: -1px 0;
   }
 
-  function tweakHeader() {
-    const header = document.querySelector("header.d-header");
-    if (!header) return;
+  .wayfarer-flag-switcher a:hover {
+    transform: scale(1.08);
+  }
 
-    header.classList.toggle("wayfarer-logged-out", isLoggedOut(header));
+  @media (max-width: 767px) {
+    header.d-header .custom-header-links {
+      display: flex !important;
+      align-items: center !important;
+      gap: 0.45rem !important;
+    }
 
-    header
-      .querySelectorAll(".wayfarer-custom-header-links")
-      .forEach((el) => el.remove());
+    header.d-header .help-center-custom-header-links,
+    header.d-header .help-center-custom-header-links.headerLink--keep,
+    header.d-header .help-center-custom-header-links.headerLink--vdm,
+    header.d-header .help-center-custom-header-links.headerLink--en {
+      display: none !important;
+      visibility: hidden !important;
+      width: 0 !important;
+      max-width: 0 !important;
+      overflow: hidden !important;
+    }
 
-    const japaneseLinkItem =
-      header.querySelector(".日本コミュニティ-custom-header-links") ||
-      [...header.querySelectorAll(".custom-header-links li")].find((li) =>
-        li.textContent.includes("日本コミュニティ")
-      );
+    header.d-header.wayfarer-logged-out .reporting-abuse-custom-header-links,
+    header.d-header.wayfarer-logged-out .wayspot-removals-custom-header-links {
+      display: none !important;
+      visibility: hidden !important;
+      width: 0 !important;
+      max-width: 0 !important;
+      overflow: hidden !important;
+    }
 
-    if (japaneseLinkItem && !japaneseLinkItem.classList.contains("wayfarer-flags-applied")) {
-      japaneseLinkItem.classList.add("wayfarer-flags-applied");
-      japaneseLinkItem.innerHTML = `
+    header.d-header.wayfarer-logged-in .reporting-abuse-custom-header-links,
+    header.d-header.wayfarer-logged-in .wayspot-removals-custom-header-links {
+      display: list-item !important;
+      visibility: visible !important;
+      width: auto !important;
+      max-width: none !important;
+      overflow: visible !important;
+    }
+
+    header.d-header .home-logo-wrapper-outlet {
+      display: flex !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      flex: 0 0 auto !important;
+      width: auto !important;
+      min-width: 42px !important;
+      max-width: none !important;
+      overflow: visible !important;
+    }
+
+    header.d-header .title,
+    header.d-header .title a {
+      display: flex !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      width: auto !important;
+      overflow: visible !important;
+    }
+
+    header.d-header #site-logo.logo-mobile {
+      display: block !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      width: auto !important;
+      max-width: 42px !important;
+      height: auto !important;
+    }
+
+    header.d-header .custom-header-links li a {
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      text-align: center !important;
+      white-space: normal !important;
+      line-height: 1.05 !important;
+      font-size: 0.86rem !important;
+      max-width: 4.5rem !important;
+    }
+
+    header.d-header .wayfarer-flag-switcher a {
+      font-size: 16px !important;
+      line-height: 0.75 !important;
+      margin: -2px 0 !important;
+      max-width: none !important;
+    }
+  }
+`;
+        document.documentElement.appendChild(style);
+    }
+
+    function isLoggedOut(header) {
+        return !![...header.querySelectorAll("button, a")].find(
+            (el) => el.textContent.trim().toLowerCase() === "log in"
+        );
+    }
+
+    function tweakHeader() {
+        const header = document.querySelector("header.d-header");
+        if (!header) return;
+
+        const loggedOut = isLoggedOut(header);
+        header.classList.toggle("wayfarer-logged-out", loggedOut);
+        header.classList.toggle("wayfarer-logged-in", !loggedOut);
+
+        header
+            .querySelectorAll(".wayfarer-custom-header-links")
+            .forEach((el) => el.remove());
+
+        const japaneseLinkItem =
+              header.querySelector(".日本コミュニティ-custom-header-links") ||
+              [...header.querySelectorAll(".custom-header-links li")].find((li) =>
+                                                                           li.textContent.includes("日本コミュニティ")
+                                                                          );
+
+        if (japaneseLinkItem && !japaneseLinkItem.classList.contains("wayfarer-flags-applied")) {
+            japaneseLinkItem.classList.add("wayfarer-flags-applied");
+            japaneseLinkItem.innerHTML = `
         <span class="wayfarer-flag-switcher" aria-label="Community language links">
           <a href="${HOME_URL}" title="English Community" aria-label="English Community">🇺🇸</a>
           <a href="${JP_URL}" title="日本コミュニティ" aria-label="日本コミュニティ">🇯🇵</a>
         </span>
       `;
+        }
+
+        const reporting = header.querySelector(".reporting-abuse-custom-header-links");
+        const removals = header.querySelector(".wayspot-removals-custom-header-links");
+
+        [reporting, removals].forEach((el) => {
+            if (!el) return;
+            el.classList.remove("headerLink--vdo");
+            el.classList.add("headerLink--keep");
+            el.style.visibility = "";
+        });
     }
 
-    const reporting = header.querySelector(".reporting-abuse-custom-header-links");
-    const removals = header.querySelector(".wayspot-removals-custom-header-links");
+    function start() {
+        addStyles();
+        tweakHeader();
 
-    [reporting, removals].forEach((el) => {
-      if (!el) return;
-      el.classList.remove("headerLink--vdo");
-      el.classList.add("headerLink--keep");
-      el.style.visibility = "";
-    });
-  }
+        const observer = new MutationObserver(() => tweakHeader());
+        observer.observe(document.documentElement, {
+            childList: true,
+            subtree: true,
+        });
+    }
 
-  function start() {
-    addStyles();
-    tweakHeader();
-
-    const observer = new MutationObserver(() => tweakHeader());
-    observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-    });
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", start);
-  } else {
-    start();
-  }
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", start);
+    } else {
+        start();
+    }
 })();
