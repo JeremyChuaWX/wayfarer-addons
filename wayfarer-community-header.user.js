@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Community Header Layout
-// @version      1.2.2
+// @version      1.2.3
 // @description  Changes the header links on Wayfarer Community Forum
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-community-header.user.js
@@ -63,34 +63,19 @@
       }
 
       @media (max-width: 767px) {
-        header.d-header .contents {
-          display: flex !important;
-          align-items: center !important;
-          gap: 0.35rem !important;
-        }
-
-        header.d-header .home-logo-wrapper-outlet {
-          flex: 0 1 auto !important;
-        }
-
-        header.d-header .before-header-panel-outlet {
-          flex: 1 1 auto !important;
-          min-width: 0 !important;
-        }
-
         header.d-header .custom-header-links {
           display: flex !important;
           align-items: center !important;
           gap: 0.45rem !important;
-          min-width: 0 !important;
-          overflow: visible !important;
         }
 
-        header.d-header .custom-header-links li {
-          display: list-item !important;
-          visibility: visible !important;
-          flex: 0 1 auto !important;
-          min-width: 0 !important;
+        header.d-header .help-center-custom-header-links {
+          display: none !important;
+        }
+
+        header.d-header.wayfarer-logged-out .reporting-abuse-custom-header-links,
+        header.d-header.wayfarer-logged-out .wayspot-removals-custom-header-links {
+          display: none !important;
         }
 
         header.d-header .custom-header-links li a {
@@ -101,14 +86,7 @@
           white-space: normal !important;
           line-height: 1.05 !important;
           font-size: 0.86rem !important;
-          max-width: 4.7rem !important;
-        }
-
-        header.d-header .help-center-custom-header-links a,
-        header.d-header .reporting-abuse-custom-header-links a,
-        header.d-header .wayspot-removals-custom-header-links a {
-          font-size: 0.86rem !important;
-          line-height: 1.05 !important;
+          max-width: 4.5rem !important;
         }
 
         header.d-header .wayfarer-flag-switcher a {
@@ -117,52 +95,23 @@
           margin: -2px 0 !important;
           max-width: none !important;
         }
-
-        header.d-header .panel {
-          flex: 0 0 auto !important;
-        }
-
-        header.d-header .d-header-icons {
-          gap: 0.15rem !important;
-        }
-
-        header.d-header #search-button {
-          padding-left: 0.25rem !important;
-          padding-right: 0.25rem !important;
-        }
-
-        header.d-header .login-button svg,
-        header.d-header .login-button .d-icon,
-        header.d-header button.login-button svg,
-        header.d-header button.login-button .d-icon {
-          display: none !important;
-        }
-
-        header.d-header .login-button,
-        header.d-header button.login-button {
-          padding-left: 0.55rem !important;
-          padding-right: 0.55rem !important;
-        }
       }
     `;
 
     document.documentElement.appendChild(style);
   }
 
-  function removeLoginIcon(header) {
-    const loginButtons = [
-      ...header.querySelectorAll("button, a")
-    ].filter((el) => el.textContent.trim().toLowerCase() === "log in");
-
-    loginButtons.forEach((button) => {
-      button.querySelectorAll("svg, .d-icon").forEach((icon) => icon.remove());
-      button.classList.add("wayfarer-compact-login");
-    });
+  function isLoggedOut(header) {
+    return !![...header.querySelectorAll("button, a")].find(
+      (el) => el.textContent.trim().toLowerCase() === "log in"
+    );
   }
 
   function tweakHeader() {
     const header = document.querySelector("header.d-header");
     if (!header) return;
+
+    header.classList.toggle("wayfarer-logged-out", isLoggedOut(header));
 
     header
       .querySelectorAll(".wayfarer-custom-header-links")
@@ -191,11 +140,8 @@
       if (!el) return;
       el.classList.remove("headerLink--vdo");
       el.classList.add("headerLink--keep");
-      el.style.display = "";
       el.style.visibility = "";
     });
-
-    removeLoginIcon(header);
   }
 
   function start() {
