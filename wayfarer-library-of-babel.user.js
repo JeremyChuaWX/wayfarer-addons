@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer - Library of Babel
-// @version      1.1.0
+// @version      1.2.0
 // @description  Plug-in for automating collection of multi-language Wayfarer email templates
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-library-of-babel.user.js
@@ -79,6 +79,17 @@
         "appealRejected"
     ];
 
+    const SUMMARY_EXPORT_KEYS = [
+        "submissionReceived",
+        "communityApproved",
+        "nianticApproved",
+        "communityRejected",
+        "nianticRejected",
+        "appealReceived",
+        "appealAccepted",
+        "appealRejected"
+    ];
+
     const REQUIRED_TEMPLATE_KEYS = [
         "submissionReceived",
         "communityApproved",
@@ -132,7 +143,9 @@
         defaultLanguage: "en",
         submissionLanguages: LANGUAGES.filter(lang => !["en", "id_ID", "tr_TR"].includes(lang)),
         deletionLanguages: LANGUAGES.filter(lang => lang !== "en"),
-        lastDeletionLanguage: null
+        lastDeletionLanguage: null,
+        username: "",
+        importedSummaries: []
     };
 
     // Sort order by country code / language code as requested
@@ -165,6 +178,8 @@
     let submitInitiatedAt = null;
 
     let babelSettings = deepClone(DEFAULT_BABEL_SETTINGS);
+
+    let libraryOfBabelModalNeedsRefresh = false;
 
     let deletionModalObserver = null;
     let deletionModalMutationScheduled = false;
@@ -303,6 +318,7 @@
             status: "",
             sawVoting: false,
             sawNianticVoting: false,
+            sawReturnedFromNianticVoting: false,
             canAppeal: false,
             appealResolved: false,
             appealNotes: "",
@@ -406,7 +422,12 @@
 
     function isNianticVotingStatus(status) {
         const s = String(status || "").toUpperCase().replace(/[_-]+/g, " ").trim();
-        return s === "NIA VOTING" || s === "NIANTIC VOTING";
+        return s === "NIANTIC REVIEW";
+    }
+
+    function isNominatedStatus(status) {
+        const s = String(status || "").toUpperCase().replace(/[_-]+/g, " ").trim();
+        return s === "NOMINATED";
     }
 
     function clearFirstOutcomeInference(inferred) {
@@ -416,6 +437,26 @@
         inferred.communityRejected = false;
         inferred.nianticRejected = false;
         inferred.rejectionUnknown = false;
+    }
+
+    function updateVotingPathFlags(record, currentStatus) {
+        const wasNianticVoting = !!record.sawNianticVoting;
+        const isCurrentlyNianticVoting = isNianticVotingStatus(currentStatus);
+        const isCurrentlyCommunityVoting = isCommunityVotingStatus(currentStatus);
+        const isCurrentlyNominated = isNominatedStatus(currentStatus);
+
+        if (isCurrentlyCommunityVoting) {
+            record.sawVoting = true;
+        }
+
+        if (isCurrentlyNianticVoting) {
+            record.sawNianticVoting = true;
+        }
+
+        if (wasNianticVoting && isCurrentlyNominated) {
+            record.sawReturnedFromNianticVoting = true;
+            record.sawVoting = true;
+        }
     }
 
     function hasAnyApprovalOutcome(emails) {
@@ -671,13 +712,7 @@
         record.userAppealNotes = submission.userAppealNotes || "";
         record.lastSeenAt = nowIso();
 
-        if (isCommunityVotingStatus(submission.status)) {
-            record.sawVoting = true;
-        }
-
-        if (isNianticVotingStatus(submission.status)) {
-            record.sawNianticVoting = true;
-        }
+        updateVotingPathFlags(record, submission.status);
 
         record.emails = Object.assign(makeEmptyEmails(), record.emails || {});
         record.emails.submissionReceived = true;
@@ -703,6 +738,265 @@
 
         const valid = list.filter(lang => LANGUAGES.includes(lang));
         return [...new Set(valid)];
+    }
+
+    function normaliseUsername(value) {
+        return String(value || "").trim();
+    }
+
+    function normaliseImportedSummaryLanguageRow(row) {
+        if (!isObject(row)) return null;
+
+        const language = row.language || row.languageId || row.language_id;
+        if (!LANGUAGES.includes(language)) return null;
+
+        const source = isObject(row.hasTemplates)
+        ? row.hasTemplates
+        : isObject(row.emails)
+        ? row.emails
+        : row;
+
+        const out = {
+            language
+        };
+
+        for (const key of SUMMARY_EXPORT_KEYS) {
+            out[key] = !!source[key];
+        }
+
+        return out;
+    }
+
+    function normaliseImportedSummaries(raw) {
+        if (!Array.isArray(raw)) return [];
+
+        const byUsername = new Map();
+
+        for (const item of raw) {
+            if (!isObject(item)) continue;
+
+            const username = normaliseUsername(item.username);
+            if (!username) continue;
+
+            const rawLanguages = Array.isArray(item.languages)
+            ? item.languages
+            : Array.isArray(item.summary)
+            ? item.summary
+            : Array.isArray(item.rows)
+            ? item.rows
+            : [];
+
+            const languages = rawLanguages
+            .map(normaliseImportedSummaryLanguageRow)
+            .filter(Boolean);
+
+            byUsername.set(username, {
+                username,
+                importedAt: item.importedAt || nowIso(),
+                languages
+            });
+        }
+
+        return Array.from(byUsername.values());
+    }
+
+    async function buildLanguageSummaryExport() {
+        const username = normaliseUsername(babelSettings.username);
+
+        if (!username) {
+            throw new Error("Please enter a username in Library of Babel settings before exporting.");
+        }
+
+        const { rows } = await getLanguageSummaryRows();
+
+        return {
+            app: "Wayfarer Library of Babel",
+            type: "language-summary",
+            version: 1,
+            username,
+            exportedAt: nowIso(),
+            languages: rows.map(row => {
+                const out = {
+                    language: row.language,
+                    languageId: row.language
+                };
+
+                for (const key of SUMMARY_EXPORT_KEYS) {
+                    out[key] = !!(row.hasTemplates && row.hasTemplates[key]);
+                }
+
+                return out;
+            })
+        };
+    }
+
+    async function copyTextToClipboard(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+            return;
+        }
+
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        textarea.style.top = "-9999px";
+
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+
+        const successful = document.execCommand("copy");
+        textarea.remove();
+
+        if (!successful) {
+            throw new Error("Clipboard copy failed.");
+        }
+    }
+
+    async function exportLanguageSummaryJson() {
+        try {
+            const exportObject = await buildLanguageSummaryExport();
+            const exportText = JSON.stringify(exportObject, null, 2);
+
+            await copyTextToClipboard(exportText);
+
+            alert("Language summary copied to clipboard.");
+        } catch (err) {
+            alert(err.message || "Unable to copy summary to clipboard.");
+            warn("Unable to copy summary to clipboard", err);
+        }
+    }
+
+    function normaliseImportedSummaryPayload(payload) {
+        const parsed = typeof payload === "string"
+        ? safeJsonParse(payload)
+        : payload;
+
+        if (!isObject(parsed)) {
+            throw new Error("Import failed: the pasted text is not valid JSON.");
+        }
+
+        const username = normaliseUsername(parsed.username);
+        if (!username) {
+            throw new Error("Import failed: the summary does not include a username.");
+        }
+
+        const rawLanguages = Array.isArray(parsed.languages)
+        ? parsed.languages
+        : Array.isArray(parsed.summary)
+        ? parsed.summary
+        : Array.isArray(parsed.rows)
+        ? parsed.rows
+        : null;
+
+        if (!Array.isArray(rawLanguages)) {
+            throw new Error("Import failed: the summary does not include a languages array.");
+        }
+
+        const languages = rawLanguages
+        .map(normaliseImportedSummaryLanguageRow)
+        .filter(Boolean);
+
+        if (languages.length === 0) {
+            throw new Error("Import failed: no recognised language rows were found.");
+        }
+
+        return {
+            username,
+            importedAt: nowIso(),
+            languages
+        };
+    }
+
+    function upsertImportedLanguageSummary(importedSummary) {
+        const existing = normaliseImportedSummaries(babelSettings.importedSummaries);
+        const index = existing.findIndex(s => s.username === importedSummary.username);
+
+        if (index >= 0) {
+            existing[index] = importedSummary;
+        } else {
+            existing.push(importedSummary);
+        }
+
+        saveBabelSettings(Object.assign({}, babelSettings, {
+            importedSummaries: existing
+        }));
+
+        return importedSummary;
+    }
+
+    async function importLanguageSummaryJson() {
+        const pasted = prompt("Paste a Library of Babel language summary JSON export:");
+
+        if (!pasted) return;
+
+        try {
+            const importedSummary = normaliseImportedSummaryPayload(pasted);
+            upsertImportedLanguageSummary(importedSummary);
+
+            await refreshOpenLibraryOfBabelModal();
+
+            alert(`Imported summary for ${importedSummary.username}.`);
+        } catch (err) {
+            alert(err.message || "Unable to import summary.");
+            warn("Unable to import summary", err);
+        }
+    }
+
+    function getImportedSummaryUsersFor(language, emailKey) {
+        const users = [];
+
+        for (const summary of normaliseImportedSummaries(babelSettings.importedSummaries)) {
+            const row = summary.languages.find(r => r.language === language);
+            if (row && row[emailKey]) {
+                users.push(summary.username);
+            }
+        }
+
+        return users;
+    }
+
+    function appendSummaryMarkCell(tr, ownMark, importedUsers, importedMark = "✓", isTop = false) {
+        const td = document.createElement("td");
+        styleCell(td, false);
+
+        td.style.width = "64px";
+        td.style.minWidth = "64px";
+        td.style.maxWidth = "64px";
+
+        if (isTop) {
+            td.style.background = "#fffbea";
+        }
+
+        if (ownMark) {
+            td.textContent = ownMark;
+        } else if (importedUsers && importedUsers.length > 0) {
+            const span = document.createElement("span");
+            span.textContent = `${importedMark}*`;
+            span.title = importedUsers.join(", ");
+            span.style.color = "#9ca3af";
+            span.style.fontWeight = "600";
+            td.appendChild(span);
+        }
+
+        tr.appendChild(td);
+        return td;
+    }
+
+    async function refreshOpenLibraryOfBabelModal() {
+        const existing = document.getElementById(BABEL_MODAL_BACKDROP_ID);
+
+        if (!existing) {
+            libraryOfBabelModalNeedsRefresh = false;
+            return;
+        }
+
+        existing.remove();
+        await refreshCache();
+        libraryOfBabelModalNeedsRefresh = false;
+        await openLibraryOfBabelModal();
     }
 
     function normaliseBabelSettings(raw) {
@@ -733,7 +1027,9 @@
             defaultLanguage,
             submissionLanguages,
             deletionLanguages,
-            lastDeletionLanguage
+            lastDeletionLanguage,
+            username: normaliseUsername(input.username),
+            importedSummaries: normaliseImportedSummaries(input.importedSummaries)
         };
     }
 
@@ -1077,6 +1373,7 @@
             status: "NOMINATED",
             sawVoting: false,
             sawNianticVoting: false,
+            sawReturnedFromNianticVoting: false,
             canAppeal: false,
             appealResolved: false,
             appealNotes: "",
@@ -1171,12 +1468,11 @@
             inferred.appealReceived = true;
         }
 
-        if (isCommunityVotingStatus(rawStatus)) {
-            record.sawVoting = true;
-        }
+        updateVotingPathFlags(record, rawStatus);
 
-        if (isNianticVotingStatus(rawStatus)) {
-            record.sawNianticVoting = true;
+        function isNominatedStatus(status) {
+            const s = String(status || "").toUpperCase().replace(/[_-]+/g, " ").trim();
+            return s === "NOMINATED";
         }
 
         if (appealResolved && status === "ACCEPTED") {
@@ -1291,13 +1587,7 @@
             linkedRecord.userAppealNotes = submission.userAppealNotes || "";
             linkedRecord.lastSeenAt = nowIso();
 
-            if (isCommunityVotingStatus(submission.status)) {
-                linkedRecord.sawVoting = true;
-            }
-
-            if (isNianticVotingStatus(submission.status)) {
-                linkedRecord.sawNianticVoting = true;
-            }
+            updateVotingPathFlags(linkedRecord, submission.status);
 
             const inferredEmails = inferEmailsForSubmission(linkedRecord, submission);
             linkedRecord.emails = mergeEmails(linkedRecord.emails, inferredEmails, linkedRecord.manualOverrides);
@@ -1437,7 +1727,15 @@
         return backdrop;
     }
 
-    function attachEscapeHandler(backdrop) {
+    function attachEscapeHandler(backdrop, onClose) {
+        function closeBackdrop() {
+            if (typeof onClose === "function") {
+                onClose();
+            } else {
+                backdrop.remove();
+            }
+        }
+
         function onKeyDown(ev) {
             if (ev.key !== "Escape") return;
 
@@ -1450,7 +1748,7 @@
             ev.stopPropagation();
             ev.preventDefault();
 
-            backdrop.remove();
+            closeBackdrop();
             document.removeEventListener("keydown", onKeyDown, true);
         }
 
@@ -1573,6 +1871,7 @@
 
         const headers = [
             { text: "Language", rowspan: 2 },
+            { text: "Details", rowspan: 2 },
             { content: makeEnvelopeIcon(), rowspan: 2, title: "Submitted" },
             { text: "Approved ✓", colspan: 2 },
             { text: "Rejected ✗", colspan: 2 },
@@ -1580,8 +1879,7 @@
             { text: "Pending", rowspan: 2 },
             { text: "Planned Appeals", rowspan: 2 },
             { text: "Pending Appeals", rowspan: 2 },
-            { text: "Score", rowspan: 2 },
-            { text: "Details", rowspan: 2 }
+            { text: "Score", rowspan: 2 }
         ];
 
         for (const h of headers) {
@@ -1652,6 +1950,10 @@
         colLanguage.style.width = "70px";
         colgroup.appendChild(colLanguage);
 
+        const colDetails = document.createElement("col");
+        colDetails.style.width = "70px";
+        colgroup.appendChild(colDetails);
+
         for (let i = 0; i < 8; i++) {
             const col = document.createElement("col");
             col.style.width = "64px";
@@ -1663,10 +1965,6 @@
             col.style.width = "70px";
             colgroup.appendChild(col);
         }
-
-        const colDetails = document.createElement("col");
-        colDetails.style.width = "70px";
-        colgroup.appendChild(colDetails);
 
         table.appendChild(colgroup);
 
@@ -1682,45 +1980,12 @@
             const isTop = topLanguages.has(row.language);
             const scoreText = row.excluded ? "—" : String(row.score);
 
-            const cells = [
-                row.language,
-                makeCheckMark(row.hasTemplates.submissionReceived),
-
-                makeMainModalOutcomeMark(row.hasTemplates, "communityApproved", "approvalUnknown"),
-                makeMainModalOutcomeMark(row.hasTemplates, "nianticApproved", "approvalUnknown"),
-
-                makeMainModalOutcomeMark(row.hasTemplates, "communityRejected", "rejectionUnknown"),
-                makeMainModalOutcomeMark(row.hasTemplates, "nianticRejected", "rejectionUnknown"),
-
-                makeCheckMark(row.hasTemplates.appealReceived),
-                makeCheckMark(row.hasTemplates.appealAccepted),
-                makeCheckMark(row.hasTemplates.appealRejected),
-
-                String(row.pendingNominations),
-                String(row.appealPlanned || 0),
-                String(row.pendingAppeals || 0),
-                scoreText
-            ];
-
-            for (let i = 0; i < cells.length; i++) {
-                const td = document.createElement("td");
-                td.textContent = cells[i];
-                styleCell(td, false);
-
-                if (i === 0) {
-                    td.style.textAlign = "left";
-                } else if (i >= 1 && i <= 8) {
-                    td.style.width = "64px";
-                    td.style.minWidth = "64px";
-                    td.style.maxWidth = "64px";
-                }
-
-                if (isTop) {
-                    td.style.background = "#fffbea";
-                }
-
-                tr.appendChild(td);
-            }
+            const languageTd = document.createElement("td");
+            languageTd.textContent = row.language;
+            styleCell(languageTd, false);
+            languageTd.style.textAlign = "left";
+            if (isTop) languageTd.style.background = "#fffbea";
+            tr.appendChild(languageTd);
 
             const detailTd = document.createElement("td");
             styleCell(detailTd, false);
@@ -1741,6 +2006,85 @@
             detailTd.appendChild(detailLink);
             tr.appendChild(detailTd);
 
+            appendSummaryMarkCell(
+                tr,
+                makeCheckMark(row.hasTemplates.submissionReceived),
+                getImportedSummaryUsersFor(row.language, "submissionReceived"),
+                "✓",
+                isTop
+            );
+
+            appendSummaryMarkCell(
+                tr,
+                makeMainModalOutcomeMark(row.hasTemplates, "communityApproved", "approvalUnknown"),
+                getImportedSummaryUsersFor(row.language, "communityApproved"),
+                "✓",
+                isTop
+            );
+
+            appendSummaryMarkCell(
+                tr,
+                makeMainModalOutcomeMark(row.hasTemplates, "nianticApproved", "approvalUnknown"),
+                getImportedSummaryUsersFor(row.language, "nianticApproved"),
+                "✓",
+                isTop
+            );
+
+            appendSummaryMarkCell(
+                tr,
+                makeMainModalOutcomeMark(row.hasTemplates, "communityRejected", "rejectionUnknown"),
+                getImportedSummaryUsersFor(row.language, "communityRejected"),
+                "✓",
+                isTop
+            );
+
+            appendSummaryMarkCell(
+                tr,
+                makeMainModalOutcomeMark(row.hasTemplates, "nianticRejected", "rejectionUnknown"),
+                getImportedSummaryUsersFor(row.language, "nianticRejected"),
+                "✓",
+                isTop
+            );
+
+            appendSummaryMarkCell(
+                tr,
+                makeCheckMark(row.hasTemplates.appealReceived),
+                getImportedSummaryUsersFor(row.language, "appealReceived"),
+                "✓",
+                isTop
+            );
+
+            appendSummaryMarkCell(
+                tr,
+                makeCheckMark(row.hasTemplates.appealAccepted),
+                getImportedSummaryUsersFor(row.language, "appealAccepted"),
+                "✓",
+                isTop
+            );
+
+            appendSummaryMarkCell(
+                tr,
+                makeCheckMark(row.hasTemplates.appealRejected),
+                getImportedSummaryUsersFor(row.language, "appealRejected"),
+                "✓",
+                isTop
+            );
+
+            const textCells = [
+                String(row.pendingNominations),
+                String(row.appealPlanned || 0),
+                String(row.pendingAppeals || 0),
+                scoreText
+            ];
+
+            for (const value of textCells) {
+                const td = document.createElement("td");
+                td.textContent = value;
+                styleCell(td, false);
+                if (isTop) td.style.background = "#fffbea";
+                tr.appendChild(td);
+            }
+
             tbody.appendChild(tr);
         }
 
@@ -1753,6 +2097,22 @@
             justifyContent: "flex-end",
             gap: "8px",
             marginTop: "10px"
+        });
+
+        const exportBtn = document.createElement("button");
+        exportBtn.type = "button";
+        exportBtn.textContent = "Export Summary";
+        styleButton(exportBtn, false);
+        exportBtn.addEventListener("click", () => {
+            void exportLanguageSummaryJson();
+        });
+
+        const importBtn = document.createElement("button");
+        importBtn.type = "button";
+        importBtn.textContent = "Import Summary";
+        styleButton(importBtn, false);
+        importBtn.addEventListener("click", () => {
+            void importLanguageSummaryJson();
         });
 
         const refreshBtn = document.createElement("button");
@@ -1780,6 +2140,8 @@
         closeBtn.addEventListener("click", () => backdrop.remove());
 
         buttonsRow.appendChild(settingsBtn);
+        buttonsRow.appendChild(exportBtn);
+        buttonsRow.appendChild(importBtn);
         buttonsRow.appendChild(refreshBtn);
         buttonsRow.appendChild(closeBtn);
         dialog.appendChild(buttonsRow);
@@ -1803,6 +2165,14 @@
         const backdrop = makeBackdrop(BABEL_DETAIL_BACKDROP_ID);
         const dialog = makeDialog("82vw", "78vh");
 
+        async function closeDetailModal() {
+            backdrop.remove();
+
+            if (libraryOfBabelModalNeedsRefresh) {
+                await refreshOpenLibraryOfBabelModal();
+            }
+        }
+
         const title = document.createElement("div");
         title.textContent = `Library of Babel — ${language}`;
         Object.assign(title.style, {
@@ -1824,7 +2194,7 @@
 
         for (let i = 0; i < 9; i++) {
             const col = document.createElement("col");
-            col.style.width = "64px";
+            col.style.width = "48px";
             colgroup.appendChild(col);
         }
 
@@ -1959,6 +2329,8 @@
                     await putRecord(fresh);
                     await refreshCache();
 
+                    libraryOfBabelModalNeedsRefresh = true;
+
                     if (emailKey === "appealReceived" && checkbox.checked) {
                         openLanguageDetailModal(language);
                     }
@@ -1998,6 +2370,8 @@
 
                 await putRecord(fresh);
                 await refreshCache();
+
+                libraryOfBabelModalNeedsRefresh = true;
             });
 
             appealPlannedTd.appendChild(appealPlannedCheckbox);
@@ -2026,19 +2400,25 @@
         closeBtn.type = "button";
         closeBtn.textContent = "Close";
         styleButton(closeBtn, true);
-        closeBtn.addEventListener("click", () => backdrop.remove());
+        closeBtn.addEventListener("click", () => {
+            void closeDetailModal();
+        });
 
         buttonsRow.appendChild(closeBtn);
         dialog.appendChild(buttonsRow);
 
         backdrop.addEventListener("click", (ev) => {
-            if (ev.target === backdrop) backdrop.remove();
+            if (ev.target === backdrop) {
+                void closeDetailModal();
+            }
         });
 
         backdrop.appendChild(dialog);
         document.body.appendChild(backdrop);
 
-        attachEscapeHandler(backdrop);
+        attachEscapeHandler(backdrop, () => {
+            void closeDetailModal();
+        });
     }
 
     // =========================================================================
@@ -2248,6 +2628,31 @@
         });
         dialog.appendChild(title);
 
+        const usernameRow = document.createElement("div");
+        Object.assign(usernameRow.style, {
+            marginBottom: "12px"
+        });
+
+        const usernameLabel = document.createElement("label");
+        usernameLabel.textContent = "Username: ";
+        usernameLabel.style.fontWeight = "600";
+
+        const usernameInput = document.createElement("input");
+        usernameInput.type = "text";
+        usernameInput.value = workingSettings.username || "";
+        usernameInput.placeholder = "Username for shared summaries";
+        Object.assign(usernameInput.style, {
+            marginLeft: "6px",
+            padding: "4px 6px",
+            width: "260px",
+            border: "1px solid #d1d5db",
+            borderRadius: "4px"
+        });
+
+        usernameRow.appendChild(usernameLabel);
+        usernameRow.appendChild(usernameInput);
+        dialog.appendChild(usernameRow);
+
         const defaultRow = document.createElement("div");
         Object.assign(defaultRow.style, {
             marginBottom: "12px"
@@ -2308,7 +2713,7 @@
                     display: "flex",
                     alignItems: "center",
                     gap: "4px",
-                    fontSize: "12px"
+                    cursor: "pointer"
                 });
 
                 const checkbox = document.createElement("input");
@@ -2342,6 +2747,90 @@
 
         dialog.appendChild(submissionSection.section);
         dialog.appendChild(deletionSection.section);
+
+        const importedSection = document.createElement("div");
+        Object.assign(importedSection.style, {
+            marginTop: "12px",
+            borderTop: "1px solid #e5e7eb",
+            paddingTop: "10px",
+            color: "#374151"
+        });
+
+        const importedHeading = document.createElement("div");
+        importedHeading.textContent = "Imported summaries";
+        Object.assign(importedHeading.style, {
+            fontWeight: "600",
+            marginBottom: "6px"
+        });
+
+        const importedSummaries = normaliseImportedSummaries(workingSettings.importedSummaries);
+
+        const importedList = document.createElement("div");
+        Object.assign(importedList.style, {
+            display: "flex",
+            flexDirection: "column",
+            gap: "6px",
+            fontSize: "11px"
+        });
+
+        if (importedSummaries.length === 0) {
+            const emptyText = document.createElement("div");
+            emptyText.textContent = "None imported";
+            importedList.appendChild(emptyText);
+        } else {
+            for (const summary of importedSummaries) {
+                const row = document.createElement("div");
+                Object.assign(row.style, {
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "8px",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "4px",
+                    padding: "4px 6px",
+                    background: "#ffffff"
+                });
+
+                const text = document.createElement("span");
+                text.textContent = summary.username;
+                text.title = summary.importedAt
+                    ? `Imported: ${summary.importedAt}`
+                : "";
+
+                const deleteBtn = document.createElement("button");
+                deleteBtn.type = "button";
+                deleteBtn.textContent = "Delete";
+                styleButton(deleteBtn, false);
+
+                deleteBtn.addEventListener("click", () => {
+                    const confirmed = confirm(`Delete imported summary for ${summary.username}?`);
+                    if (!confirmed) return;
+
+                    const nextImportedSummaries = normaliseImportedSummaries(babelSettings.importedSummaries)
+                    .filter(s => s.username !== summary.username);
+
+                    saveBabelSettings(Object.assign({}, babelSettings, {
+                        importedSummaries: nextImportedSummaries
+                    }));
+
+                    backdrop.remove();
+
+                    if (document.getElementById(BABEL_MODAL_BACKDROP_ID)) {
+                        void refreshOpenLibraryOfBabelModal();
+                    }
+
+                    openBabelSettingsModal();
+                });
+
+                row.appendChild(text);
+                row.appendChild(deleteBtn);
+                importedList.appendChild(row);
+            }
+        }
+
+        importedSection.appendChild(importedHeading);
+        importedSection.appendChild(importedList);
+        dialog.appendChild(importedSection);
 
         const buttonsRow = document.createElement("div");
         Object.assign(buttonsRow.style, {
@@ -2378,10 +2867,16 @@
                 defaultLanguage: defaultSelect.value,
                 submissionLanguages,
                 deletionLanguages,
-                lastDeletionLanguage: babelSettings.lastDeletionLanguage
+                lastDeletionLanguage: babelSettings.lastDeletionLanguage,
+                username: usernameInput.value,
+                importedSummaries: babelSettings.importedSummaries
             });
 
             backdrop.remove();
+
+            if (document.getElementById(BABEL_MODAL_BACKDROP_ID)) {
+                void refreshOpenLibraryOfBabelModal();
+            }
         });
 
         buttonsRow.appendChild(cancelBtn);
@@ -2526,7 +3021,7 @@
             submitNowInitiatedAt = null;
 
             successfulSubmitOccurredForCurrentModal = false;
-        }, 1200);
+        }, 1000);
     }
 
     function submissionModalMutationHandler() {
