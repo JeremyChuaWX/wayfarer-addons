@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer - Library of Babel
-// @version      1.2.0
+// @version      1.2.1
 // @description  Plug-in for automating collection of multi-language Wayfarer email templates
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-library-of-babel.user.js
@@ -818,7 +818,6 @@
             languages: rows.map(row => {
                 const out = {
                     language: row.language,
-                    languageId: row.language
                 };
 
                 for (const key of SUMMARY_EXPORT_KEYS) {
