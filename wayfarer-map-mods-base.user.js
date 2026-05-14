@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.8.0
+// @version      3.8.1
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -9442,6 +9442,20 @@
     // Left click on zoom hint to zoom to POI loading level
     // ==================================
 
+    const ZOOM_HINT_CLICK_SELECTOR = [
+        ".zoom-hint-pill",
+        ".sample-notice"
+    ].join(", ");
+
+    const ZOOM_HINT_HIDE_SELECTOR = [
+        ".zoom-hint-row",
+        ".sample-notice"
+    ].join(", ");
+
+    function getZoomHintClickTargets() {
+        return Array.from(document.querySelectorAll(ZOOM_HINT_CLICK_SELECTOR));
+    }
+
     function initZoomHintClickToZoom(map) {
         if (!map) return;
 
@@ -9462,35 +9476,36 @@
     }
 
     function bindZoomHintPillIfPresent(map) {
-        // Narrow selector to the pill you described
-        const pill = document.querySelector(".zoom-hint-pill");
-        if (!pill) return;
+        const targets = getZoomHintClickTargets();
+        if (!targets.length) return;
 
-        // Avoid binding multiple times as MutationObserver fires
-        if (pill.dataset.wfmmClickBound === "1") return;
-        pill.dataset.wfmmClickBound = "1";
+        for (const target of targets) {
+            if (!target) continue;
 
-        // Use capture so we can intercept early, then stop it reaching the map
-        pill.addEventListener("click", (e) => {
-            // Prevent the map click behind it
-            e.preventDefault();
-            e.stopPropagation();
-            if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+            // Avoid binding multiple times as MutationObserver fires
+            if (target.dataset.wfmmClickBound === "1") continue;
+            target.dataset.wfmmClickBound = "1";
 
-            // Zoom to the minimum zoom you want (your global constant)
-            const current = map.getZoom?.();
-            if (typeof current === "number" && current >= GCS_MIN_ZOOM) return;
+            target.addEventListener("click", (e) => {
+                // Prevent the map click behind it
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
 
-            const center = map.getCenter?.();
-            map.setZoom?.(GCS_MIN_ZOOM);
+                const current = map.getZoom?.();
+                if (typeof current === "number" && current >= GCS_MIN_ZOOM) return;
 
-            // Optional: keep the same center stable after zoom
-            if (center && map.panTo) map.panTo(center);
-        }, true);
+                const center = map.getCenter?.();
+                map.setZoom?.(GCS_MIN_ZOOM);
 
-        // (Optional) If the element is click-through because of CSS layering,
-        // reinforce it inline as well.
-        pill.style.pointerEvents = "auto";
+                // Keep same centre stable after zoom
+                if (center && map.panTo) map.panTo(center);
+            }, true);
+
+            // Reinforce clickability in case CSS layering changes
+            target.style.pointerEvents = "auto";
+            target.style.cursor = "pointer";
+        }
     }
 
     // ==================================
@@ -13300,8 +13315,9 @@ canvas#deckgl-overlay {
                 styleEl.id = "wfmapmods-hide-zoom-text-style";
                 document.head.appendChild(styleEl);
             }
+
             styleEl.textContent = `
-            .zoom-hint-row {
+            ${ZOOM_HINT_HIDE_SELECTOR} {
                 display: none !important;
             }
         `;
