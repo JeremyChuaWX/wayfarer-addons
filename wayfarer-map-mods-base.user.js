@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.7.0
+// @version      3.8.0
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -43,12 +43,15 @@
         DESKTOP: "desktop"
     };
 
-    const GCS_MIN_ZOOM = 18;
+    const GCS_MIN_ZOOM = 16;
+    const LOWZOOM_GCS_MAX_ZOOM = GCS_MIN_ZOOM - 1;
+    const NORMAL_GCS_CELL_LEVEL = 14;
 
     // ----- URLs and API -----
     const SUBMIT_ROUTE = "/new/submit/new";
     const MAPVIEW_ROUTE = "/new/mapview";
     const GCS_ENDPOINT_PART = "/api/v1/vault/mapview/gcs";
+    const LOWZOOM_GCS_ENDPOINT_PART = "/api/v1/vault/mapview/lowzoom/gcs";
 
     // ----- Indexed DB -------
     const DB_NAME = "wayfarer-tools-db";
@@ -93,6 +96,19 @@
     // Geocoder bridge postMessage types (page-context bridge)
     const WFMM_GEO_REQ = "wfmm-geocode-req";
     const WFMM_GEO_RES = "wfmm-geocode-res";
+
+    // ==================================
+    // Canvas marker rendering test
+    // ==================================
+
+    const WFMM_CANVAS_GENERIC_MARKERS_TEST = true;
+
+    let poiCanvasOverlay = null;
+
+    // Same GUID index idea, but generic markers can now be canvas-backed.
+    // Entry shape:
+    //   { renderer: "google", marker, poi }
+    //   { renderer: "canvas", marker: null, poi }
 
     // ----- Available quotas -----
     let availableQuotas = {
@@ -7513,9 +7529,56 @@
     // POI Normalisers
     // ==================================
 
+    function getPoiSource(poi) {
+        // GCS is authoritative when present.
+        // Live-only POIs do not expose this field, so missing/undefined falls back
+        // to community as a practical default.
+        return poi?.isCommunityContributed === false ? "import" : "community";
+    }
+
     function normalizeIsCommunityContributed(v) {
         // Default to true unless explicitly false
         return (v === false) ? false : true;
+    }
+
+    function isLowZoomGcsZoom(zoom) {
+        return (typeof zoom === "number" && zoom < GCS_MIN_ZOOM);
+    }
+
+    function getLowZoomGcsCellLevelForZoom(zoom) {
+        // Niantic lowzoom bands:
+        // z3-7  => L3
+        // z8-10 => L6
+        // z11-12 => L8
+        // z13-15 => L11
+        if (zoom <= 7) return 3;
+        if (zoom <= 10) return 6;
+        if (zoom <= 12) return 8;
+        return 11;
+    }
+
+    function getGcsEndpointKind(url) {
+        if (typeof url !== "string") return null;
+
+        // Check lowzoom first. It is a separate endpoint and should be handled
+        // as the same logical GCS source, but with lowzoom parsing rules.
+        if (url.includes(LOWZOOM_GCS_ENDPOINT_PART)) return "lowzoom-gcs";
+        if (url.includes(GCS_ENDPOINT_PART)) return "gcs";
+
+        return null;
+    }
+
+    function shouldForceGenericPoiMarkersForCurrentZoom() {
+        const zoom = wfMap?.getZoom?.();
+        return (typeof zoom === "number" && zoom < GCS_MIN_ZOOM);
+    }
+
+    function shouldDisablePoiDetailsForCurrentZoom() {
+        const zoom = wfMap?.getZoom?.();
+
+        // Lowzoom L11 data, used from z13-z15, contains full POI data.
+        // Below z13, lowzoom data may only contain poiId/lat/lng/isCommunityContributed.
+        return (typeof zoom !== "number" || zoom < 13);
     }
 
     function normalizeLivePoisInRadiusPoi(p) {
@@ -7547,7 +7610,7 @@
         };
     }
 
-    function normalizeGcsPoi(p) {
+    function normalizeGcsPoi(p, sourceKind = "gcs") {
         if (!p) return null;
 
         const guid = String(p.poiId ?? "");
@@ -7583,34 +7646,68 @@
             // GCS-preferred fields
             address: p.address,
             gmo,
-            isCommunityContributed: p.isCommunityContributed,
+            isCommunityContributed: normalizeGcsIsCommunityContributed(p, sourceKind),
             hasAdditionalImages: p.hasAdditionalImages,
             pgoEntity,
-            pgoEntityStatus
+            pgoEntityStatus,
+
+            // Useful for debugging / future source-specific logic.
+            __wfmmGcsSourceKind: sourceKind
         };
     }
 
-    function extractAndNormalizeGcsPois(json) {
-        // Cancel processing if zoom is too low
-        // Kicks in if the response comes after user zoomed out
+    function getGcsCellContainersFromResponseData(data) {
+        if (!Array.isArray(data)) return [];
+        return data;
+    }
+
+    function getPoisFromGcsCellContainer(cell) {
+        if (!cell || !Array.isArray(cell.pois)) return [];
+        return cell.pois;
+    }
+
+    function extractAndNormalizeGcsPois(json, sourceKind = "gcs") {
         const zoom = wfMap?.getZoom?.();
-        if (typeof zoom === "number" && zoom < GCS_MIN_ZOOM) {
-            return [];
+        const isLowzoomResponse = (sourceKind === "lowzoom-gcs");
+
+        // Important:
+        // Return null for stale cross-band responses so they do NOT clear the
+        // current GCS snapshot.
+        //
+        // Example:
+        // - User zooms 16 -> 15.
+        // - Old normal GCS response arrives late.
+        // - We ignore it and keep existing data until lowzoom arrives.
+        if (typeof zoom === "number") {
+            if (isLowzoomResponse && zoom >= GCS_MIN_ZOOM) return null;
+            if (!isLowzoomResponse && zoom < GCS_MIN_ZOOM) return null;
         }
 
         const data = json?.result?.data;
-        if (!Array.isArray(data)) return [];
+        const cells = getGcsCellContainersFromResponseData(data);
+
+        if (!cells.length) {
+            // Valid response, but no cells/POIs.
+            // This should be allowed to replace the previous GCS snapshot.
+            return [];
+        }
 
         const out = [];
-        for (const cell of data) {
-            const pois = cell?.pois;
+        const seen = new Set();
+
+        for (const cell of cells) {
+            const pois = getPoisFromGcsCellContainer(cell);
             if (!Array.isArray(pois)) continue;
 
             for (const p of pois) {
-                const norm = normalizeGcsPoi(p);
-                if (norm) out.push(norm);
+                const norm = normalizeGcsPoi(p, sourceKind);
+                if (!norm || !norm.guid || seen.has(norm.guid)) continue;
+
+                seen.add(norm.guid);
+                out.push(norm);
             }
         }
+
         return out;
     }
 
@@ -7818,7 +7915,7 @@
     // Network: Mapview/gcs api
     // ==================================
 
-    function handleGcsResponseText(responseText) {
+    function handleGcsResponseText(responseText, sourceKind = "gcs") {
         if (!responseText) return;
 
         let json;
@@ -7829,7 +7926,17 @@
 
         updateGcsLatestGeneratedTimestampFromResponse(json);
 
-        const normalized = extractAndNormalizeGcsPois(json);
+        const normalized = extractAndNormalizeGcsPois(json, sourceKind);
+
+        // null means "stale response for the wrong zoom band".
+        // Do not clear/replace the active GCS source in that case.
+        if (!Array.isArray(normalized)) return;
+
+        // Normal GCS and lowzoom GCS intentionally share the same source slot.
+        // This means:
+        // - normal GCS remains visible until lowzoom replaces it
+        // - lowzoom remains visible until normal GCS replaces it
+        // - live-pois-in-radius merge behaviour remains unchanged
         applySourcePoisSnapshot("gcs", normalized);
     }
 
@@ -7845,11 +7952,13 @@
         XMLHttpRequest.prototype.send = function () {
             try {
                 const url = this._wfmm_url || "";
-                if (typeof url === "string" && url.includes(GCS_ENDPOINT_PART)) {
+                const sourceKind = getGcsEndpointKind(url);
+
+                if (sourceKind) {
                     this.addEventListener("load", function () {
                         try {
                             if (this.status >= 200 && this.status < 300) {
-                                handleGcsResponseText(this.responseText);
+                                handleGcsResponseText(this.responseText, sourceKind);
                             }
                         } catch (e) {
                             console.error("[GCS][XHR] handler error:", e);
@@ -7867,12 +7976,29 @@
     function requestGcsPoisForBounds(map) {
         const zoom = map.getZoom?.();
 
-        // Track previous zoom on the map instance
+        // Track previous zoom on the map instance.
         const prevZoom = (typeof map._wfmmPrevZoom === "number") ? map._wfmmPrevZoom : zoom;
         map._wfmmPrevZoom = zoom;
 
-        if (typeof zoom !== "number" || zoom < GCS_MIN_ZOOM) {
-            clearGcsPois();
+        if (typeof zoom !== "number") return;
+
+        const crossedZoomBand =
+              (typeof prevZoom === "number") &&
+              (
+                  (prevZoom < GCS_MIN_ZOOM && zoom >= GCS_MIN_ZOOM) ||
+                  (prevZoom >= GCS_MIN_ZOOM && zoom < GCS_MIN_ZOOM)
+              );
+
+        // The appearance mode changes at z16, so force a marker rebuild when
+        // moving between lowzoom and normal zoom bands.
+        if (crossedZoomBand) {
+            try { rebuildAllPoiMarkers(); } catch (_) {}
+        }
+
+        // Do not manually call lowzoom GCS.
+        // Below z16, Niantic's own /mapview/lowzoom/gcs request will be captured
+        // by the XHR listener and handled via handleGcsResponseText(..., "lowzoom-gcs").
+        if (zoom < GCS_MIN_ZOOM) {
             map._wfmmGcsNeedsRefresh = true;
             return;
         }
@@ -7883,23 +8009,24 @@
         const ne = bounds.getNorthEast();
         const sw = bounds.getSouthWest();
 
-        // Decide if we should issue a request
-        let shouldRequest = true;
+        const cellLevel = NORMAL_GCS_CELL_LEVEL;
 
-        if (isOnMapviewRoute()) {
-            const crossedUp =
-                  (typeof prevZoom === "number" && prevZoom < GCS_MIN_ZOOM && zoom >= GCS_MIN_ZOOM);
+        const url =
+              `${GCS_ENDPOINT_PART}` +
+              `?ne=(${ne.lat()},${ne.lng()})` +
+              `&sw=(${sw.lat()},${sw.lng()})` +
+              `&cellLevel=${cellLevel}`;
 
-            // On mapview, ONLY request in the edge case
-            shouldRequest = !!(map._wfmmGcsNeedsRefresh || crossedUp);
+        // Avoid issuing identical requests repeatedly on idle.
+        // Native Wayfarer requests will still be caught by the XHR listener.
+        const requestKey = `${GCS_ENDPOINT_PART}|${cellLevel}|${ne.lat().toFixed(6)},${ne.lng().toFixed(6)}|${sw.lat().toFixed(6)},${sw.lng().toFixed(6)}`;
 
-            // Consume the flag if we’re about to request
-            if (shouldRequest) map._wfmmGcsNeedsRefresh = false;
+        if (map._wfmmLastGcsRequestKey === requestKey && !crossedZoomBand && !map._wfmmGcsNeedsRefresh) {
+            return;
         }
 
-        if (!shouldRequest) return;
-
-        const url = `/api/v1/vault/mapview/gcs?ne=(${ne.lat()},${ne.lng()})&sw=(${sw.lat()},${sw.lng()})`;
+        map._wfmmLastGcsRequestKey = requestKey;
+        map._wfmmGcsNeedsRefresh = false;
 
         try { map._wfmmGcsXhr?.abort?.(); } catch (_) {}
 
@@ -8678,7 +8805,20 @@
 
         wfMap.addListener("idle", () => {
             saveMapView();
+
+            const prevLowzoom = wfMap._wfmmLastIdleWasLowzoom;
+            const zoom = wfMap.getZoom?.();
+            const nowLowzoom = isLowZoomGcsZoom(zoom);
+
             requestGcsPoisForBounds(wfMap);
+
+            // If only the zoom band changed but data has not arrived yet, rebuild
+            // current markers immediately so thumbnails/clicking obey the current zoom.
+            if (typeof prevLowzoom === "boolean" && prevLowzoom !== nowLowzoom) {
+                rebuildAllPoiMarkers();
+            }
+
+            wfMap._wfmmLastIdleWasLowzoom = nowLowzoom;
         });
 
         initUserLocationMarker(wfMap);
@@ -10025,9 +10165,28 @@
     // POI classification + filtering
     // ==================================
 
-    function getPoiSource(poi) {
-        // Default to community if the flag is missing or undefined
-        return poi?.isCommunityContributed === false ? "import" : "community";
+    function hasOwn(obj, key) {
+        return !!obj && Object.prototype.hasOwnProperty.call(obj, key);
+    }
+
+    function normalizeGcsIsCommunityContributed(p, sourceKind = "gcs") {
+        if (!p) return undefined;
+
+        // Lowzoom GCS is compact:
+        // - true is sent as isCommunityContributed: true
+        // - false is omitted entirely
+        if (sourceKind === "lowzoom-gcs") {
+            return p.isCommunityContributed === true;
+        }
+
+        // Normal GCS is explicit and authoritative.
+        // It should always be true/false, but keep this defensive.
+        if (hasOwn(p, "isCommunityContributed")) {
+            return p.isCommunityContributed === true;
+        }
+
+        // Unknown only if the expected field is genuinely absent from normal GCS.
+        return undefined;
     }
 
     function getPoiGameObject(poi) {
@@ -10111,9 +10270,14 @@
         const key = getPoiAppearanceKey(poi);
         const bucket = a.styles?.[key] || {};
 
-        const markerType = bucket.markerType || "generic";
+        let markerType = bucket.markerType || "generic";
 
-        // Merge defaults + bucket configs
+        // Lowzoom data may lack image/title/detail data below z13,
+        // and thumbnails should be disabled for all zooms below z16.
+        if (shouldForceGenericPoiMarkersForCurrentZoom()) {
+            markerType = "generic";
+        }
+
         const thumbnail = { ...(a.defaults.thumbnail || {}), ...(bucket.thumbnail || {}) };
         const generic = { ...(a.defaults.generic || {}), ...(bucket.generic || {}) };
 
@@ -10456,6 +10620,8 @@
         const guid = poi.guid;
 
         marker.addListener("click", () => {
+            if (shouldDisablePoiDetailsForCurrentZoom()) return;
+
             const latest = markersByGuid?.[guid]?.poi;
             if (!latest) return;
 
@@ -10594,11 +10760,570 @@
     }
 
     // ==================================
+    // Marker canvas
+    // ==================================
+
+
+    let WfmmPoiCanvasOverlayClass = null;
+
+    function getWfmmPoiCanvasOverlayClass() {
+        if (WfmmPoiCanvasOverlayClass) return WfmmPoiCanvasOverlayClass;
+
+        if (
+            typeof google === "undefined" ||
+            !google.maps ||
+            !google.maps.OverlayView
+        ) {
+            return null;
+        }
+
+        WfmmPoiCanvasOverlayClass = class WfmmPoiCanvasOverlay extends google.maps.OverlayView {
+            constructor(map) {
+                super();
+
+                this.canvas = null;
+                this.ctx = null;
+                this.raf = 0;
+                this.hitItems = [];
+                this.lastDrawMs = 0;
+                this.lastDrawCount = 0;
+
+                this.mapDiv = null;
+                this.mouseListeners = [];
+                this.mouseDownPoint = null;
+                this.mouseMovedSinceDown = false;
+                this.hoveredGuid = null;
+
+                this.setMap(map);
+            }
+
+            onAdd() {
+                const canvas = document.createElement("canvas");
+                canvas.id = "wfmapmods-poi-canvas";
+                canvas.className = "wfmapmods-poi-canvas";
+
+                canvas.style.position = "absolute";
+                canvas.style.left = "0";
+                canvas.style.top = "0";
+                canvas.style.pointerEvents = "none";
+                canvas.style.display = "block";
+                canvas.style.zIndex = "950";
+
+                this.canvas = canvas;
+                this.ctx = canvas.getContext("2d", { alpha: true });
+
+                const panes = this.getPanes();
+
+                // Visual layer only. Google moves this pane during pan.
+                panes.overlayLayer.appendChild(canvas);
+
+                this.mapDiv = wfMap?.getDiv?.() || null;
+
+                // Important:
+                // Do NOT redraw on bounds_changed or center_changed.
+                // Those fire continuously during pan and cause the flicker/jump.
+                this.listeners = [];
+
+                if (this.mapDiv && typeof ResizeObserver !== "undefined") {
+                    this.resizeObserver = new ResizeObserver(() => this.requestDraw());
+                    this.resizeObserver.observe(this.mapDiv);
+                }
+
+                this.installMouseHitTesting();
+
+                this.requestDraw();
+            }
+
+            onRemove() {
+                this.removeMouseHitTesting();
+
+                if (this.raf) {
+                    cancelAnimationFrame(this.raf);
+                    this.raf = 0;
+                }
+
+                if (Array.isArray(this.listeners)) {
+                    this.listeners.forEach((l) => {
+                        try {
+                            google.maps.event.removeListener(l);
+                        } catch (_) {}
+                    });
+                }
+
+                this.listeners = [];
+
+                if (this.resizeObserver) {
+                    try {
+                        this.resizeObserver.disconnect();
+                    } catch (_) {}
+                    this.resizeObserver = null;
+                }
+
+                if (this.canvas) {
+                    this.canvas.remove();
+                }
+
+                this.canvas = null;
+                this.ctx = null;
+                this.hitItems = [];
+            }
+
+            draw() {
+                // Google calls draw() during its own overlay layout cycle.
+                // Do not defer this through requestAnimationFrame, or the canvas can
+                // visibly sit at the old pane position for one frame.
+                if (this.raf) {
+                    cancelAnimationFrame(this.raf);
+                    this.raf = 0;
+                }
+
+                this.renderNow();
+            }
+
+            requestDraw() {
+                if (this.raf) return;
+
+                this.raf = requestAnimationFrame(() => {
+                    this.raf = 0;
+                    this.renderNow();
+                });
+            }
+
+            resizeCanvasToMap() {
+                if (!this.canvas || !wfMap) return false;
+
+                const div = wfMap.getDiv?.();
+                if (!div) return false;
+
+                const w = div.clientWidth || 0;
+                const h = div.clientHeight || 0;
+                if (!w || !h) return false;
+
+                const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+
+                const pxW = Math.round(w * dpr);
+                const pxH = Math.round(h * dpr);
+
+                if (this.canvas.width !== pxW) this.canvas.width = pxW;
+                if (this.canvas.height !== pxH) this.canvas.height = pxH;
+
+                this.canvas.style.width = `${w}px`;
+                this.canvas.style.height = `${h}px`;
+
+                this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+                return true;
+            }
+
+            renderNow() {
+                if (!this.canvas || !this.ctx || !wfMap) return;
+
+                const projection = this.getProjection();
+                if (!projection) return;
+
+                const mapDiv = wfMap.getDiv?.();
+                if (!mapDiv) return;
+
+                const mapW = mapDiv.clientWidth || 0;
+                const mapH = mapDiv.clientHeight || 0;
+                if (!mapW || !mapH) return;
+
+                const center = wfMap.getCenter?.();
+                if (!center) return;
+
+                const centerPx = projection.fromLatLngToDivPixel(center);
+                if (!centerPx) return;
+
+                // Overscan means the canvas is larger than the visible map.
+                // While panning, Google moves this whole canvas with the map,
+                // and already-drawn offscreen markers slide into view smoothly.
+                const overscan = 2.0;
+
+                const cssW = Math.round(mapW * (1 + overscan * 2));
+                const cssH = Math.round(mapH * (1 + overscan * 2));
+
+                const left = Math.round(centerPx.x - cssW / 2);
+                const top = Math.round(centerPx.y - cssH / 2);
+
+                const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+                const pxW = Math.round(cssW * dpr);
+                const pxH = Math.round(cssH * dpr);
+
+                if (this.canvas.width !== pxW) this.canvas.width = pxW;
+                if (this.canvas.height !== pxH) this.canvas.height = pxH;
+
+                this.canvas.style.left = `${left}px`;
+                this.canvas.style.top = `${top}px`;
+                this.canvas.style.width = `${cssW}px`;
+                this.canvas.style.height = `${cssH}px`;
+
+                const ctx = this.ctx;
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                ctx.clearRect(0, 0, cssW, cssH);
+
+                const start = performance.now();
+                const items = [];
+
+                for (const guid in markersByGuid) {
+                    const entry = markersByGuid[guid];
+                    if (!entry || entry.renderer !== "canvas") continue;
+
+                    const poi = entry.poi;
+                    if (!poi) continue;
+
+                    const { visibleNow } = getMarkerVisibilityForPoi(poi);
+                    if (!visibleNow) continue;
+
+                    const lat = Number(poi.lat);
+                    const lng = Number(poi.lng);
+                    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+                    const divPoint = projection.fromLatLngToDivPixel(
+                        new google.maps.LatLng(lat, lng)
+                    );
+
+                    if (!divPoint) continue;
+
+                    const x = divPoint.x - left;
+                    const y = divPoint.y - top;
+
+                    const ap = getResolvedPoiAppearance(poi);
+                    const s = ap.generic || {};
+                    const selected = poi.guid && poi.guid === selectedPoiGuid;
+
+                    const radius = selected
+                    ? (Number(s.markerSize ?? 8) + 1)
+                    : Number(s.markerSize ?? 8);
+
+                    const strokeWeight = selected
+                    ? (Number(s.borderWidth ?? 2) + 2)
+                    : Number(s.borderWidth ?? 2);
+
+                    const pad = Math.max(24, radius + strokeWeight + 4);
+
+                    if (
+                        x < -pad ||
+                        y < -pad ||
+                        x > cssW + pad ||
+                        y > cssH + pad
+                    ) {
+                        continue;
+                    }
+
+                    items.push({
+                        guid,
+                        poi,
+                        x,
+                        y,
+                        radius,
+                        strokeWeight,
+                        fillColor: s.fillColor || "#ffffff",
+                        fillOpacity: clamp(s.fillOpacity, 0, 1, 1),
+                        strokeColor: selected ? "#ff00ff" : (s.borderColor || "#000000"),
+                        strokeOpacity: selected ? 1 : clamp(s.borderOpacity, 0, 1, 1),
+                        zIndex: getPoiMarkerZIndex(poi)
+                    });
+                }
+
+                items.sort((a, b) => a.zIndex - b.zIndex);
+
+                for (const item of items) {
+                    this.drawCircleMarker(ctx, item);
+                }
+
+                this.hitItems = items;
+                this.lastDrawMs = performance.now() - start;
+                this.lastDrawCount = items.length;
+            }
+
+            drawCircleMarker(ctx, item) {
+                ctx.save();
+
+                ctx.globalAlpha = item.fillOpacity;
+                ctx.fillStyle = item.fillColor;
+
+                ctx.beginPath();
+                ctx.arc(item.x, item.y, item.radius, 0, Math.PI * 2);
+                ctx.fill();
+
+                if (item.strokeWeight > 0) {
+                    ctx.globalAlpha = item.strokeOpacity;
+                    ctx.strokeStyle = item.strokeColor;
+                    ctx.lineWidth = item.strokeWeight;
+
+                    ctx.beginPath();
+                    ctx.arc(
+                        item.x,
+                        item.y,
+                        Math.max(0, item.radius - item.strokeWeight / 2),
+                        0,
+                        Math.PI * 2
+                    );
+                    ctx.stroke();
+                }
+
+                ctx.restore();
+            }
+
+            installMouseHitTesting() {
+                const mapDiv = this.mapDiv || wfMap?.getDiv?.();
+                if (!mapDiv) return;
+
+                this.mapDiv = mapDiv;
+
+                const opts = { capture: true, passive: false };
+
+                mapDiv.addEventListener("mousemove", this.handleMapMouseMove, opts);
+                mapDiv.addEventListener("mouseleave", this.handleMapMouseLeave, opts);
+                mapDiv.addEventListener("mousedown", this.handleMapMouseDown, opts);
+                mapDiv.addEventListener("mouseup", this.handleMapMouseUp, opts);
+                mapDiv.addEventListener("click", this.handleMapClick, opts);
+
+                this.mouseListeners = [
+                    ["mousemove", this.handleMapMouseMove, opts],
+                    ["mouseleave", this.handleMapMouseLeave, opts],
+                    ["mousedown", this.handleMapMouseDown, opts],
+                    ["mouseup", this.handleMapMouseUp, opts],
+                    ["click", this.handleMapClick, opts]
+                ];
+            }
+
+            removeMouseHitTesting() {
+                if (!this.mapDiv || !Array.isArray(this.mouseListeners)) return;
+
+                for (const [type, handler, opts] of this.mouseListeners) {
+                    try {
+                        this.mapDiv.removeEventListener(type, handler, opts);
+                    } catch (_) {}
+                }
+
+                this.mouseListeners = [];
+                this.hoveredGuid = null;
+
+                try {
+                    this.setCanvasMarkerHoverCursor(false);
+                } catch (_) {}
+            }
+
+            getCanvasPointFromMouseEvent(ev) {
+                if (!this.canvas) return null;
+
+                const rect = this.canvas.getBoundingClientRect();
+
+                return {
+                    x: ev.clientX - rect.left,
+                    y: ev.clientY - rect.top
+                };
+            }
+
+            findHitItemAtCanvasPoint(x, y) {
+                if (!Array.isArray(this.hitItems) || !this.hitItems.length) return null;
+
+                // Reverse order so the visually topmost marker wins.
+                for (let i = this.hitItems.length - 1; i >= 0; i--) {
+                    const item = this.hitItems[i];
+                    if (!item) continue;
+
+                    const hitRadius = Math.max(
+                        10,
+                        Number(item.radius || 0) + Number(item.strokeWeight || 0) + 4
+                    );
+
+                    const dx = x - item.x;
+                    const dy = y - item.y;
+
+                    if ((dx * dx + dy * dy) <= hitRadius * hitRadius) {
+                        const latest = markersByGuid?.[item.guid]?.poi;
+                        if (!latest) return null;
+
+                        return {
+                            item,
+                            poi: latest
+                        };
+                    }
+                }
+
+                return null;
+            }
+
+            findHitItemFromMouseEvent(ev) {
+                const point = this.getCanvasPointFromMouseEvent(ev);
+                if (!point) return null;
+
+                return this.findHitItemAtCanvasPoint(point.x, point.y);
+            }
+
+            handleMapMouseMove = (ev) => {
+                if (!this.mapDiv) return;
+
+                if (this.mouseDownPoint) {
+                    const dx = ev.clientX - this.mouseDownPoint.x;
+                    const dy = ev.clientY - this.mouseDownPoint.y;
+
+                    if ((dx * dx + dy * dy) > 16) {
+                        this.mouseMovedSinceDown = true;
+                    }
+                }
+
+                const hit = shouldDisablePoiDetailsForCurrentZoom()
+                ? null
+                : this.findHitItemFromMouseEvent(ev);
+
+                const guid = hit?.item?.guid || null;
+
+                if (guid !== this.hoveredGuid) {
+                    this.hoveredGuid = guid;
+
+                    // Do not fight the map's dragging cursor while the mouse is down.
+                    this.setCanvasMarkerHoverCursor(!!guid && !this.mouseDownPoint);
+                }
+            };
+
+            handleMapMouseLeave = () => {
+                this.hoveredGuid = null;
+                this.mouseDownPoint = null;
+                this.mouseMovedSinceDown = false;
+                this.setCanvasMarkerHoverCursor(false);
+            };
+
+            handleMapMouseDown = (ev) => {
+                this.mouseDownPoint = {
+                    x: ev.clientX,
+                    y: ev.clientY
+                };
+
+                this.mouseMovedSinceDown = false;
+            };
+
+            handleMapMouseUp = () => {
+                this.mouseDownPoint = null;
+                this.mouseMovedSinceDown = false;
+                this.setCanvasMarkerHoverCursor(
+                    !!this.hoveredGuid && !shouldDisablePoiDetailsForCurrentZoom()
+                );
+            };
+
+            handleMapClick = (ev) => {
+                // If the user dragged the map, do not treat the final click as marker click.
+                if (this.mouseMovedSinceDown) {
+                    this.mouseDownPoint = null;
+                    this.mouseMovedSinceDown = false;
+                    return;
+                }
+
+                if (shouldDisablePoiDetailsForCurrentZoom()) return;
+
+                const hit = this.findHitItemFromMouseEvent(ev);
+                if (!hit?.poi) return;
+
+                publishPoiToBridge(hit.poi);
+
+                // Prevent the underlying map click handler from also firing.
+                ev.preventDefault();
+                ev.stopPropagation();
+
+                if (typeof ev.stopImmediatePropagation === "function") {
+                    ev.stopImmediatePropagation();
+                }
+            };
+
+            setCanvasMarkerHoverCursor(enabled) {
+                if (!this.mapDiv) return;
+
+                this.mapDiv.classList.toggle(
+                    "wfmapmods-canvas-marker-hover",
+                    !!enabled
+                );
+            }
+        };
+
+        return WfmmPoiCanvasOverlayClass;
+    }
+
+    function shouldUseCanvasPoiMarker(poi) {
+        if (!WFMM_CANVAS_GENERIC_MARKERS_TEST) return false;
+        if (!wfMap || !poi) return false;
+
+        const ap = getResolvedPoiAppearance(poi);
+
+        // Test only generic markers first.
+        // Thumbnail markers stay as google.maps.Marker because they use the image pipeline.
+        return ap.markerType !== "thumbnail";
+    }
+
+    function ensurePoiCanvasOverlay() {
+        if (!WFMM_CANVAS_GENERIC_MARKERS_TEST) return null;
+        if (!wfMap || typeof google === "undefined" || !google.maps) return null;
+
+        if (poiCanvasOverlay && poiCanvasOverlay.getMap && poiCanvasOverlay.getMap() === wfMap) {
+            return poiCanvasOverlay;
+        }
+
+        if (poiCanvasOverlay) {
+            try {
+                poiCanvasOverlay.setMap(null);
+            } catch (_) {}
+            poiCanvasOverlay = null;
+        }
+
+        const OverlayClass = getWfmmPoiCanvasOverlayClass();
+        if (!OverlayClass) return null;
+
+        poiCanvasOverlay = new OverlayClass(wfMap);
+        return poiCanvasOverlay;
+    }
+
+    function destroyPoiCanvasOverlay() {
+        if (poiCanvasOverlay) {
+            try {
+                poiCanvasOverlay.setMap(null);
+            } catch (_) {}
+            poiCanvasOverlay = null;
+        }
+    }
+
+    function requestPoiCanvasRedraw() {
+        if (!poiCanvasOverlay) return;
+        poiCanvasOverlay.requestDraw();
+    }
+
+    function upsertCanvasPoiMarker(poi) {
+        ensurePoiCanvasOverlay();
+
+        const guid = poi?.guid;
+        if (!guid) return;
+
+        markersByGuid[guid] = {
+            renderer: "canvas",
+            marker: null,
+            poi
+        };
+
+        requestPoiCanvasRedraw();
+    }
+
+    function removeCanvasPoiMarker(guid) {
+        if (!guid) return;
+
+        const entry = markersByGuid?.[guid];
+        if (entry?.renderer === "canvas") {
+            delete markersByGuid[guid];
+            requestPoiCanvasRedraw();
+        }
+    }
+
+    // ==================================
     // Marker lifecycle (create, refresh, upsert, sync, rebuild, clear)
     // ==================================
 
     function createPoiMarker(poi) {
         const ap = getResolvedPoiAppearance(poi);
+
+        if (shouldUseCanvasPoiMarker(poi)) {
+            upsertCanvasPoiMarker(poi);
+            return null;
+        }
+
         const { visibleNow, mapForMarker } = getMarkerVisibilityForPoi(poi);
         const zIndex = getPoiMarkerZIndex(poi);
 
@@ -10618,19 +11343,17 @@
 
         marker.__wfmmStyled = true;
         marker.__wfmmGuid = poi.guid;
+        marker.__wfmmRenderer = "google";
 
-        // init thumbnail state
         if (ap.markerType === "thumbnail") {
             marker.__wfmmThumbApplied = false;
             marker.__wfmmThumbStyleKey = null;
 
-            // set an immediate placeholder (with correct current border)
             const { size, baseBw, baseBc, baseBo } = getThumbParamsFromPoi(poi, ap);
             const { bc, bw, bo } = resolveThumbBorderForPoi(poi.guid, baseBw, baseBc, baseBo);
             const placeholderUrl = getWayfarerPlaceholderUrl(size, bc, bw, bo);
             setMarkerThumbIcon(marker, placeholderUrl, size);
 
-            // kick async final render
             applyThumbnailVisuals(marker, poi, ap);
         } else {
             applyGenericVisuals(marker, poi, ap);
@@ -10641,6 +11364,13 @@
     }
 
     function refreshPoiMarkerIcon(entry) {
+        if (!entry) return;
+
+        if (entry.renderer === "canvas") {
+            requestPoiCanvasRedraw();
+            return;
+        }
+
         const marker = entry?.marker;
         const poi = entry?.poi;
         if (!marker || !poi) return;
@@ -10654,13 +11384,11 @@
             marker.setVisible(visibleNow);
         }
 
-        // Keep map attachment consistent with visibility decisions
         if (marker.__wfmmMap !== mapForMarker) {
             marker.__wfmmMap = mapForMarker;
             marker.setMap(mapForMarker);
         }
 
-        // Don't waste work styling markers that aren't shown
         if (!visibleNow) return;
 
         const ap = getResolvedPoiAppearance(poi);
@@ -10673,9 +11401,12 @@
 
     function refreshAllPoiMarkers() {
         if (!wfMap) return;
+
         for (const guid in markersByGuid) {
             refreshPoiMarkerIcon(markersByGuid[guid]);
         }
+
+        requestPoiCanvasRedraw();
         syncPowerSpotRingsWithMarkers();
     }
 
@@ -10683,7 +11414,30 @@
         const guid = poi.guid;
         const existing = markersByGuid[guid];
 
-        if (existing) {
+        const useCanvas = shouldUseCanvasPoiMarker(poi);
+
+        // Existing canvas marker
+        if (existing?.renderer === "canvas") {
+            if (useCanvas) {
+                existing.poi = poi;
+                requestPoiCanvasRedraw();
+                return;
+            }
+
+            // Marker changed from generic/canvas to thumbnail/google.
+            delete markersByGuid[guid];
+        }
+
+        // Existing Google marker
+        if (existing?.renderer === "google" || existing?.marker) {
+            if (useCanvas) {
+                // Marker changed from thumbnail/google to generic/canvas.
+                if (existing.marker) existing.marker.setMap(null);
+                delete markersByGuid[guid];
+                upsertCanvasPoiMarker(poi);
+                return;
+            }
+
             const marker = existing.marker;
             const pos = marker.getPosition();
 
@@ -10692,29 +11446,49 @@
             }
 
             existing.poi = poi;
+            existing.renderer = "google";
 
-            // zIndex
             if (typeof marker.setZIndex === "function") {
                 marker.setZIndex(getPoiMarkerZIndex(poi));
             }
 
             refreshPoiMarkerIcon(existing);
-
-        } else {
-            const marker = createPoiMarker(poi);
-            markersByGuid[guid] = { marker, poi };
+            return;
         }
+
+        // New marker
+        if (useCanvas) {
+            upsertCanvasPoiMarker(poi);
+            return;
+        }
+
+        const marker = createPoiMarker(poi);
+        markersByGuid[guid] = {
+            renderer: "google",
+            marker,
+            poi
+        };
     }
 
     function removeStaleMarkers(newGuids) {
+        let removedCanvasMarker = false;
+
         for (const guid in markersByGuid) {
             if (!newGuids.has(guid)) {
                 const entry = markersByGuid[guid];
-                if (entry && entry.marker) {
+
+                if (entry?.renderer === "canvas") {
+                    removedCanvasMarker = true;
+                } else if (entry?.marker) {
                     entry.marker.setMap(null);
                 }
+
                 delete markersByGuid[guid];
             }
+        }
+
+        if (removedCanvasMarker) {
+            requestPoiCanvasRedraw();
         }
     }
 
@@ -10724,6 +11498,8 @@
         if (!poiInfoWindow) {
             poiInfoWindow = new google.maps.InfoWindow();
         }
+
+        ensurePoiCanvasOverlay();
 
         updateNearbyWayspotsRadiusCircle();
 
@@ -10745,20 +11521,23 @@
     function rebuildAllPoiMarkers() {
         if (!wfMap || !Array.isArray(window.currentPois)) return;
 
-        // Remove existing markers
         for (const guid in markersByGuid) {
             const entry = markersByGuid[guid];
-            if (entry && entry.marker) {
+
+            if (entry?.renderer === "google" && entry.marker) {
                 entry.marker.setMap(null);
             }
         }
+
         markersByGuid = {};
 
-        // Recreate using current userSettings.poi
+        ensurePoiCanvasOverlay();
+
         for (const poi of window.currentPois) {
             upsertPoiMarker(poi);
         }
 
+        requestPoiCanvasRedraw();
         syncPowerSpotRingsWithMarkers();
     }
 
@@ -10767,7 +11546,8 @@
             if (markersByGuid) {
                 for (const guid in markersByGuid) {
                     const entry = markersByGuid[guid];
-                    if (entry && entry.marker) {
+
+                    if (entry?.renderer === "google" && entry.marker) {
                         entry.marker.setMap(null);
                     }
                 }
@@ -10776,8 +11556,11 @@
             console.warn("[GCS] Failed to clear markers:", e);
         }
 
-        // Hard reset the index to release references
         markersByGuid = {};
+
+        if (poiCanvasOverlay) {
+            requestPoiCanvasRedraw();
+        }
     }
 
     // ==================================
@@ -12381,6 +13164,22 @@
   border: 1px solid rgba(255,255,255,0.22);
   padding: 4px 10px;
   border-radius: 9999px;
+}
+
+/* Canvas-rendered generic POI markers */
+#wfmapmods-poi-canvas {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  z-index: 950 !important;
+}
+
+/* Force pointer cursor while hovering a canvas-rendered marker */
+.wfmapmods-canvas-marker-hover,
+.wfmapmods-canvas-marker-hover * {
+  cursor: pointer !important;
 }
 `;
 
