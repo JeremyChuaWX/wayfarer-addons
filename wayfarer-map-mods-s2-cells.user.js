@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - s2 Cells
-// @version      3.1.1
+// @version      3.2.0
 // @description  Adds s2 cell grids and shading to the Wayfarer Map, and allows manual addition of PokéStops and Gyms
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-s2-cells.user.js
@@ -39,7 +39,7 @@
     const MAPVIEW_ROUTE = "/new/mapview";
 
     // Minimum zoom at which GCS API loads Wayspots
-    const GCS_MIN_ZOOM = 18;
+    const GCS_MIN_ZOOM = 16;
 
     // LocalStorage key for this plugin
     const SETTINGS_KEY = "wfmap_s2_settings";
@@ -3728,7 +3728,7 @@
             const seenCells = {};
             const cellsToDraw = [];
 
-            // if (map.getZoom() < GCS_MIN_ZOOM) return;
+            if (map.getZoom() < GCS_MIN_ZOOM) return;
 
             if (gridLevel >= 2 && gridLevel < (map.getZoom())) {
                 const latLng = map.getCenter();
@@ -4182,7 +4182,7 @@
         if (!l14StatsCache) l14StatsCache = buildL14StatsFromCachedCounts(drawBounds);
 
         // L17 shading
-        if (s2Settings.enabled && zoom >= GCS_MIN_ZOOM) {
+        if (s2Settings.enabled && zoom >= GCS_MIN_ZOOM + 1) {
             drawL17FromCountsCache(l17CountsCache, s2Settings, drawBounds);
         } else {
             clearL17ShadingOnly();
