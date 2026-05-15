@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.8.4
+// @version      3.8.5
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -11176,6 +11176,135 @@
                 };
             }
 
+            getEventPathToMapDiv(ev) {
+                const path = typeof ev.composedPath === "function"
+                ? ev.composedPath()
+                : [];
+
+                if (!path.length) return [];
+
+                const out = [];
+
+                for (const el of path) {
+                    if (!el) continue;
+                    out.push(el);
+
+                    if (el === this.mapDiv) break;
+                }
+
+                return out;
+            }
+
+            isElementInteractiveForCanvasHitTest(el) {
+                if (!el || el === this.mapDiv || el === this.canvas) return false;
+                if (!(el instanceof Element)) return false;
+
+                // Always allow the raw Google map surface to pass through.
+                // We only want to block controls/overlays sitting above the map.
+                if (el.id === "wfmapmods-poi-canvas") return false;
+
+                // Native and semantic interactive UI.
+                if (
+                    el.matches?.(
+                        [
+                            "button",
+                            "a[href]",
+                            "input",
+                            "select",
+                            "textarea",
+                            "label",
+                            "summary",
+                            "[role='button']",
+                            "[role='link']",
+                            "[role='menuitem']",
+                            "[role='checkbox']",
+                            "[role='switch']",
+                            "[tabindex]:not([tabindex='-1'])",
+                            "[contenteditable='true']"
+                        ].join(", ")
+                    )
+                ) {
+                    return true;
+                }
+
+                // Your script's UI should always win over canvas marker hit-testing.
+                if (
+                    el.closest?.(
+                        [
+                            ".wfmapmods-panel",
+                            ".wfmapmods-side-panel",
+                            ".wfmapmods-modal",
+                            ".wfmapmods-wayspot-overlay-backdrop",
+                            ".wfmapmods-floating-button",
+                            ".wfmapmods-layers-button",
+                            ".wfmapmods-filter-button",
+                            ".wfmapmods-draft-marker",
+                            "#wfmapmods-side-panel",
+                            "#wfmapmods-settings-modal",
+                            "#wfmapmods-layers-button",
+                            "#wfmapmods-filter-button"
+                        ].join(", ")
+                    )
+                ) {
+                    return true;
+                }
+
+                // Niantic / Google UI and common custom overlay controls.
+                if (
+                    el.closest?.(
+                        [
+                            ".gm-control-active",
+                            ".gmnoprint",
+                            ".gm-style-mtc",
+                            ".gm-fullscreen-control",
+                            ".gm-svpc",
+                            ".top-controls",
+                            "app-map-controls",
+                            "app-map-legend",
+                            "app-poi-detail-panel",
+                            ".filter-button",
+                            ".sample-notice",
+                            ".zoom-hint-row",
+                            ".zoom-hint-pill"
+                        ].join(", ")
+                    )
+                ) {
+                    return true;
+                }
+
+                // Compatibility for other userscripts:
+                // if an overlay author made a div/img/svg clickable with cursor:pointer,
+                // do not steal its click for a canvas POI behind it.
+                const cursor = window.getComputedStyle?.(el)?.cursor;
+                if (cursor === "pointer") return true;
+
+                return false;
+            }
+
+            isEventBlockedByOverlayUi(ev) {
+                if (!this.mapDiv) return false;
+
+                const path = this.getEventPathToMapDiv(ev);
+
+                for (const el of path) {
+                    if (this.isElementInteractiveForCanvasHitTest(el)) {
+                        return true;
+                    }
+                }
+
+                // Extra safety: inspect the actual topmost element at this screen point.
+                // This catches absolutely-positioned overlays from other scripts even if
+                // the composed path is odd.
+                const top = document.elementFromPoint?.(ev.clientX, ev.clientY);
+                if (top && this.mapDiv.contains(top)) {
+                    if (this.isElementInteractiveForCanvasHitTest(top)) {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
             findHitItemAtCanvasPoint(x, y) {
                 if (!Array.isArray(this.hitItems) || !this.hitItems.length) return null;
 
@@ -11207,6 +11336,8 @@
             }
 
             findHitItemFromMouseEvent(ev) {
+                if (this.isEventBlockedByOverlayUi(ev)) return null;
+
                 const point = this.getCanvasPointFromMouseEvent(ev);
                 if (!point) return null;
 
@@ -11247,6 +11378,14 @@
             };
 
             handleMapMouseDown = (ev) => {
+                if (this.isEventBlockedByOverlayUi(ev)) {
+                    this.mouseDownPoint = null;
+                    this.mouseMovedSinceDown = false;
+                    this.hoveredGuid = null;
+                    this.setCanvasMarkerHoverCursor(false);
+                    return;
+                }
+
                 this.mouseDownPoint = {
                     x: ev.clientX,
                     y: ev.clientY
@@ -11264,6 +11403,12 @@
             };
 
             handleMapClick = (ev) => {
+                if (this.isEventBlockedByOverlayUi(ev)) {
+                    this.mouseDownPoint = null;
+                    this.mouseMovedSinceDown = false;
+                    return;
+                }
+
                 // If the user dragged the map, do not treat the final click as marker click.
                 if (this.mouseMovedSinceDown) {
                     this.mouseDownPoint = null;
@@ -13237,8 +13382,7 @@
 }
 
 /* Force pointer cursor while hovering a canvas-rendered marker */
-.wfmapmods-canvas-marker-hover,
-.wfmapmods-canvas-marker-hover * {
+.wfmapmods-canvas-marker-hover {
   cursor: pointer !important;
 }
 `;
