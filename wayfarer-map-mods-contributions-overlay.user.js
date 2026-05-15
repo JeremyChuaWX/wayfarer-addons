@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Contributions Overlay
-// @version      3.2.0
+// @version      3.2.1
 // @description  Loads nominations from the Contributions list and shows them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-contributions-overlay.user.js
@@ -1842,6 +1842,99 @@
         return best;
     }
 
+    let hollowContributionDomMouseDownHit = null;
+
+    function getLatLngFromMapDomEvent(ev) {
+        if (!wfMap || !ev) return null;
+
+        const overlay = ensureContribClickProjectionOverlay();
+        const projection = overlay?.getProjection?.();
+        const mapDiv = wfMap.getDiv?.();
+
+        if (!projection || !mapDiv) return null;
+
+        const rect = mapDiv.getBoundingClientRect();
+
+        const containerPoint = new google.maps.Point(
+            ev.clientX - rect.left,
+            ev.clientY - rect.top
+        );
+
+        if (typeof projection.fromContainerPixelToLatLng !== "function") {
+            return null;
+        }
+
+        return projection.fromContainerPixelToLatLng(containerPoint);
+    }
+
+    function findHollowContributionMarkerStrokeHitFromDomEvent(ev) {
+        const latLng = getLatLngFromMapDomEvent(ev);
+        if (!latLng) return null;
+
+        return findHollowContributionMarkerStrokeHit(latLng);
+    }
+
+    function consumeMapDomEvent(ev) {
+        if (!ev) return;
+
+        if (typeof ev.preventDefault === "function") {
+            ev.preventDefault();
+        }
+
+        if (typeof ev.stopPropagation === "function") {
+            ev.stopPropagation();
+        }
+
+        if (typeof ev.stopImmediatePropagation === "function") {
+            ev.stopImmediatePropagation();
+        }
+    }
+
+    function handleHollowContributionMarkerDomMouseDown(ev) {
+        // Left button only. Do not interfere with right-click/context menu.
+        if (ev.button !== 0) return;
+
+        const hit = findHollowContributionMarkerStrokeHitFromDomEvent(ev);
+        if (!hit) {
+            hollowContributionDomMouseDownHit = null;
+            return;
+        }
+
+        hollowContributionDomMouseDownHit = hit;
+
+        // Stop Google Maps / Wayfarer from treating this as a map click.
+        consumeMapDomEvent(ev);
+    }
+
+    function handleHollowContributionMarkerDomMouseUp(ev) {
+        if (!hollowContributionDomMouseDownHit) return;
+
+        // Keep this mouse sequence from becoming a normal map click.
+        consumeMapDomEvent(ev);
+    }
+
+    function handleHollowContributionMarkerDomClick(ev) {
+        const hit =
+              findHollowContributionMarkerStrokeHitFromDomEvent(ev) ||
+              hollowContributionDomMouseDownHit;
+
+        if (!hit) {
+            hollowContributionDomMouseDownHit = null;
+            return;
+        }
+
+        consumeMapDomEvent(ev);
+
+        handleContributionSelectionFromMarker(hit.marker, hit.poi);
+
+        hollowContributionDomMouseDownHit = null;
+    }
+
+    function handleHollowContributionMarkerDomMouseMove(ev) {
+        const hit = findHollowContributionMarkerStrokeHitFromDomEvent(ev);
+        setHollowContributionMarkerCursor(!!hit);
+    }
+
     function handleContributionSelectionFromMarker(marker, poi) {
         if (!marker || !poi) return;
 
@@ -1849,13 +1942,6 @@
         lastSelectedNominationId = poi.id || null;
         sendPoiToBridge(poi);
         updateNominationActionLinks(poi);
-    }
-
-    function handleHollowContributionMarkerMapClick(ev) {
-        const hit = findHollowContributionMarkerStrokeHit(ev?.latLng);
-        if (!hit) return;
-
-        handleContributionSelectionFromMarker(hit.marker, hit.poi);
     }
 
     function setHollowContributionMarkerCursor(enabled) {
@@ -1881,14 +1967,41 @@
     function ensureHollowContributionMarkerClickHandler() {
         if (!wfMap || wfMap._contribHollowMarkerClickListenerAdded) return;
 
-        wfMap.addListener("click", handleHollowContributionMarkerMapClick);
-        wfMap.addListener("mousemove", handleHollowContributionMarkerMapMouseMove);
-
         const mapDiv = wfMap.getDiv?.();
-        if (mapDiv && !mapDiv._contribHollowMarkerMouseLeaveAdded) {
-            mapDiv.addEventListener("mouseleave", clearHollowContributionMarkerCursor);
-            mapDiv._contribHollowMarkerMouseLeaveAdded = true;
-        }
+        if (!mapDiv) return;
+
+        // Capture phase is important:
+        // this runs before Google Maps / Wayfarer turns the browser event into
+        // a map click that moves the submission pin.
+        mapDiv.addEventListener(
+            "mousedown",
+            handleHollowContributionMarkerDomMouseDown,
+            true
+        );
+
+        mapDiv.addEventListener(
+            "mouseup",
+            handleHollowContributionMarkerDomMouseUp,
+            true
+        );
+
+        mapDiv.addEventListener(
+            "click",
+            handleHollowContributionMarkerDomClick,
+            true
+        );
+
+        mapDiv.addEventListener(
+            "mousemove",
+            handleHollowContributionMarkerDomMouseMove,
+            true
+        );
+
+        mapDiv.addEventListener(
+            "mouseleave",
+            clearHollowContributionMarkerCursor,
+            true
+        );
 
         wfMap._contribHollowMarkerClickListenerAdded = true;
     }
