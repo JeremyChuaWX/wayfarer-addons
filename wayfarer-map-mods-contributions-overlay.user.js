@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Contributions Overlay
-// @version      3.1.0
+// @version      3.2.0
 // @description  Loads nominations from the Contributions list and shows them as markers on the submission map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-contributions-overlay.user.js
@@ -1187,9 +1187,9 @@
 
             if (!noms.length) return;
 
-            // Pre-normalise pending coords to fixed-6
-            const pLat = Number(pending.lat.toFixed(6));
-            const pLng = Number(pending.lng.toFixed(6));
+            // Pre-normalise pending coords to fixed-5
+            const pLat = Number(pending.lat.toFixed(5));
+            const pLng = Number(pending.lng.toFixed(5));
 
             const match = noms.find(nom => {
                 if (!nom || nom.type !== "NOMINATION") return false;
@@ -1200,8 +1200,8 @@
                 if (typeof nomLat !== "number" || typeof nomLng !== "number") return false;
 
                 // Compare to server-style precision (6 decimals)
-                const nLat = Number(nomLat.toFixed(6));
-                const nLng = Number(nomLng.toFixed(6));
+                const nLat = Number(nomLat.toFixed(5));
+                const nLng = Number(nomLng.toFixed(5));
 
                 return nLat === pLat && nLng === pLng;
             });
@@ -1415,6 +1415,8 @@
         wfMap = map;
         mapAttached = true;
 
+        ensureHollowContributionMarkerClickHandler();
+
         // Update markers whenever the user pans or zooms the map
         if (!wfMap._contribOverlayBoundsListenerAdded) {
             wfMap.addListener("idle", refreshNominationMarkers);
@@ -1477,6 +1479,8 @@
         return markersCfg[status] || fallback;
     }
 
+    let contribClickProjectionOverlay = null;
+
     /**
      * Create a Google Maps marker for a nomination POI.
      * The marker is initially detached from the map; caller decides when to display it.
@@ -1489,10 +1493,13 @@
         const status = String(statusRaw).toUpperCase();
         const cfg = getMarkerConfigForStatus(statusRaw);
 
+        const hollow = isHollowMarkerConfig(cfg);
+
         const marker = new google.maps.Marker({
-            map: null, // attach later when in-bounds
+            map: null,
             position: { lat, lng },
             title: `${poi.title || "No title"} (${status || "UNKNOWN"})`,
+            clickable: !hollow,
             icon: {
                 path: google.maps.SymbolPath.CIRCLE,
                 fillColor: cfg.fillColor,
@@ -1505,12 +1512,11 @@
             }
         });
 
-        marker.addListener("click", () => {
-            selectNominationMarker(marker);
-            lastSelectedNominationId = poi.id || null;
-            sendPoiToBridge(poi);
-            updateNominationActionLinks(poi);
-        });
+        if (!hollow) {
+            marker.addListener("click", () => {
+                handleContributionSelectionFromMarker(marker, poi);
+            });
+        }
 
         return marker;
     }
@@ -1686,23 +1692,30 @@
 
             if (!marker) {
                 // Create new marker
+                const hollow = isHollowMarkerConfig(cfg);
+
                 marker = new google.maps.Marker({
-                    map: null, // attach later when in-bounds
+                    map: null,
                     position: { lat: poi.lat, lng: poi.lng },
                     title: `${poi.title || "No title"} (${String(poi.status || "").toUpperCase() || "UNKNOWN"})`,
                     icon: baseIcon,
                     optimized: false,
+                    clickable: !hollow
                 });
 
-                marker.addListener("click", () => {
-                    selectNominationMarker(marker);
-                    lastSelectedNominationId = poi.id || null;
-                    sendPoiToBridge(poi);
-                    updateNominationActionLinks(poi);
-                });
+                if (!hollow) {
+                    marker.addListener("click", () => {
+                        handleContributionSelectionFromMarker(marker, poi);
+                    });
+                }
 
                 nominationMarkers[id] = marker;
             } else {
+                const hollow = isHollowMarkerConfig(cfg);
+                if (typeof marker.setClickable === "function") {
+                    marker.setClickable(!hollow);
+                }
+
                 // Existing marker: update its icon to match the new status
                 if (marker === lastSelectedNomMarker) {
                     // Keep the selected styling but base it on the updated icon
@@ -1732,6 +1745,152 @@
                 marker.setMap(null);
             }
         });
+    }
+
+    // -----------------------------
+    // Hollow markers (e.g. Accepted status
+    // -----------------------------
+
+
+    function isHollowMarkerConfig(cfg) {
+        return !!cfg && Number(cfg.fillOpacity || 0) <= 0;
+    }
+
+    function ensureContribClickProjectionOverlay() {
+        if (!wfMap || typeof google === "undefined" || !google.maps) return null;
+
+        if (contribClickProjectionOverlay) return contribClickProjectionOverlay;
+
+        contribClickProjectionOverlay = new google.maps.OverlayView();
+        contribClickProjectionOverlay.onAdd = function () {};
+        contribClickProjectionOverlay.draw = function () {};
+        contribClickProjectionOverlay.onRemove = function () {};
+        contribClickProjectionOverlay.setMap(wfMap);
+
+        return contribClickProjectionOverlay;
+    }
+
+    function getMarkerPixelPosition(marker) {
+        const overlay = ensureContribClickProjectionOverlay();
+        const projection = overlay?.getProjection?.();
+        const pos = marker?.getPosition?.();
+
+        if (!projection || !pos) return null;
+
+        return projection.fromLatLngToDivPixel(pos);
+    }
+
+    function getLatLngPixelPosition(latLng) {
+        const overlay = ensureContribClickProjectionOverlay();
+        const projection = overlay?.getProjection?.();
+
+        if (!projection || !latLng) return null;
+
+        return projection.fromLatLngToDivPixel(latLng);
+    }
+
+    function isClickOnHollowMarkerStroke(clickPixel, markerPixel, cfg) {
+        if (!clickPixel || !markerPixel || !cfg) return false;
+
+        const dx = clickPixel.x - markerPixel.x;
+        const dy = clickPixel.y - markerPixel.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        const radius = Number(cfg.scale || 8);
+        const strokeWeight = Number(cfg.strokeWeight || 2);
+
+        // Make the clickable band a little forgiving.
+        const tolerance = Math.max(4, strokeWeight + 3);
+
+        return Math.abs(dist - radius) <= tolerance;
+    }
+
+    function findHollowContributionMarkerStrokeHit(latLng) {
+        if (!wfMap || !latLng) return null;
+
+        const clickPixel = getLatLngPixelPosition(latLng);
+        if (!clickPixel) return null;
+
+        let best = null;
+
+        for (const [id, marker] of Object.entries(nominationMarkers || {})) {
+            if (!marker || marker.getMap?.() !== wfMap) continue;
+
+            const poi = Array.isArray(nominations)
+            ? nominations.find(n => (n.id || `${n.lat},${n.lng}`) === id)
+            : null;
+
+            if (!poi) continue;
+
+            const cfg = getMarkerConfigForStatus(poi.status);
+            if (!isHollowMarkerConfig(cfg)) continue;
+
+            const markerPixel = getMarkerPixelPosition(marker);
+            if (!markerPixel) continue;
+
+            if (!isClickOnHollowMarkerStroke(clickPixel, markerPixel, cfg)) continue;
+
+            const dx = clickPixel.x - markerPixel.x;
+            const dy = clickPixel.y - markerPixel.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (!best || dist < best.dist) {
+                best = { marker, poi, dist };
+            }
+        }
+
+        return best;
+    }
+
+    function handleContributionSelectionFromMarker(marker, poi) {
+        if (!marker || !poi) return;
+
+        selectNominationMarker(marker);
+        lastSelectedNominationId = poi.id || null;
+        sendPoiToBridge(poi);
+        updateNominationActionLinks(poi);
+    }
+
+    function handleHollowContributionMarkerMapClick(ev) {
+        const hit = findHollowContributionMarkerStrokeHit(ev?.latLng);
+        if (!hit) return;
+
+        handleContributionSelectionFromMarker(hit.marker, hit.poi);
+    }
+
+    function setHollowContributionMarkerCursor(enabled) {
+        const mapDiv = wfMap?.getDiv?.();
+        if (!mapDiv) return;
+
+        if (enabled) {
+            mapDiv.classList.add("wf-contrib-hollow-marker-hover");
+        } else {
+            mapDiv.classList.remove("wf-contrib-hollow-marker-hover");
+        }
+    }
+
+    function handleHollowContributionMarkerMapMouseMove(ev) {
+        const hit = findHollowContributionMarkerStrokeHit(ev?.latLng);
+        setHollowContributionMarkerCursor(!!hit);
+    }
+
+    function clearHollowContributionMarkerCursor() {
+        setHollowContributionMarkerCursor(false);
+    }
+
+    function ensureHollowContributionMarkerClickHandler() {
+        if (!wfMap || wfMap._contribHollowMarkerClickListenerAdded) return;
+
+        wfMap.addListener("click", handleHollowContributionMarkerMapClick);
+        wfMap.addListener("mousemove", handleHollowContributionMarkerMapMouseMove);
+
+        const mapDiv = wfMap.getDiv?.();
+        if (mapDiv && !mapDiv._contribHollowMarkerMouseLeaveAdded) {
+            mapDiv.addEventListener("mouseleave", clearHollowContributionMarkerCursor);
+            mapDiv._contribHollowMarkerMouseLeaveAdded = true;
+        }
+
+        wfMap._contribHollowMarkerClickListenerAdded = true;
     }
 
     // -----------------------------
@@ -3193,6 +3352,26 @@
     }
 
     // -----------------------------
+    // css
+    // -----------------------------
+
+    function injectCss() {
+        if (document.getElementById("wf-contrib-hollow-marker-cursor-css")) return;
+
+        const style = document.createElement("style");
+        style.id = "wf-contrib-hollow-marker-cursor-css";
+        style.textContent = `
+        .wf-contrib-hollow-marker-hover,
+        .wf-contrib-hollow-marker-hover .gm-style,
+        .wf-contrib-hollow-marker-hover .gm-style div[style*="cursor"] {
+            cursor: pointer !important;
+        }
+    `;
+
+        document.head.appendChild(style);
+    }
+
+    // -----------------------------
     // Plugin bootstrap
     // -----------------------------
 
@@ -3200,6 +3379,7 @@
         loadSettings();
         loadNominationsFromIDB();
         setupMapRouteWatcher();
+        injectCss();
     }
 
     bootstrap();
