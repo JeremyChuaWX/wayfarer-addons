@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.8.1
+// @version      3.8.2
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -46,6 +46,7 @@
     const GCS_MIN_ZOOM = 16;
     const LOWZOOM_GCS_MAX_ZOOM = GCS_MIN_ZOOM - 1;
     const NORMAL_GCS_CELL_LEVEL = 14;
+    const POWER_SPOT_RING_MIN_ZOOM = 18;
 
     // ----- URLs and API -----
     const SUBMIT_ROUTE = "/new/submit/new";
@@ -6144,8 +6145,12 @@
                 saveSettings();
                 updateNearbyWayspotsRadiusCircle();
                 updateSubmitRadiusCircle();
-                updatePowerSpotRadiusCircle();
                 applyHideZoomTextCss();
+
+                if (isValidLatLng(window.currentLat, window.currentLng)) {
+                    updatePowerSpotRadiusCircle(window.currentLat, window.currentLng);
+                    updateSubmissionInteractionCircle(window.currentLat, window.currentLng);
+                }
 
                 // Re-evaluate marker filtering/styling if inactive-as-active changed
                 if (inactiveAsActiveChanged) {
@@ -7397,6 +7402,7 @@
 
                 // Update 22m powerSpot radius circle
                 updatePowerSpotRadiusCircle(initialCoords.lat, initialCoords.lng);
+                updateSubmissionInteractionCircle(initialCoords.lat, initialCoords.lng);
 
                 if (currentMapMode === MAP_MODE.DESKTOP) {
                     updateDesktopSubmitMarkerPosition();
@@ -7456,6 +7462,7 @@
 
         // Update 22m Power Spot radius circle
         updatePowerSpotRadiusCircle(newLat, newLng);
+        updateSubmissionInteractionCircle(newLat, newLng);
 
         // Move our custom desktop submission marker (desktop mode only)
         if (currentMapMode === MAP_MODE.DESKTOP) {
@@ -10004,6 +10011,20 @@
         });
     }
 
+    function updateSubmissionInteractionCircle(lat, lng) {
+        if (!isValidLatLng(lat, lng)) return;
+
+        updateCircleOverlay({
+            circleRefName: "submissionInteractionCircle80m",
+            center: {
+                lat,
+                lng
+            },
+            radiusMeters: 80,
+            style: userSettings.map.interactRadius
+        });
+    }
+
     function updateCircleOverlay(opts) {
         const {
             circleRefName,
@@ -10086,6 +10107,13 @@
         });
 
         updateCircleOverlay({
+            circleRefName: "submissionInteractionCircle80m",
+            center: null,
+            radiusMeters: 0,
+            style: { enabled: false }
+        });
+
+        updateCircleOverlay({
             circleRefName: "nearbyWayspotsRadiusCircle",
             center: null,
             radiusMeters: 0,
@@ -10110,10 +10138,18 @@
         if (!wfMap || typeof google === "undefined" || !google.maps) return;
 
         const style = userSettings?.map?.powerSpotRadius || {};
-        const enabledGlobal = !!style.enabled && !!userSettings?.map?.showPowerSpotRadiusAroundPokestopsAndGyms;
+        const enabledGlobal =
+              !!style.enabled &&
+              !!userSettings?.map?.showPowerSpotRadiusAroundPokestopsAndGyms;
 
-        // If off, clear all
-        if (!enabledGlobal) {
+        const zoom = wfMap?.getZoom?.();
+        const enabledAtCurrentZoom =
+              enabledGlobal &&
+              typeof zoom === "number" &&
+              zoom >= POWER_SPOT_RING_MIN_ZOOM;
+
+        // If off, or zoomed too far out, clear all
+        if (!enabledAtCurrentZoom) {
             for (const guid in powerSpotRingsByGuid) {
                 powerSpotRingsByGuid[guid]?.setMap?.(null);
             }
@@ -10126,10 +10162,16 @@
         for (const guid in markersByGuid) {
             const entry = markersByGuid[guid];
             const poi = entry?.poi;
-            const marker = entry?.marker;
-            if (!poi || !marker) continue;
+            if (!poi) continue;
 
-            // Respect marker visibility decisions: if marker not shown, hide ring too
+            const isCanvasMarker = entry?.renderer === "canvas";
+            const isGoogleMarker = !!entry?.marker;
+
+            // Ignore malformed entries, but allow canvas entries with marker:null.
+            if (!isCanvasMarker && !isGoogleMarker) continue;
+
+            // Respect marker visibility decisions. Canvas markers do not have a
+            // google.maps.Marker instance, so visibility must be calculated from POI.
             const { visibleNow } = getMarkerVisibilityForPoi(poi);
             if (!visibleNow) continue;
 
@@ -10137,11 +10179,11 @@
 
             wanted.add(guid);
 
-            let c = powerSpotRingsByGuid[guid] || null;
             const center = { lat: poi.lat, lng: poi.lng };
+            let circle = powerSpotRingsByGuid[guid] || null;
 
-            if (!c) {
-                c = new google.maps.Circle({
+            if (!circle) {
+                circle = new google.maps.Circle({
                     map: wfMap,
                     center,
                     radius: 22,
@@ -10152,9 +10194,10 @@
                     fillOpacity: style.fillOpacity ?? 0.0,
                     clickable: false
                 });
-                powerSpotRingsByGuid[guid] = c;
+
+                powerSpotRingsByGuid[guid] = circle;
             } else {
-                c.setOptions({
+                circle.setOptions({
                     strokeColor: style.strokeColor,
                     strokeOpacity: style.strokeOpacity ?? 0.8,
                     strokeWeight: style.strokeWidth ?? 2,
@@ -10162,9 +10205,10 @@
                     fillOpacity: style.fillOpacity ?? 0.0,
                     clickable: false
                 });
-                c.setCenter(center);
-                c.setRadius(22);
-                c.setMap(wfMap);
+
+                circle.setCenter(center);
+                circle.setRadius(22);
+                circle.setMap(wfMap);
             }
         }
 
@@ -10176,6 +10220,7 @@
             }
         }
     }
+
     // ==================================
     // POI classification + filtering
     // ==================================
