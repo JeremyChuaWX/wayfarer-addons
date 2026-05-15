@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.8.5
+// @version      3.8.6
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -11272,12 +11272,6 @@
                     return true;
                 }
 
-                // Compatibility for other userscripts:
-                // if an overlay author made a div/img/svg clickable with cursor:pointer,
-                // do not steal its click for a canvas POI behind it.
-                const cursor = window.getComputedStyle?.(el)?.cursor;
-                if (cursor === "pointer") return true;
-
                 return false;
             }
 
@@ -11313,9 +11307,14 @@
                     const item = this.hitItems[i];
                     if (!item) continue;
 
+                    const visualRadius = Number(item.radius || 0);
+                    const strokeWeight = Number(item.strokeWeight || 0);
+
+                    // Keep a very small tolerance for anti-aliasing / easy clicking,
+                    // but do not make the hit area much larger than the visible marker.
                     const hitRadius = Math.max(
-                        10,
-                        Number(item.radius || 0) + Number(item.strokeWeight || 0) + 4
+                        4,
+                        visualRadius + Math.ceil(strokeWeight / 2) + 1
                     );
 
                     const dx = x - item.x;
@@ -13382,7 +13381,8 @@
 }
 
 /* Force pointer cursor while hovering a canvas-rendered marker */
-.wfmapmods-canvas-marker-hover {
+.wfmapmods-canvas-marker-hover,
+.wfmapmods-canvas-marker-hover * {
   cursor: pointer !important;
 }
 `;
