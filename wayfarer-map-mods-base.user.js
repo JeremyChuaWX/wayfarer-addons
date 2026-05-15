@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.8.2
+// @version      3.8.3
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -7935,6 +7935,8 @@
 
         const normalized = extractAndNormalizeGcsPois(json, sourceKind);
 
+        console.log('normalized...');
+        console.log(normalized);
         // null means "stale response for the wrong zoom band".
         // Do not clear/replace the active GCS source in that case.
         if (!Array.isArray(normalized)) return;
