@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.8.6
+// @version      3.8.7
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -10997,7 +10997,7 @@
                 // Overscan means the canvas is larger than the visible map.
                 // While panning, Google moves this whole canvas with the map,
                 // and already-drawn offscreen markers slide into view smoothly.
-                const overscan = 2.0;
+                const overscan = 1.0;
 
                 const cssW = Math.round(mapW * (1 + overscan * 2));
                 const cssH = Math.round(mapH * (1 + overscan * 2));
