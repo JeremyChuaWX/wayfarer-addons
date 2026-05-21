@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Old Rating UI
-// @version      0.0.3
+// @version      0.0.4
 // @description  Restores the Rating UI on the Profile page
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-old-rating-ui.user.js
@@ -40,8 +40,12 @@
     const state = {
         performance: null,
         darkMode: false,
-        language: 'en'
+        language: 'en',
+        oldRatingUnavailable: false
     };
+
+    const OLD_RATING_UNAVAILABLE_MESSAGE =
+          "Niantic has now hidden the old rating data from users. You should uninstall plug-in 'Wayfarer Old Rating UI'.";
 
     const ORDER = ['poor', 'fair', 'good', 'great'];
 
@@ -258,7 +262,25 @@
      * OLD RATING BAR RENDERING
      ******************************************************************/
 
+    function createOldRatingUnavailableMessage() {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'wf-old-rating-wrapper';
+        wrapper.dataset.oldWayfinderRating = 'true';
+        applyWrapperTheme(wrapper);
+
+        const message = document.createElement('div');
+        message.className = 'wf-old-rating-unavailable-message';
+        message.textContent = OLD_RATING_UNAVAILABLE_MESSAGE;
+
+        wrapper.appendChild(message);
+        return wrapper;
+    }
+
     function createOldRatingBar() {
+        if (state.oldRatingUnavailable) {
+            return createOldRatingUnavailableMessage();
+        }
+
         const ratingData = getRatingData();
 
         const wrapper = document.createElement('div');
@@ -297,6 +319,17 @@
 
         wrappers.forEach((wrapper) => {
             applyWrapperTheme(wrapper);
+
+            if (state.oldRatingUnavailable) {
+                wrapper.replaceChildren();
+
+                const message = document.createElement('div');
+                message.className = 'wf-old-rating-unavailable-message';
+                message.textContent = OLD_RATING_UNAVAILABLE_MESSAGE;
+
+                wrapper.appendChild(message);
+                return;
+            }
 
             const segments = wrapper.querySelectorAll('.wf-old-rating-segment');
 
@@ -358,6 +391,19 @@
             const result = data?.result;
 
             if (!result) return;
+
+            const hasPerformance =
+                  Object.prototype.hasOwnProperty.call(result, 'performance');
+
+            if (!hasPerformance || !normalizeRating(result.performance)) {
+                state.oldRatingUnavailable = true;
+
+                if (isProfilePage()) {
+                    refreshUiWithRetry();
+                }
+
+                return;
+            }
 
             let changed = false;
 
@@ -643,6 +689,18 @@
                 background-color: rgb(196, 181, 253);
                 color: rgb(0, 0, 0);
                 border-right: 1px solid rgb(196, 181, 253);
+            }
+
+            .wf-old-rating-unavailable-message {
+                font-family: Akkurat, ui-sans-serif, system-ui, -apple-system, "system-ui", "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+                font-size: 12px;
+                line-height: 18px;
+                font-weight: 400;
+                color: rgb(115, 115, 115);
+            }
+
+            .wf-old-rating-wrapper.theme-dark .wf-old-rating-unavailable-message {
+                color: rgb(212, 212, 212);
             }
         `;
 
