@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - s2 Cells
-// @version      3.2.0
+// @version      3.2.1
 // @description  Adds s2 cell grids and shading to the Wayfarer Map, and allows manual addition of PokéStops and Gyms
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-s2-cells.user.js
 // @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-s2-cells.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
+// @match        https://wayfarer-qa.eng.nianticlabs.com/*
 // @run-at       document-start
 // ==/UserScript==
 
@@ -1075,8 +1076,7 @@
                 (enabled) => {
                     userSettings.poiMarkers.stop.enabled = enabled;
                     saveSettings();
-                    // Rendering changes will be implemented later:
-                    // refreshManualPoiMarkers();
+                    refreshManualPoiMarkers();
                 }
             );
         } else {
@@ -1093,7 +1093,7 @@
                 (enabled) => {
                     userSettings.poiMarkers.gym.enabled = enabled;
                     saveSettings();
-                    // refreshManualPoiMarkers();
+                    refreshManualPoiMarkers();
                 }
             );
         } else {
@@ -1110,7 +1110,7 @@
                 (enabled) => {
                     userSettings.poiMarkers.powerspot.enabled = enabled;
                     saveSettings();
-                    // refreshManualPoiMarkers();
+                    refreshManualPoiMarkers();
                 }
             );
         } else {
@@ -4442,7 +4442,7 @@
     // Return style for a given POI type
     function getMarkerStyleForPoiType(type) {
         const cfg = userSettings.poiMarkers?.[type];
-        if (!cfg) return null;
+        if (!cfg || cfg.enabled === false) return null;
 
         return {
             fillColor: cfg.fillColor,
