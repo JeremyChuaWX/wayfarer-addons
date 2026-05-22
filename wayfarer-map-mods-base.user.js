@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.8.7
+// @version      3.8.8
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -126,7 +126,7 @@
     let submitIdleListener = null;
 
     // ----- Radius for retrieving POIs -----
-    let radius = 200;
+    let radius = 350;
     let poiMovementThreshold = radius * 0.25;
 
     // ----- Radius for submitting POIs -----
