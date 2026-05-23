@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Draggable Help Chat
-// @version      1.0.0
+// @version      1.1.0
 // @description  Base plug-in for Wayfarer Maps
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-draggable-help-chat.user.js
@@ -84,11 +84,16 @@
         pageObserver = null;
     }
 
+    function checkForHelpChatNow() {
+        const iframe = findHelpshiftIframe();
+        if (iframe) makeIframeDraggable(iframe);
+    }
+
     function onRouteMaybeChanged() {
+        checkForHelpChatNow();
+
         if (isHelpRoute()) {
             startPageObserverIfNeeded();
-        } else {
-            stopPageObserverIfRunning();
         }
     }
 
@@ -97,8 +102,10 @@
         const origReplaceState = history.replaceState;
 
         function fire() {
-            // Defer so location updates settle
+            // Defer so Angular route changes and Helpshift injection can settle.
             setTimeout(onRouteMaybeChanged, 0);
+            setTimeout(onRouteMaybeChanged, 500);
+            setTimeout(onRouteMaybeChanged, 1500);
         }
 
         history.pushState = function (...args) {
@@ -115,8 +122,13 @@
 
         window.addEventListener("popstate", fire, true);
 
-        // Initial check
-        onRouteMaybeChanged();
+        // Initial page-load check for users who also have the always-load plugin.
+        checkForHelpChatNow();
+
+        // If the page loaded directly on /new/help, watch for native Helpshift injection.
+        if (isHelpRoute()) {
+            startPageObserverIfNeeded();
+        }
     }
 
     function injectCss() {
