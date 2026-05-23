@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.1.1
+// @version      0.2.0
 // @description  Support for simultaneous tickets
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
@@ -8,13 +8,9 @@
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.nianticlabs.com/*
 // @match        https://webchat.helpshift.com/*
-// @grant        GM_setValue
-// @grant        GM_getValue
-// @grant        GM_deleteValue
-// @grant        GM_addValueChangeListener
 // ==/UserScript==
 
-// Copyright 2025 tntnnbltn
+// Copyright 2026 tntnnbltn
 
 // This script is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -28,11 +24,15 @@
 
 function init() {
 
-    const uuid = 'aff6f55e-004d-4100-abee-f6f93c108eb5'; // randomly generated, unique to this userscript, please don't re-use in other scripts
-
     const ORIGIN_WAYFARER = 'https://wayfarer.nianticlabs.com';
     const ORIGIN_HELPSHIFT = 'https://webchat.helpshift.com';
     const OBJECT_STORE_NAME = 'helpChatSessions';
+
+    const WFTM_SOURCE = 'wftm';
+
+    function isSafeObject(value) {
+        return value && typeof value === 'object';
+    }
 
     function initHelp() {
 
@@ -54,10 +54,27 @@ function init() {
             };
         })(XMLHttpRequest.prototype.open);
 
+        function handleParentMessage(event) {
+            if (event.origin !== ORIGIN_WAYFARER) return;
+            if (!isSafeObject(event.data)) return;
+            if (event.data.source !== WFTM_SOURCE) return;
+
+            const { type, payload } = event.data;
+
+            if (type === 'clearSession') {
+                clearLocalStorage();
+            } else if (type === 'restoreSession' && payload && payload.aui) {
+                updateLocalStorage(payload);
+            }
+        }
+
+        window.addEventListener('message', handleParentMessage);
+
         function parseResponse() {
             try {
                 const json = JSON.parse(this.responseText);
                 if (!json) return;
+                console.log(json);
                 sendTicketHistory(json);
             } catch (ex) {
                 console.error('Error parsing JSON:', ex);
@@ -69,17 +86,21 @@ function init() {
             const asi = localStorage.getItem('asi:niantic-4d50991f7c85c5b');
             const aui = localStorage.getItem('aui:niantic-4d50991f7c85c5b');
 
-            const values = { di, asi, aui };
-
-            // Send the values to the parent window (Wayfarer page)
-            window.parent.postMessage(values, 'https://wayfarer.nianticlabs.com');
+            window.parent.postMessage({
+                source: WFTM_SOURCE,
+                type: 'sessionValues',
+                payload: { di, asi, aui }
+            }, ORIGIN_WAYFARER);
         }
 
         loadAndSendSessionValues();
 
         function sendTicketHistory(data) {
-            GM_setValue(uuid, data);
-            GM_deleteValue(uuid);
+            window.parent.postMessage({
+                source: WFTM_SOURCE,
+                type: 'ticketHistory',
+                payload: data
+            }, ORIGIN_WAYFARER);
         }
 
         function clearLocalStorage() {
@@ -87,52 +108,79 @@ function init() {
         }
 
         function updateLocalStorage(data) {
-            localStorage.setItem('di:niantic-4d50991f7c85c5b', data.di);
-            localStorage.setItem('asi:niantic-4d50991f7c85c5b', data.asi);
-            localStorage.setItem('aui:niantic-4d50991f7c85c5b', data.aui);
+            const suffix = 'niantic-4d50991f7c85c5b';
 
-            const configKey = 'config:niantic-4d50991f7c85c5b';
-            if (localStorage.getItem(configKey)) {
-                let configData = JSON.parse(localStorage.getItem(configKey));
+            const diKey = `di:${suffix}`;
+            const asiKey = `asi:${suffix}`;
+            const auiKey = `aui:${suffix}`;
+            const configKey = `config:${suffix}`;
 
-                const oldKey = Object.keys(configData)[0];
-                const newKey = data.aui;
+            const previousAui = localStorage.getItem(auiKey);
 
-                configData[newKey] = configData[oldKey];
-                delete configData[oldKey];
+            localStorage.setItem(diKey, data.di);
+            localStorage.setItem(asiKey, data.asi);
+            localStorage.setItem(auiKey, data.aui);
 
+            const rawConfig = localStorage.getItem(configKey);
+            if (!rawConfig) return;
+
+            try {
+                const configData = JSON.parse(rawConfig);
+
+                // Helpshift now appears to expect the active AUI to exist inside configData.
+                // If the restored AUI does not have a config entry, copy one from the current session.
+                if (!configData[data.aui]) {
+                    if (previousAui && configData[previousAui]) {
+                        configData[data.aui] = configData[previousAui];
+                    } else {
+                        const configKeys = Object.keys(configData);
+                        const fallbackKey = configKeys[configKeys.length - 1];
+
+                        if (fallbackKey) {
+                            configData[data.aui] = configData[fallbackKey];
+                        }
+                    }
+                }
+
+                // Do not delete old config entries. Current Helpshift storage may contain several.
                 localStorage.setItem(configKey, JSON.stringify(configData));
+            } catch (ex) {
+                console.error('Ticket Manager: Failed to update Helpshift config storage', ex);
             }
         }
-
-        GM_addValueChangeListener(uuid, (label, data) => {
-            if (label === uuid && data) {
-                if (data === 'clear') {
-                    clearLocalStorage();
-                } else if (data.aui) {
-                    updateLocalStorage(data);
-                }
-            }
-        });
     }
 
 
     function initWF() {
         let helpChatSessions = JSON.parse(localStorage.getItem(OBJECT_STORE_NAME)) || {};
-
         let currentSession;
-
         let isTheNextMessageTheWayspotTitle = false;
+        let ticketButtonAdded = false;
+        let iframeObserverStarted = false;
+        let routeHooked = false;
+        let waitingForIframe = false;
 
         const awaitElement = get => new Promise((resolve, reject) => {
             let triesLeft = 20;
+
             const queryLoop = () => {
                 const ref = get();
-                if (ref) resolve(ref);
-                else if (!triesLeft) reject();
-                else setTimeout(queryLoop, 1000);
-                triesLeft;
-            }
+
+                if (ref) {
+                    resolve(ref);
+                    return;
+                }
+
+                triesLeft -= 1;
+
+                if (triesLeft <= 0) {
+                    reject(new Error('Element not found'));
+                    return;
+                }
+
+                setTimeout(queryLoop, 1000);
+            };
+
             queryLoop();
         });
 
@@ -140,15 +188,6 @@ function init() {
             const doc = new DOMParser().parseFromString(str, "text/html");
             return doc.documentElement.textContent;
         };
-
-        awaitElement(() => document.getElementById('hs-web-sdk-iframe'))
-            .then(() => {
-            addTicketSwitchButton();
-            observeIframeWidthChanges();
-        })
-            .catch(() => {
-            console.error('Iframe not found.');
-        });
 
         // Function to observe changes to iframe width properties
         // Used to detect when the Help Chat is opened
@@ -166,32 +205,138 @@ function init() {
             }
         };
 
-        window.addEventListener('message', function(event) {
-            if (event.origin === 'https://webchat.helpshift.com') {
-                const data = event.data;
 
-                if (data.di && data.aui) {
-                    currentSession = data.aui
+        function isHelpRoute() {
+            return location.origin === ORIGIN_WAYFARER &&
+                location.pathname === '/new/help';
+        }
 
-                    if (!helpChatSessions[data.aui]) {
-                        helpChatSessions[data.aui] = { di: data.di, asi: data.asi };
-                        saveDataToLocalStorage();
-                    }
+        function ensureTicketManagerLoaded(options = {}) {
+            const { requireHelpRoute = false } = options;
+
+            if (requireHelpRoute && !isHelpRoute()) {
+                removeInterfaceContainer();
+                return;
+            }
+
+            if (document.getElementById('ticketSwitchButton')) {
+                ticketButtonAdded = true;
+            }
+
+            if (ticketButtonAdded && iframeObserverStarted) {
+                return;
+            }
+
+            if (waitingForIframe) {
+                return;
+            }
+
+            waitingForIframe = true;
+
+            awaitElement(() => document.getElementById('hs-web-sdk-iframe'))
+                .then(() => {
+                waitingForIframe = false;
+
+                if (!ticketButtonAdded && !document.getElementById('ticketSwitchButton')) {
+                    addTicketSwitchButton();
+                    ticketButtonAdded = true;
                 }
+
+                if (!iframeObserverStarted) {
+                    observeIframeWidthChanges();
+                    iframeObserverStarted = true;
+                }
+            })
+                .catch(() => {
+                waitingForIframe = false;
+                console.error('Iframe not found.');
+            });
+        }
+
+        function handleRouteChange() {
+            if (isHelpRoute()) {
+                ensureTicketManagerLoaded({ requireHelpRoute: true });
+            } else {
+                removeInterfaceContainer();
+            }
+        }
+
+        function hookRouteChanges() {
+            if (routeHooked) return;
+            routeHooked = true;
+
+            const originalPushState = history.pushState;
+            const originalReplaceState = history.replaceState;
+
+            history.pushState = function(...args) {
+                originalPushState.apply(this, args);
+                setTimeout(handleRouteChange, 0);
+            };
+
+            history.replaceState = function(...args) {
+                originalReplaceState.apply(this, args);
+                setTimeout(handleRouteChange, 0);
+            };
+
+            window.addEventListener('popstate', () => {
+                setTimeout(handleRouteChange, 0);
+            });
+        }
+
+        hookRouteChanges();
+
+        // Initial page-load check: look for the iframe regardless of current route.
+        ensureTicketManagerLoaded({ requireHelpRoute: false });
+
+        window.addEventListener('message', function(event) {
+            if (event.origin !== ORIGIN_HELPSHIFT) return;
+            if (!isSafeObject(event.data)) return;
+            if (event.data.source !== WFTM_SOURCE) return;
+
+            const { type, payload } = event.data;
+
+            if (type === 'sessionValues' && payload && payload.di && payload.aui) {
+                currentSession = payload.aui;
+
+                if (!helpChatSessions[payload.aui]) {
+                    helpChatSessions[payload.aui] = {
+                        di: payload.di,
+                        asi: payload.asi
+                    };
+                    saveDataToLocalStorage();
+                }
+            } else if (type === 'ticketHistory' && payload) {
+                processTicketData(payload);
             }
         });
 
+        function postToHelp(type, payload = null) {
+            const iframe = document.getElementById('hs-web-sdk-iframe');
+            if (!iframe || !iframe.contentWindow) {
+                console.warn('Ticket Manager: Helpshift iframe not available');
+                return false;
+            }
+
+            iframe.contentWindow.postMessage({
+                source: WFTM_SOURCE,
+                type,
+                payload
+            }, ORIGIN_HELPSHIFT);
+
+            return true;
+        }
+
         function restoreOldTicket(data) {
-            GM_setValue(uuid, data);
-            GM_deleteValue(uuid);
+            const sent = postToHelp('restoreSession', data);
+            if (!sent) return;
 
             saveDataToLocalStorage();
             refreshPage();
         }
 
         function generateNewTicket() {
-            GM_setValue(uuid, 'clear');
-            GM_deleteValue(uuid);
+            const sent = postToHelp('clearSession');
+            if (!sent) return;
 
             saveDataToLocalStorage();
             refreshPage();
@@ -208,12 +353,6 @@ function init() {
                 location.reload();
             }, 50);
         }
-
-        GM_addValueChangeListener(uuid, (label, data) => {
-            if (label === uuid && data) {
-                processTicketData(data);
-            }
-        });
 
         function processTicketData(data) {
             if (data.body) {
@@ -383,6 +522,11 @@ function init() {
         }
 
         function addTicketSwitchButton() {
+            if (document.getElementById('ticketSwitchButton')) {
+                ticketButtonAdded = true;
+                return;
+            }
+
             const containerDiv = document.createElement('div');
             containerDiv.classList.add('wftm-containerDiv');
 
