@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.8.8
+// @version      3.9.0
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -157,10 +157,13 @@
     // ----- Local draft submissions -----
     let draftSubmissions = [];
     let draftMarkers = [];
+    let draftMarkerLabelOverlays = [];
 
-    // ----- Remote draft submissions -----
     let remoteDraftSubmissions = [];
     let remoteDraftMarkers = [];
+    let remoteDraftMarkerLabelOverlays = [];
+
+    let DraftMarkerLabelOverlay = null;
 
     // ----- Select Wayspot after deep link or search -----
     let deepLinkTarget = null;
@@ -338,6 +341,7 @@
             showPowerSpotRadiusAroundPokestopsAndGyms: false,
             displayInactivePowerSpotsAsActive: false,
             defaultDraftSaveLocation: "remote",
+            showDraftMarkerTitles: false,
             nearbyRadius: { enabled: true, strokeColor: "#4285F4", strokeOpacity: 0.8, strokeWidth: 2, fillColor: "#4285F4", fillOpacity: 0 },
             submitRadius: { enabled: true, strokeColor: "#e13cff", strokeOpacity: 0.8, strokeWidth: 4, fillColor: "#e13cff", fillOpacity: 0 },
             interactRadius: { enabled: true, strokeColor: "#ffcc33", strokeOpacity: 0.9, strokeWidth: 2, fillColor: "#ffed24", fillOpacity: 0.05 },
@@ -849,6 +853,8 @@
                 }
             });
         }
+
+        applyDraftMarkerTitleVisibilityToAllOverlays();
     }
 
     function isWayspotsLayerEnabled() {
@@ -4285,6 +4291,9 @@
         });
         remoteDraftMarkers = [];
 
+        clearDraftMarkerLabelOverlays(remoteDraftMarkerLabelOverlays);
+        remoteDraftMarkerLabelOverlays = [];
+
         remoteDraftSubmissions.forEach(draft => {
             const poi = draft.poi || {};
             const lat = poi.lat;
@@ -4328,10 +4337,130 @@
             });
 
             remoteDraftMarkers.push(marker);
+
+            const labelOverlay = createDraftMarkerLabelOverlay(marker, poi.title);
+            if (labelOverlay) {
+                remoteDraftMarkerLabelOverlays.push(labelOverlay);
+            }
         });
     }
 
+    // -----------------------------
+    // Draft marker title labels
+    // -----------------------------
 
+    function isDraftMarkerTitlesEnabled() {
+        const mapCfg = (userSettings && userSettings.map) || {};
+        return mapCfg.showDraftMarkerTitles === true;
+    }
+
+    function ensureDraftMarkerLabelOverlayClass() {
+        if (DraftMarkerLabelOverlay) return;
+
+        DraftMarkerLabelOverlay = function (marker, text) {
+            this.marker = marker;
+            this.text = text || "";
+            this.div = null;
+            this.visible = true;
+            this.setMap(wfMap);
+        };
+
+        DraftMarkerLabelOverlay.prototype = new google.maps.OverlayView();
+
+        DraftMarkerLabelOverlay.prototype.onAdd = function () {
+            const panes = this.getPanes();
+            const pane = panes && panes.overlayImage;
+            if (!pane) return;
+
+            const div = document.createElement("div");
+            div.className = "wfmapmods-draft-marker-label";
+            div.textContent = this.text || "";
+            div.style.display = this.visible ? "" : "none";
+
+            pane.appendChild(div);
+            this.div = div;
+        };
+
+        DraftMarkerLabelOverlay.prototype.draw = function () {
+            if (!this.div || !this.marker) return;
+
+            const projection = this.getProjection();
+            if (!projection) return;
+
+            const markerPosition = this.marker.getPosition?.();
+            if (!markerPosition) return;
+
+            const pos = projection.fromLatLngToDivPixel(markerPosition);
+            if (!pos) return;
+
+            this.div.style.left = pos.x + "px";
+            this.div.style.top = (pos.y + 4) + "px";
+        };
+
+        DraftMarkerLabelOverlay.prototype.onRemove = function () {
+            if (this.div && this.div.parentNode) {
+                this.div.parentNode.removeChild(this.div);
+            }
+            this.div = null;
+        };
+
+        DraftMarkerLabelOverlay.prototype.setText = function (text) {
+            this.text = text || "";
+            if (this.div) {
+                this.div.textContent = this.text;
+            }
+        };
+
+        DraftMarkerLabelOverlay.prototype.setVisible = function (visible) {
+            this.visible = visible !== false;
+            if (this.div) {
+                this.div.style.display = this.visible ? "" : "none";
+            }
+        };
+    }
+
+    function createDraftMarkerLabelOverlay(marker, titleText) {
+        const text = String(titleText || "").trim();
+        if (!marker || !text) return null;
+        if (!wfMap || typeof google === "undefined" || !google.maps) return null;
+
+        ensureDraftMarkerLabelOverlayClass();
+
+        const overlay = new DraftMarkerLabelOverlay(marker, text);
+        overlay.setVisible(isDraftLayerEnabled() && isDraftMarkerTitlesEnabled());
+
+        return overlay;
+    }
+
+    function clearDraftMarkerLabelOverlays(overlays) {
+        if (!Array.isArray(overlays)) return;
+
+        overlays.forEach(overlay => {
+            if (overlay && typeof overlay.setMap === "function") {
+                overlay.setMap(null);
+            }
+        });
+    }
+
+    function applyDraftMarkerTitleVisibilityToAllOverlays() {
+        const visible = isDraftLayerEnabled() && isDraftMarkerTitlesEnabled();
+
+        if (Array.isArray(draftMarkerLabelOverlays)) {
+            draftMarkerLabelOverlays.forEach(overlay => {
+                if (overlay && typeof overlay.setVisible === "function") {
+                    overlay.setVisible(visible);
+                }
+            });
+        }
+
+        if (Array.isArray(remoteDraftMarkerLabelOverlays)) {
+            remoteDraftMarkerLabelOverlays.forEach(overlay => {
+                if (overlay && typeof overlay.setVisible === "function") {
+                    overlay.setVisible(visible);
+                }
+            });
+        }
+    }
 
     // ======================================
     // Local draft submissions
@@ -4525,6 +4654,9 @@
         });
         draftMarkers = [];
 
+        clearDraftMarkerLabelOverlays(draftMarkerLabelOverlays);
+        draftMarkerLabelOverlays = [];
+
         draftSubmissions.forEach(draft => {
             const poi = draft.poi || {};
             const lat = poi.lat;
@@ -4569,6 +4701,11 @@
             });
 
             draftMarkers.push(marker);
+
+            const labelOverlay = createDraftMarkerLabelOverlay(marker, poi.title);
+            if (labelOverlay) {
+                draftMarkerLabelOverlays.push(labelOverlay);
+            }
         });
     }
 
@@ -6666,7 +6803,7 @@
     function openDraftSettingsWindow() {
         openModal({
             id: "wfmapmods-draft-settings-backdrop",
-            title: "Draft settings",
+            title: "Draft Settings",
             width: 430,
             buildContent(dialog, okBtn, closeModal) {
                 const mapCfg = userSettings.map;
@@ -6674,21 +6811,52 @@
                 const remoteCount = Array.isArray(remoteDraftSubmissions) ? remoteDraftSubmissions.length : 0;
 
                 // -------------------------
-                // Section: intro / overview
+                // Section: draft marker display
                 // -------------------------
-                const introSection = document.createElement("div");
-                introSection.className = "wfmapmods-modal-section";
+                const displaySection = document.createElement("div");
+                displaySection.className = "wfmapmods-modal-section";
 
-                const introHeader = document.createElement("div");
-                introHeader.className = "wfmapmods-modal-section-header";
-                introHeader.textContent = "Draft storage";
-                introSection.appendChild(introHeader);
+                const displayHeader = document.createElement("div");
+                displayHeader.className = "wfmapmods-modal-section-header";
+                displayHeader.textContent = "Draft marker display";
+                displaySection.appendChild(displayHeader);
 
-                const introText = document.createElement("div");
-                introText.className = "wfmapmods-modal-hint";
-                introText.style.whiteSpace = "normal";
-                introText.style.lineHeight = "1.5";
-                introText.innerHTML = `
+                const showDraftTitlesRow = document.createElement("label");
+                showDraftTitlesRow.className = "wfmapmods-layers-option";
+                showDraftTitlesRow.style.alignItems = "center";
+
+                const showDraftTitlesChk = document.createElement("input");
+                showDraftTitlesChk.type = "checkbox";
+                showDraftTitlesChk.className = "wfmapmods-layers-checkbox";
+                showDraftTitlesChk.checked = mapCfg.showDraftMarkerTitles === true;
+
+                const showDraftTitlesText = document.createElement("span");
+                showDraftTitlesText.className = "wfmapmods-layers-label";
+                showDraftTitlesText.style.lineHeight = "1.2";
+                showDraftTitlesText.textContent = "Show draft titles under markers";
+
+                showDraftTitlesRow.appendChild(showDraftTitlesChk);
+                showDraftTitlesRow.appendChild(showDraftTitlesText);
+
+                displaySection.appendChild(showDraftTitlesRow);
+                dialog.appendChild(displaySection);
+
+                // -------------------------
+                // Section: draft storage
+                // -------------------------
+                const storageSection = document.createElement("div");
+                storageSection.className = "wfmapmods-modal-section";
+
+                const storageHeader = document.createElement("div");
+                storageHeader.className = "wfmapmods-modal-section-header";
+                storageHeader.textContent = "Draft storage";
+                storageSection.appendChild(storageHeader);
+
+                const storageText = document.createElement("div");
+                storageText.className = "wfmapmods-modal-hint";
+                storageText.style.whiteSpace = "normal";
+                storageText.style.lineHeight = "1.5";
+                storageText.innerHTML = `
                 There are two possible locations where drafts can be stored:<br>
                 • Local on the device<br>
                 • Remotely on the Wayfarer website<br><br>
@@ -6697,20 +6865,16 @@
                 Currently, you have <strong>${localCount}</strong> local draft${localCount === 1 ? "" : "s"} and
                 <strong>${remoteCount}</strong> remote draft${remoteCount === 1 ? "" : "s"}.
             `;
-                introSection.appendChild(introText);
+                storageSection.appendChild(storageText);
 
-                dialog.appendChild(introSection);
-
-                // -------------------------
-                // Section: default save location
-                // -------------------------
-                const defaultsSection = document.createElement("div");
-                defaultsSection.className = "wfmapmods-modal-section";
+                const storageDivider = document.createElement("div");
+                storageDivider.className = "wfmapmods-modal-divider";
+                storageSection.appendChild(storageDivider);
 
                 const defaultsHeader = document.createElement("div");
                 defaultsHeader.className = "wfmapmods-modal-section-header";
                 defaultsHeader.textContent = "Preferred storage location";
-                defaultsSection.appendChild(defaultsHeader);
+                storageSection.appendChild(defaultsHeader);
 
                 const defaultSaveLabel = document.createElement("div");
                 defaultSaveLabel.className = "wfmapmods-modal-hint";
@@ -6718,7 +6882,7 @@
                 defaultSaveLabel.style.lineHeight = "1.5";
                 defaultSaveLabel.style.marginBottom = "10px";
                 defaultSaveLabel.textContent = "Where should new drafts be stored?";
-                defaultsSection.appendChild(defaultSaveLabel);
+                storageSection.appendChild(defaultSaveLabel);
 
                 const defaultSaveSelect = document.createElement("select");
                 defaultSaveSelect.className = "wfmapmods-modal-select";
@@ -6743,8 +6907,8 @@
                 defaultSaveSelect.appendChild(optLocal);
                 defaultSaveSelect.value = mapCfg.defaultDraftSaveLocation === "local" ? "local" : "remote";
 
-                defaultsSection.appendChild(defaultSaveSelect);
-                dialog.appendChild(defaultsSection);
+                storageSection.appendChild(defaultSaveSelect);
+                dialog.appendChild(storageSection);
 
                 // -------------------------
                 // Section: migrate local drafts
@@ -6797,8 +6961,6 @@
                             const result = await migrateLocalDraftsToRemoteQueue((progress) => {
                                 const total = progress.total || 0;
                                 const index = progress.index || 0;
-                                const successCount = progress.successCount || 0;
-                                const failCount = progress.failCount || 0;
 
                                 let completed = 0;
 
@@ -6837,14 +6999,28 @@
                 }
 
                 return {
-                    defaultSaveSelect
+                    defaultSaveSelect,
+                    showDraftTitlesChk
                 };
             },
             onOk(ctx, closeModal) {
+                const newShowDraftTitles = !!ctx.showDraftTitlesChk.checked;
+                const draftTitlesChanged = userSettings.map.showDraftMarkerTitles !== newShowDraftTitles;
+
                 userSettings.map.defaultDraftSaveLocation =
                     ctx.defaultSaveSelect.value === "local" ? "local" : "remote";
 
+                userSettings.map.showDraftMarkerTitles = newShowDraftTitles;
+
                 saveSettings();
+
+                if (draftTitlesChanged) {
+                    refreshDraftMarkers();
+                    refreshRemoteDraftMarkers();
+                } else {
+                    applyDraftMarkerTitleVisibilityToAllOverlays();
+                }
+
                 closeModal();
             }
         });
@@ -13468,6 +13644,22 @@ canvas#deckgl-overlay {
 /* Hide Google’s built-in blue geolocation dot */
 .gm-style img[src*="rgba(22%2C%20188%2C%20240%2C%200.4)"][src*="%230096ff"] {
   display: none !important;
+}
+
+/* Draft marker title labels */
+.wfmapmods-draft-marker-label {
+  position: absolute;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: bold;
+  color: rgba(255, 241, 0, 0.9);
+  text-shadow:
+    0 0 2px #000000,
+    0 0 4px #000000,
+    -1px -1px 2px #000000,
+    1px 1px 2px #000000;
+  pointer-events: none;
+  transform: translate(-50%, 0);
 }
       `
 
