@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         Pokémon Go Map Copy Coordinates
-// @version      0.1.1
+// @name         Pokémon Go Map Preview Card Details
+// @version      0.1.2
 // @description  Adds coordinates to Pokemon Go Map preview cards
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/pokemon-go-map-card-coords.user.js
-// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/pokemon-go-map-card-coords.user.js
+// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/pokemon-go-map-preview-card-details.user.js
+// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/pokemon-go-map-preview-card-details.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://pokemongo.com/gamemap*
 // @run-at       document-start
