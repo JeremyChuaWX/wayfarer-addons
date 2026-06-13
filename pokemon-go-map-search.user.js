@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Pokémon Go Map Search
-// @version      0.2.0
+// @version      0.2.1
 // @description  Improves the functionality of the Pokemon Go Map search bar
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/pokemon-go-map-search.user.js
@@ -1061,7 +1061,6 @@
             slot.replaceWith(existingWrap);
 
             state.uiInjected = true;
-            debug('Moved search UI into location toolbar slot.');
             return;
         }
 
@@ -1073,7 +1072,6 @@
             slot.replaceWith(wrap);
 
             state.uiInjected = true;
-            debug('Replaced location toolbar slot with search UI.');
             return;
         }
 
@@ -1081,8 +1079,6 @@
         wrap.classList.add('pgo-floating-wrapper');
         searchBox.classList.add('pgo-floating-fallback');
         document.body.appendChild(wrap);
-
-        debug('Location toolbar slot not found yet; using temporary fallback UI.');
     }
 
     function startObservers() {
