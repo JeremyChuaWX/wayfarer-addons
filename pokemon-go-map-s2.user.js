@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Pokémon Go Map S2 Grids
-// @version      0.1.0
+// @version      0.2.0
 // @description  Adds L17 and L14 S2 cells to the Pokemon Go Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/pokemon-go-map-s2.user.js
@@ -32,448 +32,519 @@
 (() => {
 
     // -----------------------------
-// S2 grid overlay
-// -----------------------------
+    // S2 grid overlay
+    // -----------------------------
 
-const CONFIG = {
-    L14: {
-        level: 14,
-        minZoom: 14,
-        strokeColor: '#cc0000',
-        strokeOpacity: 0.9,
-        strokeWeight: 2.4,
-        zIndex: 1400,
-        maxCells: 1200,
-    },
+    const CONFIG = {
+        L14: {
+            level: 14,
+            minZoom: 14,
+            strokeColor: '#cc0000',
+            strokeOpacity: 0.9,
+            strokeWeight: 2.4,
+            zIndex: 1400,
+            maxCells: 1200,
+        },
 
-    L17: {
-        level: 17,
-        minZoom: 16,
-        strokeColor: '#0066ff',
-        strokeOpacity: 0.55,
-        strokeWeight: 1,
-        zIndex: 170,
-        maxCells: 3500,
-    },
+        L17: {
+            level: 17,
+            minZoom: 16,
+            strokeColor: '#0066ff',
+            strokeOpacity: 0.55,
+            strokeWeight: 1,
+            zIndex: 170,
+            maxCells: 3500,
+        },
 
-    redrawDebounceMs: 150,
+        redrawDebounceMs: 150,
 
-    // Expands the search area slightly beyond the viewport so grid lines do not
-    // appear/disappear right at the edge while panning.
-    viewportPaddingRatio: 0.18,
-};
+        // Expands the search area slightly beyond the viewport so grid lines do not
+        // appear/disappear right at the edge while panning.
+        viewportPaddingRatio: 0.18,
+    };
 
-const state = {
-    maps: [],
-    activeMap: null,
-    redrawTimer: null,
-    overlaysByLevel: {
-        14: new Map(),
-        17: new Map(),
-    },
-    listenersAttached: false,
-    originalGoogle: window.google,
-};
+    const state = {
+        maps: [],
+        activeMap: null,
+        redrawTimer: null,
+        overlaysByLevel: {
+            14: new Map(),
+            17: new Map(),
+        },
+        listenersAttached: false,
+        originalGoogle: getPageWindow().google,
+    };
 
-function debug(...args) {
-    console.debug('[PGO S2 Grid]', ...args);
-}
-
-function isMapLike(obj) {
-    return !!obj &&
-        typeof obj.setCenter === 'function' &&
-        typeof obj.setZoom === 'function' &&
-        typeof obj.getCenter === 'function' &&
-        typeof obj.getZoom === 'function' &&
-        typeof obj.getBounds === 'function' &&
-        typeof obj.getDiv === 'function';
-}
-
-function registerMap(map, source) {
-    if (!isMapLike(map)) return map;
-
-    if (!state.maps.includes(map)) {
-        state.maps.push(map);
-        state.activeMap = map;
-        window.__pgoS2GridMap = map;
-
-        debug(`Captured map via ${source}`, map);
-        attachMapListeners(map);
-        scheduleRedraw();
+    function debug(...args) {
+        console.debug('[PGO S2 Grid]', ...args);
     }
 
-    return map;
-}
-
-function patchMapPrototype(MapCtor) {
-    if (!MapCtor?.prototype || MapCtor.prototype.__pgoS2GridPatched) return;
-
-    for (const method of [
-        'setCenter',
-        'setZoom',
-        'panTo',
-        'fitBounds',
-        'getCenter',
-        'getZoom',
-        'getBounds',
-        'getDiv',
-    ]) {
-        const original = MapCtor.prototype[method];
-        if (typeof original !== 'function') continue;
-
-        MapCtor.prototype[method] = function (...args) {
-            registerMap(this, `prototype.${method}`);
-            return original.apply(this, args);
-        };
-    }
-
-    MapCtor.prototype.__pgoS2GridPatched = true;
-}
-
-function wrapMapConstructor(MapCtor) {
-    if (!MapCtor || MapCtor.__pgoS2GridWrapped) return MapCtor;
-
-    patchMapPrototype(MapCtor);
-
-    function WrappedMap(...args) {
-        const map = Reflect.construct(MapCtor, args, new.target || WrappedMap);
-        registerMap(map, 'constructor');
-        return map;
-    }
-
-    Object.setPrototypeOf(WrappedMap, MapCtor);
-    WrappedMap.prototype = MapCtor.prototype;
-
-    for (const key of Reflect.ownKeys(MapCtor)) {
-        if (key === 'prototype') continue;
-
+    function getPageWindow() {
         try {
-            Object.defineProperty(
-                WrappedMap,
-                key,
-                Object.getOwnPropertyDescriptor(MapCtor, key)
-            );
+            if (typeof unsafeWindow !== 'undefined') return unsafeWindow;
         } catch (_) {}
+
+        return window;
     }
 
-    WrappedMap.__pgoS2GridWrapped = true;
-    return WrappedMap;
-}
+    function getPgoMapMods() {
+        const W = getPageWindow();
 
-function patchMapsObject(maps) {
-    if (!maps || maps.__pgoS2GridPatched) return;
+        if (W.__pgoMapMods?.version >= 1) {
+            return W.__pgoMapMods;
+        }
 
-    let mapValue = maps.Map;
+        const api = W.__pgoMapMods = {
+            version: 1,
+            maps: [],
+            activeMap: null,
+            callbacks: [],
+            hookInstalled: false,
 
-    Object.defineProperty(maps, 'Map', {
-        configurable: true,
-        enumerable: true,
-        get() {
-            return mapValue;
-        },
-        set(value) {
-            mapValue = wrapMapConstructor(value);
-        },
-    });
+            isMapLike(obj) {
+                return !!obj &&
+                    typeof obj.setCenter === 'function' &&
+                    typeof obj.setZoom === 'function' &&
+                    typeof obj.getCenter === 'function' &&
+                    typeof obj.getZoom === 'function' &&
+                    typeof obj.getDiv === 'function';
+            },
 
-    if (mapValue) maps.Map = mapValue;
+            registerMap(map, source = 'unknown') {
+                if (!api.isMapLike(map)) return map;
 
-    if (typeof maps.importLibrary === 'function' && !maps.importLibrary.__pgoS2GridImportPatched) {
-        const originalImportLibrary = maps.importLibrary.bind(maps);
+                if (!api.maps.includes(map)) {
+                    api.maps.push(map);
+                    api.activeMap = map;
+                    W.__pgoGoogleMap = map;
 
-        maps.importLibrary = async function (...args) {
-            const lib = await originalImportLibrary(...args);
+                    console.debug('[PGO MapMods] Captured map via', source, map);
 
-            if (args[0] === 'maps' && lib?.Map) {
-                lib.Map = wrapMapConstructor(lib.Map);
+                    for (const callback of [...api.callbacks]) {
+                        try {
+                            callback(map);
+                        } catch (err) {
+                            console.error('[PGO MapMods] Map callback failed:', err);
+                        }
+                    }
+
+                    try {
+                        W.dispatchEvent(new CustomEvent('pgo-mapmods:map-ready', {
+                            detail: { map, source },
+                        }));
+                    } catch (_) {}
+                }
+
+                return map;
+            },
+
+            getMap() {
+                return api.activeMap || W.__pgoGoogleMap || api.maps[0] || null;
+            },
+
+            whenMapReady(callback) {
+                const map = api.getMap();
+
+                if (map) {
+                    callback(map);
+                    return;
+                }
+
+                api.callbacks.push(callback);
+            },
+
+            installGoogleHook() {
+                if (api.hookInstalled) return;
+                api.hookInstalled = true;
+
+                function patchMapPrototype(MapCtor) {
+                    if (!MapCtor?.prototype || MapCtor.prototype.__pgoMapModsPatched) return;
+
+                    for (const method of [
+                        'setCenter',
+                        'setZoom',
+                        'panTo',
+                        'fitBounds',
+                        'getCenter',
+                        'getZoom',
+                        'getBounds',
+                        'getDiv',
+                    ]) {
+                        const original = MapCtor.prototype[method];
+                        if (typeof original !== 'function') continue;
+
+                        MapCtor.prototype[method] = function (...args) {
+                            api.registerMap(this, `prototype.${method}`);
+                            return original.apply(this, args);
+                        };
+                    }
+
+                    MapCtor.prototype.__pgoMapModsPatched = true;
+                }
+
+                function wrapMapConstructor(MapCtor) {
+                    if (!MapCtor) return MapCtor;
+
+                    // If another PGO plugin already wrapped it through this shared core,
+                    // do not wrap it again.
+                    if (MapCtor.__pgoMapModsWrapped) return MapCtor;
+
+                    patchMapPrototype(MapCtor);
+
+                    function WrappedMap(...args) {
+                        const map = Reflect.construct(MapCtor, args, new.target || WrappedMap);
+                        api.registerMap(map, 'constructor');
+                        return map;
+                    }
+
+                    Object.setPrototypeOf(WrappedMap, MapCtor);
+                    WrappedMap.prototype = MapCtor.prototype;
+
+                    for (const key of Reflect.ownKeys(MapCtor)) {
+                        if (key === 'prototype') continue;
+
+                        try {
+                            Object.defineProperty(
+                                WrappedMap,
+                                key,
+                                Object.getOwnPropertyDescriptor(MapCtor, key)
+                            );
+                        } catch (_) {}
+                    }
+
+                    WrappedMap.__pgoMapModsWrapped = true;
+                    WrappedMap.__pgoMapModsOriginal = MapCtor;
+
+                    return WrappedMap;
+                }
+
+                function patchMapsObject(maps) {
+                    if (!maps || maps.__pgoMapModsPatched) return;
+
+                    let mapValue = maps.Map;
+
+                    Object.defineProperty(maps, 'Map', {
+                        configurable: true,
+                        enumerable: true,
+                        get() {
+                            return mapValue;
+                        },
+                        set(value) {
+                            mapValue = wrapMapConstructor(value);
+                        },
+                    });
+
+                    if (mapValue) {
+                        maps.Map = mapValue;
+                    }
+
+                    if (typeof maps.importLibrary === 'function' && !maps.importLibrary.__pgoMapModsPatched) {
+                        const originalImportLibrary = maps.importLibrary.bind(maps);
+
+                        maps.importLibrary = async function (...args) {
+                            const lib = await originalImportLibrary(...args);
+
+                            if (args[0] === 'maps' && lib?.Map) {
+                                lib.Map = wrapMapConstructor(lib.Map);
+                            }
+
+                            return lib;
+                        };
+
+                        maps.importLibrary.__pgoMapModsPatched = true;
+                    }
+
+                    maps.__pgoMapModsPatched = true;
+                }
+
+                function patchGoogleObject(google) {
+                    if (!google || google.__pgoMapModsPatched) return;
+
+                    let mapsValue = google.maps;
+
+                    Object.defineProperty(google, 'maps', {
+                        configurable: true,
+                        enumerable: true,
+                        get() {
+                            return mapsValue;
+                        },
+                        set(value) {
+                            mapsValue = value;
+                            patchMapsObject(mapsValue);
+                        },
+                    });
+
+                    if (mapsValue) {
+                        google.maps = mapsValue;
+                    }
+
+                    google.__pgoMapModsPatched = true;
+                }
+
+                let googleValue = W.google;
+
+                Object.defineProperty(W, 'google', {
+                    configurable: true,
+                    enumerable: true,
+                    get() {
+                        return googleValue;
+                    },
+                    set(value) {
+                        googleValue = value;
+                        patchGoogleObject(googleValue);
+                    },
+                });
+
+                if (googleValue) {
+                    W.google = googleValue;
+                }
+
+                console.debug('[PGO MapMods] Installed shared Google Maps hook.');
+            },
+        };
+
+        api.installGoogleHook();
+
+        return api;
+    }
+
+    function attachMapListeners(map) {
+        if (state.listenersAttached) return;
+
+        const W = getPageWindow();
+
+        if (!W.google?.maps?.event) return;
+
+        state.listenersAttached = true;
+
+        W.google.maps.event.addListener(map, 'idle', scheduleRedraw);
+        W.google.maps.event.addListener(map, 'zoom_changed', scheduleRedraw);
+        W.google.maps.event.addListener(map, 'bounds_changed', scheduleRedraw);
+
+        debug('Attached map listeners.');
+    }
+
+    function scheduleRedraw() {
+        clearTimeout(state.redrawTimer);
+
+        state.redrawTimer = setTimeout(() => {
+            redrawAllGrids().catch(err => {
+                console.error('[PGO S2 Grid]', err);
+            });
+        }, CONFIG.redrawDebounceMs);
+    }
+
+    let PgoMapMods = null;
+
+    function getActiveMap() {
+        return PgoMapMods?.getMap?.() || null;
+    }
+
+    function boundsToBox(bounds) {
+        const ne = bounds.getNorthEast();
+        const sw = bounds.getSouthWest();
+
+        let north = ne.lat();
+        let south = sw.lat();
+        let east = ne.lng();
+        let west = sw.lng();
+
+        const latPad = Math.max(0.0001, Math.abs(north - south) * CONFIG.viewportPaddingRatio);
+        let lngSpan = east - west;
+
+        // Normalise antimeridian-crossing bounds.
+        if (lngSpan < 0) lngSpan += 360;
+
+        const lngPad = Math.max(0.0001, lngSpan * CONFIG.viewportPaddingRatio);
+
+        north = Math.min(90, north + latPad);
+        south = Math.max(-90, south - latPad);
+        east = wrapLng(east + lngPad);
+        west = wrapLng(west - lngPad);
+
+        return { north, south, east, west };
+    }
+
+    function wrapLng(lng) {
+        return ((((lng + 180) % 360) + 360) % 360) - 180;
+    }
+
+    function lngInBox(lng, box) {
+        lng = wrapLng(lng);
+
+        if (box.west <= box.east) {
+            return lng >= box.west && lng <= box.east;
+        }
+
+        // Crosses antimeridian.
+        return lng >= box.west || lng <= box.east;
+    }
+
+    function pointInBox(latLng, box) {
+        return latLng.lat >= box.south &&
+            latLng.lat <= box.north &&
+            lngInBox(latLng.lng, box);
+    }
+
+    function cellIntersectsBox(cell, box) {
+        const corners = cell.getCornerLatLngs();
+        const center = cell.getLatLng();
+
+        if (pointInBox(center, box)) return true;
+        if (corners.some(corner => pointInBox(corner, box))) return true;
+
+        const cellNorth = Math.max(...corners.map(c => c.lat));
+        const cellSouth = Math.min(...corners.map(c => c.lat));
+
+        if (cellSouth > box.north || cellNorth < box.south) return false;
+
+        // For ordinary viewports, this is enough. Antimeridian cases are rare but
+        // still mostly handled by testing corners/center above.
+        if (box.west <= box.east) {
+            const lngs = corners.map(c => wrapLng(c.lng));
+            const cellWest = Math.min(...lngs);
+            const cellEast = Math.max(...lngs);
+
+            return !(cellEast < box.west || cellWest > box.east);
+        }
+
+        return true;
+    }
+
+    function cellToGooglePath(cell) {
+        return cell.getCornerLatLngs().map(corner => ({
+            lat: corner.lat,
+            lng: corner.lng,
+        }));
+    }
+
+    function makeCellKey(cell) {
+        return `${cell.level}:${cell.toHilbertQuadkey()}`;
+    }
+
+    function getVisibleCells(level, box, maxCells) {
+        const map = getActiveMap();
+        const center = map.getCenter();
+
+        const start = S2.S2Cell.FromLatLng({
+            lat: center.lat(),
+            lng: center.lng(),
+        }, level);
+
+        const queue = [start];
+        const queued = new Set([makeCellKey(start)]);
+        const visible = [];
+
+        while (queue.length && visible.length < maxCells) {
+            const cell = queue.shift();
+            const key = makeCellKey(cell);
+
+            if (!cellIntersectsBox(cell, box)) continue;
+
+            visible.push(cell);
+
+            for (const neighbor of cell.getNeighbors()) {
+                const neighborKey = makeCellKey(neighbor);
+
+                if (queued.has(neighborKey)) continue;
+
+                queued.add(neighborKey);
+                queue.push(neighbor);
+            }
+        }
+
+        if (queue.length) {
+            console.warn(
+                `[PGO S2 Grid] Hit max cell limit for L${level}. ` +
+                `Visible=${visible.length}, Max=${maxCells}. Zoom in for full grid.`
+            );
+        }
+
+        return visible;
+    }
+
+    function drawLevelGrid(levelConfig, box) {
+        const map = getActiveMap();
+        const W = getPageWindow();
+        const maps = W.google?.maps;
+
+        if (!map || !maps?.Polygon) return;
+
+        const level = levelConfig.level;
+        const existing = state.overlaysByLevel[level];
+        const cells = getVisibleCells(level, box, levelConfig.maxCells);
+        const wantedKeys = new Set();
+
+        for (const cell of cells) {
+            const key = makeCellKey(cell);
+            wantedKeys.add(key);
+
+            const path = cellToGooglePath(cell);
+
+            if (existing.has(key)) {
+                existing.get(key).setPath(path);
+                continue;
             }
 
-            return lib;
-        };
+            const polygon = new maps.Polygon({
+                paths: path,
+                map,
+                clickable: false,
+                geodesic: true,
+                fillOpacity: 0,
+                strokeColor: levelConfig.strokeColor,
+                strokeOpacity: levelConfig.strokeOpacity,
+                strokeWeight: levelConfig.strokeWeight,
+                zIndex: levelConfig.zIndex,
+            });
 
-        maps.importLibrary.__pgoS2GridImportPatched = true;
-    }
+            existing.set(key, polygon);
+        }
 
-    maps.__pgoS2GridPatched = true;
-    debug('Patched google.maps.');
-}
-
-function patchGoogleObject(google) {
-    if (!google || google.__pgoS2GridPatched) return;
-
-    let mapsValue = google.maps;
-
-    Object.defineProperty(google, 'maps', {
-        configurable: true,
-        enumerable: true,
-        get() {
-            return mapsValue;
-        },
-        set(value) {
-            mapsValue = value;
-            patchMapsObject(mapsValue);
-        },
-    });
-
-    if (mapsValue) google.maps = mapsValue;
-
-    google.__pgoS2GridPatched = true;
-    debug('Patched window.google.');
-}
-
-function installGoogleTrap() {
-    let googleValue = state.originalGoogle;
-
-    Object.defineProperty(window, 'google', {
-        configurable: true,
-        enumerable: true,
-        get() {
-            return googleValue;
-        },
-        set(value) {
-            googleValue = value;
-            patchGoogleObject(googleValue);
-        },
-    });
-
-    if (googleValue) window.google = googleValue;
-
-    debug('Installed Google Maps trap.');
-}
-
-function attachMapListeners(map) {
-    if (state.listenersAttached) return;
-    if (!window.google?.maps?.event) return;
-
-    state.listenersAttached = true;
-
-    google.maps.event.addListener(map, 'idle', scheduleRedraw);
-    google.maps.event.addListener(map, 'zoom_changed', scheduleRedraw);
-    google.maps.event.addListener(map, 'bounds_changed', scheduleRedraw);
-
-    debug('Attached map listeners.');
-}
-
-function scheduleRedraw() {
-    clearTimeout(state.redrawTimer);
-
-    state.redrawTimer = setTimeout(() => {
-        redrawAllGrids().catch(err => {
-            console.error('[PGO S2 Grid]', err);
-        });
-    }, CONFIG.redrawDebounceMs);
-}
-
-function getActiveMap() {
-    return state.activeMap || window.__pgoS2GridMap || state.maps[0] || null;
-}
-
-function boundsToBox(bounds) {
-    const ne = bounds.getNorthEast();
-    const sw = bounds.getSouthWest();
-
-    let north = ne.lat();
-    let south = sw.lat();
-    let east = ne.lng();
-    let west = sw.lng();
-
-    const latPad = Math.max(0.0001, Math.abs(north - south) * CONFIG.viewportPaddingRatio);
-    let lngSpan = east - west;
-
-    // Normalise antimeridian-crossing bounds.
-    if (lngSpan < 0) lngSpan += 360;
-
-    const lngPad = Math.max(0.0001, lngSpan * CONFIG.viewportPaddingRatio);
-
-    north = Math.min(90, north + latPad);
-    south = Math.max(-90, south - latPad);
-    east = wrapLng(east + lngPad);
-    west = wrapLng(west - lngPad);
-
-    return { north, south, east, west };
-}
-
-function wrapLng(lng) {
-    return ((((lng + 180) % 360) + 360) % 360) - 180;
-}
-
-function lngInBox(lng, box) {
-    lng = wrapLng(lng);
-
-    if (box.west <= box.east) {
-        return lng >= box.west && lng <= box.east;
-    }
-
-    // Crosses antimeridian.
-    return lng >= box.west || lng <= box.east;
-}
-
-function pointInBox(latLng, box) {
-    return latLng.lat >= box.south &&
-        latLng.lat <= box.north &&
-        lngInBox(latLng.lng, box);
-}
-
-function cellIntersectsBox(cell, box) {
-    const corners = cell.getCornerLatLngs();
-    const center = cell.getLatLng();
-
-    if (pointInBox(center, box)) return true;
-    if (corners.some(corner => pointInBox(corner, box))) return true;
-
-    const cellNorth = Math.max(...corners.map(c => c.lat));
-    const cellSouth = Math.min(...corners.map(c => c.lat));
-
-    if (cellSouth > box.north || cellNorth < box.south) return false;
-
-    // For ordinary viewports, this is enough. Antimeridian cases are rare but
-    // still mostly handled by testing corners/center above.
-    if (box.west <= box.east) {
-        const lngs = corners.map(c => wrapLng(c.lng));
-        const cellWest = Math.min(...lngs);
-        const cellEast = Math.max(...lngs);
-
-        return !(cellEast < box.west || cellWest > box.east);
-    }
-
-    return true;
-}
-
-function cellToGooglePath(cell) {
-    return cell.getCornerLatLngs().map(corner => ({
-        lat: corner.lat,
-        lng: corner.lng,
-    }));
-}
-
-function makeCellKey(cell) {
-    return `${cell.level}:${cell.toHilbertQuadkey()}`;
-}
-
-function getVisibleCells(level, box, maxCells) {
-    const map = getActiveMap();
-    const center = map.getCenter();
-
-    const start = S2.S2Cell.FromLatLng({
-        lat: center.lat(),
-        lng: center.lng(),
-    }, level);
-
-    const queue = [start];
-    const queued = new Set([makeCellKey(start)]);
-    const visible = [];
-
-    while (queue.length && visible.length < maxCells) {
-        const cell = queue.shift();
-        const key = makeCellKey(cell);
-
-        if (!cellIntersectsBox(cell, box)) continue;
-
-        visible.push(cell);
-
-        for (const neighbor of cell.getNeighbors()) {
-            const neighborKey = makeCellKey(neighbor);
-
-            if (queued.has(neighborKey)) continue;
-
-            queued.add(neighborKey);
-            queue.push(neighbor);
+        for (const [key, polygon] of existing.entries()) {
+            if (!wantedKeys.has(key)) {
+                polygon.setMap(null);
+                existing.delete(key);
+            }
         }
     }
 
-    if (queue.length) {
-        console.warn(
-            `[PGO S2 Grid] Hit max cell limit for L${level}. ` +
-            `Visible=${visible.length}, Max=${maxCells}. Zoom in for full grid.`
-        );
-    }
+    function clearLevelGrid(level) {
+        const existing = state.overlaysByLevel[level];
 
-    return visible;
-}
-
-function drawLevelGrid(levelConfig, box) {
-    const map = getActiveMap();
-    const maps = window.google?.maps;
-
-    if (!map || !maps?.Polygon) return;
-
-    const level = levelConfig.level;
-    const existing = state.overlaysByLevel[level];
-    const cells = getVisibleCells(level, box, levelConfig.maxCells);
-    const wantedKeys = new Set();
-
-    for (const cell of cells) {
-        const key = makeCellKey(cell);
-        wantedKeys.add(key);
-
-        const path = cellToGooglePath(cell);
-
-        if (existing.has(key)) {
-            existing.get(key).setPath(path);
-            continue;
-        }
-
-        const polygon = new maps.Polygon({
-            paths: path,
-            map,
-            clickable: false,
-            geodesic: true,
-            fillOpacity: 0,
-            strokeColor: levelConfig.strokeColor,
-            strokeOpacity: levelConfig.strokeOpacity,
-            strokeWeight: levelConfig.strokeWeight,
-            zIndex: levelConfig.zIndex,
-        });
-
-        existing.set(key, polygon);
-    }
-
-    for (const [key, polygon] of existing.entries()) {
-        if (!wantedKeys.has(key)) {
+        for (const polygon of existing.values()) {
             polygon.setMap(null);
-            existing.delete(key);
+        }
+
+        existing.clear();
+    }
+
+    async function redrawAllGrids() {
+        const map = getActiveMap();
+
+        if (!map) return;
+
+        const bounds = map.getBounds();
+        const zoom = map.getZoom();
+
+        if (!bounds || typeof zoom !== 'number') return;
+
+        const box = boundsToBox(bounds);
+
+        // Draw L17 first, lower zIndex.
+        if (zoom >= CONFIG.L17.minZoom) {
+            drawLevelGrid(CONFIG.L17, box);
+        } else {
+            clearLevelGrid(17);
+        }
+
+        // Draw L14 second, higher zIndex and thicker lines.
+        if (zoom >= CONFIG.L14.minZoom) {
+            drawLevelGrid(CONFIG.L14, box);
+        } else {
+            clearLevelGrid(14);
         }
     }
-}
-
-function clearLevelGrid(level) {
-    const existing = state.overlaysByLevel[level];
-
-    for (const polygon of existing.values()) {
-        polygon.setMap(null);
-    }
-
-    existing.clear();
-}
-
-async function redrawAllGrids() {
-    const map = getActiveMap();
-
-    if (!map) return;
-
-    const bounds = map.getBounds();
-    const zoom = map.getZoom();
-
-    if (!bounds || typeof zoom !== 'number') return;
-
-    const box = boundsToBox(bounds);
-
-    // Draw L17 first, lower zIndex.
-    if (zoom >= CONFIG.L17.minZoom) {
-        drawLevelGrid(CONFIG.L17, box);
-    } else {
-        clearLevelGrid(17);
-    }
-
-    // Draw L14 second, higher zIndex and thicker lines.
-    if (zoom >= CONFIG.L14.minZoom) {
-        drawLevelGrid(CONFIG.L14, box);
-    } else {
-        clearLevelGrid(14);
-    }
-}
-
-installGoogleTrap();
 
     // -----------------------------
     // S2 library
@@ -1045,5 +1116,27 @@ installGoogleTrap();
 
     })('undefined' !== typeof module ? module.exports : window);
 
+    // -----------------------------
+    // Bootstrap
+    // -----------------------------
+
+    function bootstrapS2Grid() {
+        PgoMapMods = getPgoMapMods();
+
+        PgoMapMods.whenMapReady(map => {
+            debug('Map ready for S2 grid:', map);
+            attachMapListeners(map);
+            scheduleRedraw();
+        });
+
+        const existingMap = PgoMapMods.getMap();
+        if (existingMap) {
+            debug('Existing shared map found for S2 grid:', existingMap);
+            attachMapListeners(existingMap);
+            scheduleRedraw();
+        }
+    }
+
+    bootstrapS2Grid();
 
 })();
