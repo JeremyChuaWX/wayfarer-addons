@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Pokémon Go Map Search
-// @version      0.1.0
+// @version      0.2.0
 // @description  Improves the functionality of the Pokemon Go Map search bar
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/pokemon-go-map-search.user.js
@@ -43,15 +43,237 @@
     };
 
     const state = {
-        maps: [],
-        activeMap: null,
         marker: null,
-        originalGoogle: W.google,
         uiInjected: false,
     };
 
     function debug(...args) {
-        console.debug('[PGO Better Search]', ...args);
+        console.debug('[PGO Map Search]', ...args);
+    }
+
+    function getPageWindow() {
+        try {
+            if (typeof unsafeWindow !== 'undefined') return unsafeWindow;
+        } catch (_) {}
+
+        return window;
+    }
+
+    function getPgoMapMods() {
+        const W = getPageWindow();
+
+        if (W.__pgoMapMods?.version >= 1) {
+            return W.__pgoMapMods;
+        }
+
+        const api = W.__pgoMapMods = {
+            version: 1,
+            maps: [],
+            activeMap: null,
+            callbacks: [],
+            hookInstalled: false,
+
+            isMapLike(obj) {
+                return !!obj &&
+                    typeof obj.setCenter === 'function' &&
+                    typeof obj.setZoom === 'function' &&
+                    typeof obj.getCenter === 'function' &&
+                    typeof obj.getZoom === 'function' &&
+                    typeof obj.getDiv === 'function';
+            },
+
+            registerMap(map, source = 'unknown') {
+                if (!api.isMapLike(map)) return map;
+
+                if (!api.maps.includes(map)) {
+                    api.maps.push(map);
+                    api.activeMap = map;
+                    W.__pgoGoogleMap = map;
+
+                    for (const callback of [...api.callbacks]) {
+                        try {
+                            callback(map);
+                        } catch (err) {
+                            console.error('[PGO MapMods] Map callback failed:', err);
+                        }
+                    }
+
+                    try {
+                        W.dispatchEvent(new CustomEvent('pgo-mapmods:map-ready', {
+                            detail: { map, source },
+                        }));
+                    } catch (_) {}
+                }
+
+                return map;
+            },
+
+            getMap() {
+                return api.activeMap || W.__pgoGoogleMap || api.maps[0] || null;
+            },
+
+            whenMapReady(callback) {
+                const map = api.getMap();
+
+                if (map) {
+                    callback(map);
+                    return;
+                }
+
+                api.callbacks.push(callback);
+            },
+
+            installGoogleHook() {
+                if (api.hookInstalled) return;
+                api.hookInstalled = true;
+
+                function patchMapPrototype(MapCtor) {
+                    if (!MapCtor?.prototype || MapCtor.prototype.__pgoMapModsPatched) return;
+
+                    for (const method of [
+                        'setCenter',
+                        'setZoom',
+                        'panTo',
+                        'fitBounds',
+                        'getCenter',
+                        'getZoom',
+                        'getBounds',
+                        'getDiv',
+                    ]) {
+                        const original = MapCtor.prototype[method];
+                        if (typeof original !== 'function') continue;
+
+                        MapCtor.prototype[method] = function (...args) {
+                            api.registerMap(this, `prototype.${method}`);
+                            return original.apply(this, args);
+                        };
+                    }
+
+                    MapCtor.prototype.__pgoMapModsPatched = true;
+                }
+
+                function wrapMapConstructor(MapCtor) {
+                    if (!MapCtor) return MapCtor;
+
+                    // If another PGO plugin already wrapped it through this shared core,
+                    // do not wrap it again.
+                    if (MapCtor.__pgoMapModsWrapped) return MapCtor;
+
+                    patchMapPrototype(MapCtor);
+
+                    function WrappedMap(...args) {
+                        const map = Reflect.construct(MapCtor, args, new.target || WrappedMap);
+                        api.registerMap(map, 'constructor');
+                        return map;
+                    }
+
+                    Object.setPrototypeOf(WrappedMap, MapCtor);
+                    WrappedMap.prototype = MapCtor.prototype;
+
+                    for (const key of Reflect.ownKeys(MapCtor)) {
+                        if (key === 'prototype') continue;
+
+                        try {
+                            Object.defineProperty(
+                                WrappedMap,
+                                key,
+                                Object.getOwnPropertyDescriptor(MapCtor, key)
+                            );
+                        } catch (_) {}
+                    }
+
+                    WrappedMap.__pgoMapModsWrapped = true;
+                    WrappedMap.__pgoMapModsOriginal = MapCtor;
+
+                    return WrappedMap;
+                }
+
+                function patchMapsObject(maps) {
+                    if (!maps || maps.__pgoMapModsPatched) return;
+
+                    let mapValue = maps.Map;
+
+                    Object.defineProperty(maps, 'Map', {
+                        configurable: true,
+                        enumerable: true,
+                        get() {
+                            return mapValue;
+                        },
+                        set(value) {
+                            mapValue = wrapMapConstructor(value);
+                        },
+                    });
+
+                    if (mapValue) {
+                        maps.Map = mapValue;
+                    }
+
+                    if (typeof maps.importLibrary === 'function' && !maps.importLibrary.__pgoMapModsPatched) {
+                        const originalImportLibrary = maps.importLibrary.bind(maps);
+
+                        maps.importLibrary = async function (...args) {
+                            const lib = await originalImportLibrary(...args);
+
+                            if (args[0] === 'maps' && lib?.Map) {
+                                lib.Map = wrapMapConstructor(lib.Map);
+                            }
+
+                            return lib;
+                        };
+
+                        maps.importLibrary.__pgoMapModsPatched = true;
+                    }
+
+                    maps.__pgoMapModsPatched = true;
+                }
+
+                function patchGoogleObject(google) {
+                    if (!google || google.__pgoMapModsPatched) return;
+
+                    let mapsValue = google.maps;
+
+                    Object.defineProperty(google, 'maps', {
+                        configurable: true,
+                        enumerable: true,
+                        get() {
+                            return mapsValue;
+                        },
+                        set(value) {
+                            mapsValue = value;
+                            patchMapsObject(mapsValue);
+                        },
+                    });
+
+                    if (mapsValue) {
+                        google.maps = mapsValue;
+                    }
+
+                    google.__pgoMapModsPatched = true;
+                }
+
+                let googleValue = W.google;
+
+                Object.defineProperty(W, 'google', {
+                    configurable: true,
+                    enumerable: true,
+                    get() {
+                        return googleValue;
+                    },
+                    set(value) {
+                        googleValue = value;
+                        patchGoogleObject(googleValue);
+                    },
+                });
+
+                if (googleValue) {
+                    W.google = googleValue;
+                }
+            },
+        };
+
+        api.installGoogleHook();
+
+        return api;
     }
 
     // ---------------------------------------------------------------------------
@@ -193,7 +415,7 @@
             }
         }
 
-        console.warn('[PGO Better Search] Geocoder errors:', errors);
+        console.warn('[PGO Map Search] Geocoder errors:', errors);
         throw new Error(`Could not find "${query}".`);
     }
 
@@ -201,161 +423,25 @@
     // Google Maps capture
     // ---------------------------------------------------------------------------
 
-    function isMapLike(obj) {
-        return !!obj &&
-            typeof obj.setCenter === 'function' &&
-            typeof obj.setZoom === 'function' &&
-            typeof obj.getCenter === 'function' &&
-            typeof obj.getZoom === 'function' &&
-            typeof obj.getDiv === 'function';
-    }
-
-    function registerMap(map, source) {
-        if (!isMapLike(map)) return map;
-
-        if (!state.maps.includes(map)) {
-            state.maps.push(map);
-            state.activeMap = map;
-            W.__pgoBetterSearchMap = map;
-            debug(`Captured map via ${source}`, map);
-        }
-
-        return map;
-    }
-
-    function patchMapPrototype(MapCtor) {
-        if (!MapCtor?.prototype || MapCtor.prototype.__pgoBetterSearchPatched) return;
-
-        for (const method of ['setCenter', 'setZoom', 'panTo', 'fitBounds', 'getCenter', 'getZoom', 'getDiv']) {
-            const original = MapCtor.prototype[method];
-            if (typeof original !== 'function') continue;
-
-            MapCtor.prototype[method] = function(...args) {
-                registerMap(this, `prototype.${method}`);
-                return original.apply(this, args);
-            };
-        }
-
-        MapCtor.prototype.__pgoBetterSearchPatched = true;
-    }
-
-    function wrapMapConstructor(MapCtor) {
-        if (!MapCtor || MapCtor.__pgoBetterSearchWrapped) return MapCtor;
-
-        patchMapPrototype(MapCtor);
-
-        function WrappedMap(...args) {
-            const map = Reflect.construct(MapCtor, args, new.target || WrappedMap);
-            registerMap(map, 'constructor');
-            return map;
-        }
-
-        Object.setPrototypeOf(WrappedMap, MapCtor);
-        WrappedMap.prototype = MapCtor.prototype;
-
-        WrappedMap.__pgoBetterSearchWrapped = true;
-        return WrappedMap;
-    }
-
-    function patchMapsObject(maps) {
-        if (!maps || maps.__pgoBetterSearchPatched) return;
-
-        let mapValue = maps.Map;
-
-        Object.defineProperty(maps, 'Map', {
-            configurable: true,
-            enumerable: true,
-            get() {
-                return mapValue;
-            },
-            set(value) {
-                mapValue = wrapMapConstructor(value);
-            },
-        });
-
-        if (mapValue) maps.Map = mapValue;
-
-        if (typeof maps.importLibrary === 'function' && !maps.importLibrary.__pgoBetterSearchPatched) {
-            const originalImportLibrary = maps.importLibrary.bind(maps);
-
-            maps.importLibrary = async function(...args) {
-                const lib = await originalImportLibrary(...args);
-
-                if (args[0] === 'maps' && lib?.Map) {
-                    lib.Map = wrapMapConstructor(lib.Map);
-                }
-
-                return lib;
-            };
-
-            maps.importLibrary.__pgoBetterSearchPatched = true;
-        }
-
-        maps.__pgoBetterSearchPatched = true;
-        debug('Patched google.maps.');
-    }
-
-    function patchGoogleObject(google) {
-        if (!google || google.__pgoBetterSearchPatched) return;
-
-        let mapsValue = google.maps;
-
-        Object.defineProperty(google, 'maps', {
-            configurable: true,
-            enumerable: true,
-            get() {
-                return mapsValue;
-            },
-            set(value) {
-                mapsValue = value;
-                patchMapsObject(mapsValue);
-            },
-        });
-
-        if (mapsValue) google.maps = mapsValue;
-
-        google.__pgoBetterSearchPatched = true;
-        debug('Patched window.google.');
-    }
-
-    function installGoogleTrap() {
-        let googleValue = state.originalGoogle;
-
-        Object.defineProperty(W, 'google', {
-            configurable: true,
-            enumerable: true,
-            get() {
-                return googleValue;
-            },
-            set(value) {
-                googleValue = value;
-                patchGoogleObject(googleValue);
-            },
-        });
-
-        if (googleValue) W.google = googleValue;
-
-        debug('Installed google trap inside gamemap iframe.');
-    }
+    const PgoMapMods = getPgoMapMods();
 
     function waitForMap(timeoutMs = 20000) {
         return new Promise((resolve, reject) => {
-            const started = Date.now();
+            const existing = PgoMapMods.getMap();
 
-            const timer = setInterval(() => {
-                const map = state.activeMap || W.__pgoBetterSearchMap;
+            if (existing) {
+                resolve(existing);
+                return;
+            }
 
-                if (map && isMapLike(map)) {
-                    clearInterval(timer);
-                    resolve(map);
-                    return;
-                }
+            const timer = setTimeout(() => {
+                reject(new Error('Could not find the Google Maps object.'));
+            }, timeoutMs);
 
-                if (Date.now() - started > timeoutMs) {
-                    clearInterval(timer);
-                    reject(new Error('Could not find the Google Maps object.'));
-                }
-            }, 100);
+            PgoMapMods.whenMapReady(map => {
+                clearTimeout(timer);
+                resolve(map);
+            });
         });
     }
 
@@ -708,7 +794,7 @@
                         await moveMapTo(result.lat, result.lng, CONFIG.searchZoom, result.label);
                         setStatus('');
                     } catch (err) {
-                        console.error('[PGO Better Search]', err);
+                        console.error('[PGO Map Search]', err);
                         setStatus(err.message || String(err), true);
                     }
                 });
@@ -757,7 +843,7 @@
             } catch (err) {
                 if (requestId !== autocompleteRequestId) return;
 
-                console.warn('[PGO Better Search] Autocomplete failed:', err);
+                console.warn('[PGO Map Search] Autocomplete failed:', err);
                 hideSuggestions();
             }
         }
@@ -786,9 +872,8 @@
                 // Hide status after success.
                 setStatus('');
 
-                console.debug('[PGO Better Search] Search result:', msg);
             } catch (err) {
-                console.error('[PGO Better Search]', err);
+                console.error('[PGO Map Search]', err);
                 setStatus(err.message || String(err), true);
             }
         }
@@ -826,7 +911,7 @@
                     moveMapTo(selected.lat, selected.lng, CONFIG.searchZoom, selected.label)
                         .then(() => setStatus(''))
                         .catch(err => {
-                        console.error('[PGO Better Search]', err);
+                        console.error('[PGO Map Search]', err);
                         setStatus(err.message || String(err), true);
                     });
 
@@ -948,7 +1033,7 @@
 
         const toolbarRow = findToolbarRowFromLocationButton(locationButton);
         if (!toolbarRow) {
-            console.warn('[PGO Better Search] Could not identify toolbar row from icons.');
+            console.warn('[PGO Map Search] Could not identify toolbar row from icons.');
             return null;
         }
 
@@ -973,8 +1058,6 @@
             existingWrap.classList.remove('pgo-floating-wrapper');
             existingWrap.querySelector('#pgo-better-searchbox')?.classList.remove('pgo-floating-fallback');
 
-            console.debug('[PGO Better Search] Replacing slot:', slot);
-
             slot.replaceWith(existingWrap);
 
             state.uiInjected = true;
@@ -987,8 +1070,6 @@
         const { wrap, searchBox } = buildSearchUI();
 
         if (slot) {
-            console.debug('[PGO Better Search] Replacing slot:', slot);
-
             slot.replaceWith(wrap);
 
             state.uiInjected = true;
@@ -1016,8 +1097,6 @@
 
         injectSearchUI();
     }
-
-    installGoogleTrap();
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', startObservers, {
