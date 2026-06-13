@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pokémon Go Map Copy Coordinates
-// @version      0.1.0
-// @description  Adds coordinates to Pokemon Go Map render card
+// @version      0.1.1
+// @description  Adds coordinates to Pokemon Go Map preview cards
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/pokemon-go-map-card-coords.user.js
 // @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/pokemon-go-map-card-coords.user.js
@@ -154,8 +154,6 @@
 
         state.lastObjects.unshift(stored);
         state.lastObjects = state.lastObjects.slice(0, 20);
-
-        debug('Stored map object coordinates:', stored);
     }
 
     function processGraphQLJson(json) {
@@ -210,7 +208,6 @@
         };
 
         window.fetch.__pgoCardCoordsPatched = true;
-        debug('Patched fetch.');
     }
 
     function patchXMLHttpRequest() {
@@ -246,7 +243,6 @@
         };
 
         window.XMLHttpRequest.prototype.__pgoCardCoordsPatched = true;
-        debug('Patched XMLHttpRequest.');
     }
 
     // -----------------------------
@@ -476,8 +472,6 @@
             if (coordEl.parentElement !== titleRow.parentElement || coordEl.previousElementSibling !== titleRow) {
                 titleRow.insertAdjacentElement('afterend', coordEl);
             }
-
-            debug('Inserted/updated coordinates under title:', payload.coordText);
             return;
         }
 
@@ -485,8 +479,6 @@
             if (!detailsContainer.contains(coordEl)) {
                 detailsContainer.prepend(coordEl);
             }
-
-            debug('Inserted/updated coordinates in details container:', payload.coordText);
             return;
         }
 
