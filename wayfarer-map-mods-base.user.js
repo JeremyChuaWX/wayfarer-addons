@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.9.0
+// @version      3.10.0
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -29,6 +29,7 @@
 // <https://gitlab.com/Tntnnbltn/wayfarer-addons/-/blob/main/LICENSE>
 // If not, see <https://www.gnu.org/licenses/>.
 
+/* eslint-disable no-multi-spaces */
 
 (function() {
     'use strict';
@@ -47,6 +48,12 @@
     const LOWZOOM_GCS_MAX_ZOOM = GCS_MIN_ZOOM - 1;
     const NORMAL_GCS_CELL_LEVEL = 14;
     const POWER_SPOT_RING_MIN_ZOOM = 18;
+
+    // ----- Radius for retrieving POIs -----
+    const RADIUS_FOR_LIVE_POIS_API = 350;
+    const POI_MOVEMENT_THRESHOLD = RADIUS_FOR_LIVE_POIS_API * 0.20;
+    const SUBMIT_RADIUS_GCS_SOURCE_KIND = "submit-radius-gcs";
+    const SUBMIT_RADIUS_GCS_PADDING_METERS = 25;
 
     // ----- URLs and API -----
     const SUBMIT_ROUTE = "/new/submit/new";
@@ -125,10 +132,6 @@
     let routeChangeTimer = null;
     let submitIdleListener = null;
 
-    // ----- Radius for retrieving POIs -----
-    let radius = 350;
-    let poiMovementThreshold = radius * 0.25;
-
     // ----- Radius for submitting POIs -----
     let submitRadius = 10000;
 
@@ -166,12 +169,17 @@
     let DraftMarkerLabelOverlay = null;
 
     // ----- Select Wayspot after deep link or search -----
+    const DEEP_LINK_REASSERT_DELAYS_MS = [0, 250, 750, 1500, 3000, 5000];
+    const DEEP_LINK_TOLERANCE_METRES = 10;
+
     let deepLinkTarget = null;
     let pendingSelectLatLng = null;
     let pendingSelect = false;
     let skipRestoreMapViewForThisLoad = false;
     let pendingSelectSourcesNeeded = null; // Set("live","gcs")
     let pendingSelectSourcesSeen = null;   // Set("live","gcs")
+    let deepLinkReassertTimers = [];
+    let deepLinkStartedAt = 0;
 
     // ----- Observers & watchers -----
     let latLngObserver = null;
@@ -2008,13 +2016,16 @@
         for (const p of pois) {
             const srcLabel = getWayspotSourceLabel(p);
 
+            const lat = (typeof p.lat === "number") ? p.lat : Number(p.lat);
+            const lng = (typeof p.lng === "number") ? p.lng : Number(p.lng);
+
             rows.push([
                 p.guid || "",
                 p.title || "",
                 p.description || "",
                 p.address || "",
-                (typeof p.lat === "number") ? p.lat : (p.lat || ""),
-                (typeof p.lng === "number") ? p.lng : (p.lng || ""),
+                Number.isFinite(lat) ? lat : (p.lat || ""),
+                Number.isFinite(lng) ? lng : (p.lng || ""),
                 p.imageUrl || "",
                 srcLabel,
                 p.pgoEntity,
@@ -5397,7 +5408,6 @@
     (() => {
         try {
             patchMissingAddressStringsOnLoad({ throttleMs: 5000 }).then((res) => {
-                console.log("[WFMM - Base] Address patch result:", res);
             });
         } catch (e) {
             console.warn("[WFMM - Base] Address patch: failed to start:", e);
@@ -7652,7 +7662,7 @@
         // Defaults to 25% of POI radius (i.e. 50 metres)
         // Prevents spamming calls to server for minor pin movements
         const dist = distanceMeters(lastFetchLat, lastFetchLng, newLat, newLng);
-        if (dist > poiMovementThreshold) {
+        if (dist > POI_MOVEMENT_THRESHOLD) {
             lastFetchLat = newLat;
             lastFetchLng = newLng;
             fetchLivePois(newLat, newLng);
@@ -7852,16 +7862,16 @@
     function extractAndNormalizeGcsPois(json, sourceKind = "gcs") {
         const zoom = wfMap?.getZoom?.();
         const isLowzoomResponse = (sourceKind === "lowzoom-gcs");
+        const isSubmitRadiusResponse = (sourceKind === SUBMIT_RADIUS_GCS_SOURCE_KIND);
 
         // Important:
         // Return null for stale cross-band responses so they do NOT clear the
         // current GCS snapshot.
         //
-        // Example:
-        // - User zooms 16 -> 15.
-        // - Old normal GCS response arrives late.
-        // - We ignore it and keep existing data until lowzoom arrives.
-        if (typeof zoom === "number") {
+        // Exception:
+        // submit-radius-gcs is an intentional normal-GCS request made below z16
+        // using a small safe bounding box around the submit pin.
+        if (!isSubmitRadiusResponse && typeof zoom === "number") {
             if (isLowzoomResponse && zoom >= GCS_MIN_ZOOM) return null;
             if (!isLowzoomResponse && zoom < GCS_MIN_ZOOM) return null;
         }
@@ -8060,7 +8070,7 @@
     // ==================================
 
     function fetchLivePois(lat, lng) {
-        const url = `/api/v1/vault/live-pois-in-radius?lat=${lat}&lng=${lng}&radius=${radius}`;
+        const url = `/api/v1/vault/live-pois-in-radius?lat=${lat}&lng=${lng}&radius=${RADIUS_FOR_LIVE_POIS_API}`;
 
         const xhr = new XMLHttpRequest();
         xhr.open("GET", url, true);
@@ -8156,67 +8166,156 @@
         };
     })();
 
+    function isFiniteNumber(value) {
+        return typeof value === "number" && Number.isFinite(value);
+    }
+
+    function getSubmitPinLatLng() {
+        // Primary source: the submit coordinate watcher already maintains these.
+        if (isFiniteNumber(window.currentLat) && isFiniteNumber(window.currentLng)) {
+            return {
+                lat: window.currentLat,
+                lng: window.currentLng
+            };
+        }
+
+        // Fallback: live-pois-in-radius uses these when available.
+        if (isFiniteNumber(lastFetchLat) && isFiniteNumber(lastFetchLng)) {
+            return {
+                lat: lastFetchLat,
+                lng: lastFetchLng
+            };
+        }
+
+        return null;
+    }
+
+    function clampLatitude(lat) {
+        return Math.max(-85, Math.min(85, lat));
+    }
+
+    function normalizeLongitude(lng) {
+        while (lng > 180) lng -= 360;
+        while (lng < -180) lng += 360;
+        return lng;
+    }
+
+    function getBoundsAroundLatLng(lat, lng, radiusMeters) {
+        // Approximate metres per degree latitude.
+        const latDelta = radiusMeters / 111320;
+
+        // Longitude degrees get smaller toward the poles.
+        const cosLat = Math.cos(lat * Math.PI / 180);
+        const safeCosLat = Math.max(0.01, Math.abs(cosLat));
+        const lngDelta = radiusMeters / (111320 * safeCosLat);
+
+        return {
+            ne: {
+                lat: clampLatitude(lat + latDelta),
+                lng: normalizeLongitude(lng + lngDelta)
+            },
+            sw: {
+                lat: clampLatitude(lat - latDelta),
+                lng: normalizeLongitude(lng - lngDelta)
+            }
+        };
+    }
+
     function requestGcsPoisForBounds(map) {
+        // Only run this on the Submit route.
+        // The mapview page already does GCS and lowzoom GCS natively.
+        if (isOnMapviewRoute()) return;
+
         const zoom = map.getZoom?.();
-
-        // Track previous zoom on the map instance.
-        const prevZoom = (typeof map._wfmmPrevZoom === "number") ? map._wfmmPrevZoom : zoom;
-        map._wfmmPrevZoom = zoom;
-
         if (typeof zoom !== "number") return;
 
-        const crossedZoomBand =
-              (typeof prevZoom === "number") &&
-              (
-                  (prevZoom < GCS_MIN_ZOOM && zoom >= GCS_MIN_ZOOM) ||
-                  (prevZoom >= GCS_MIN_ZOOM && zoom < GCS_MIN_ZOOM)
-              );
+        let ne;
+        let sw;
+        let sourceKind = "gcs";
 
-        // The appearance mode changes at z16, so force a marker rebuild when
-        // moving between lowzoom and normal zoom bands.
-        if (crossedZoomBand) {
-            try { rebuildAllPoiMarkers(); } catch (_) {}
+        if (zoom >= GCS_MIN_ZOOM) {
+            // At z16+, keep using the full map bounds.
+            const bounds = map.getBounds?.();
+            if (!bounds) return;
+
+            const nativeNe = bounds.getNorthEast();
+            const nativeSw = bounds.getSouthWest();
+
+            ne = {
+                lat: nativeNe.lat(),
+                lng: nativeNe.lng()
+            };
+
+            sw = {
+                lat: nativeSw.lat(),
+                lng: nativeSw.lng()
+            };
+        } else {
+            // Below z16, do NOT request the whole map bounds.
+            // Instead, request normal GCS for a small bounding box around the
+            // submit pin, matching the live-pois-in-radius area.
+            const submitPin = getSubmitPinLatLng();
+            if (!submitPin) return;
+
+            const radiusMeters =
+                  (isFiniteNumber(radius) ? radius : 350) + SUBMIT_RADIUS_GCS_PADDING_METERS;
+
+            const syntheticBounds = getBoundsAroundLatLng(
+                submitPin.lat,
+                submitPin.lng,
+                radiusMeters
+            );
+
+            ne = syntheticBounds.ne;
+            sw = syntheticBounds.sw;
+            sourceKind = SUBMIT_RADIUS_GCS_SOURCE_KIND;
         }
-
-        // Do not manually call lowzoom GCS.
-        // Below z16, Niantic's own /mapview/lowzoom/gcs request will be captured
-        // by the XHR listener and handled via handleGcsResponseText(..., "lowzoom-gcs").
-        if (zoom < GCS_MIN_ZOOM) {
-            map._wfmmGcsNeedsRefresh = true;
-            return;
-        }
-
-        const bounds = map.getBounds?.();
-        if (!bounds) return;
-
-        const ne = bounds.getNorthEast();
-        const sw = bounds.getSouthWest();
 
         const cellLevel = NORMAL_GCS_CELL_LEVEL;
 
         const url =
               `${GCS_ENDPOINT_PART}` +
-              `?ne=(${ne.lat()},${ne.lng()})` +
-              `&sw=(${sw.lat()},${sw.lng()})` +
+              `?ne=(${ne.lat},${ne.lng})` +
+              `&sw=(${sw.lat},${sw.lng})` +
               `&cellLevel=${cellLevel}`;
 
         // Avoid issuing identical requests repeatedly on idle.
-        // Native Wayfarer requests will still be caught by the XHR listener.
-        const requestKey = `${GCS_ENDPOINT_PART}|${cellLevel}|${ne.lat().toFixed(6)},${ne.lng().toFixed(6)}|${sw.lat().toFixed(6)},${sw.lng().toFixed(6)}`;
+        // Include sourceKind so z<16 submit-radius and z>=16 full-bounds requests
+        // are treated as different request classes.
+        const requestKey = [
+            GCS_ENDPOINT_PART,
+            sourceKind,
+            cellLevel,
+            ne.lat.toFixed(6),
+            ne.lng.toFixed(6),
+            sw.lat.toFixed(6),
+            sw.lng.toFixed(6)
+        ].join("|");
 
-        if (map._wfmmLastGcsRequestKey === requestKey && !crossedZoomBand && !map._wfmmGcsNeedsRefresh) {
+        if (map._wfmmLastGcsRequestKey === requestKey) {
             return;
         }
 
         map._wfmmLastGcsRequestKey = requestKey;
-        map._wfmmGcsNeedsRefresh = false;
 
         try { map._wfmmGcsXhr?.abort?.(); } catch (_) {}
 
         const xhr = new XMLHttpRequest();
         map._wfmmGcsXhr = xhr;
+
+        // Mark this manual request so the global XHR interceptor does not process
+        // the same response a second time as ordinary "gcs".
+        xhr._wfmm_manualGcsSourceKind = sourceKind;
+
         xhr.open("GET", url, true);
         xhr.withCredentials = true;
+
+        xhr.onload = function () {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                handleGcsResponseText(xhr.responseText, sourceKind);
+            }
+        };
+
         xhr.send();
     }
 
@@ -9814,11 +9913,32 @@
         const search = window.location.search || "";
         if (!search || search.length < 3) return null;
 
-        // Only treat it as a deep link if there are NO '=' characters:
-        if (search.indexOf("=") !== -1) return null;
+        const raw = decodeURIComponent(search.substring(1)).trim();
 
-        const raw = decodeURIComponent(search.substring(1));
-        return parseLatLng(raw);
+        const match = raw.match(/^(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)(?=$|[=&])/);
+
+        if (!match) return null;
+
+        const lat = parseFloat(match[1]);
+        const lng = parseFloat(match[2]);
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        if (lat < -90 || lat > 90) return null;
+        if (lng < -180 || lng > 180) return null;
+
+        console.debug("[WFMM deep link] parse", {
+            href: window.location.href,
+            search,
+            raw,
+            match,
+            result: match ? {
+                lat: parseFloat(match[1]),
+                lng: parseFloat(match[2])
+            } : null
+        });
+
+
+        return { lat, lng };
     }
 
     function buildDeepLinkUrl(lat, lng) {
@@ -9833,20 +9953,107 @@
         return `${base}?${latStr},${lngStr}`;
     }
 
+    function clearDeepLinkReassertTimers() {
+        for (const timer of deepLinkReassertTimers) {
+            clearTimeout(timer);
+        }
+        deepLinkReassertTimers = [];
+    }
+
+    function getMapCenterLatLng() {
+        if (!wfMap || typeof wfMap.getCenter !== "function") return null;
+
+        const center = wfMap.getCenter();
+        if (!center) return null;
+
+        const lat = typeof center.lat === "function" ? center.lat() : center.lat;
+        const lng = typeof center.lng === "function" ? center.lng() : center.lng;
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+        return { lat, lng };
+    }
+
+    function distanceFromDeepLinkTarget() {
+        if (!deepLinkTarget) return Infinity;
+
+        const center = getMapCenterLatLng();
+        if (!center) return Infinity;
+
+        return distanceMeters(
+            deepLinkTarget.lat,
+            deepLinkTarget.lng,
+            center.lat,
+            center.lng
+        );
+    }
+
+    function forceDeepLinkMapView(reason) {
+        if (!wfMap || !deepLinkTarget) return;
+
+        const { lat, lng } = deepLinkTarget;
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+        const distance = distanceFromDeepLinkTarget();
+
+        console.debug("[WFMM deep link] reassert check", {
+            reason,
+            target: { lat, lng },
+            currentCenter: getMapCenterLatLng(),
+            distanceFromTarget: distance,
+            zoom: wfMap.getZoom && wfMap.getZoom(),
+            href: window.location.href
+        });
+
+        if (distance <= DEEP_LINK_TOLERANCE_METRES) {
+            return;
+        }
+
+        const centerLatLng = new google.maps.LatLng(lat, lng);
+
+        flyToLatLngAndPlaceSubmission(centerLatLng);
+
+        if (wfMap.setZoom && wfMap.getZoom && wfMap.getZoom() < GCS_MIN_ZOOM) {
+            wfMap.setZoom(GCS_MIN_ZOOM);
+        }
+    }
+
+    function scheduleDeepLinkReassertion() {
+        clearDeepLinkReassertTimers();
+
+        deepLinkStartedAt = Date.now();
+
+        for (const delay of DEEP_LINK_REASSERT_DELAYS_MS) {
+            const timer = setTimeout(() => {
+                if (!deepLinkTarget || !wfMap || isMapStale()) return;
+
+                forceDeepLinkMapView(`timer-${delay}ms`);
+
+                if (delay === DEEP_LINK_REASSERT_DELAYS_MS[DEEP_LINK_REASSERT_DELAYS_MS.length - 1]) {
+                    console.debug("[WFMM deep link] finished reassert window", {
+                        finalCenter: getMapCenterLatLng(),
+                        finalDistance: distanceFromDeepLinkTarget()
+                    });
+
+                    clearDeepLinkReassertTimers();
+                }
+            }, delay);
+
+            deepLinkReassertTimers.push(timer);
+        }
+    }
+
     function applyDeepLinkMapView() {
         if (!wfMap || !deepLinkTarget) return;
 
         const { lat, lng } = deepLinkTarget;
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
 
-        const centerLatLng = new google.maps.LatLng(lat, lng);
+        skipRestoreMapViewForThisLoad = true;
 
-        flyToLatLngAndPlaceSubmission(centerLatLng);
-
-        // queue select for when POIs load
         queueExactPoiSelect(lat, lng);
 
-        skipRestoreMapViewForThisLoad = true;
+        scheduleDeepLinkReassertion();
     }
 
     function trySelectPendingPoi() {
@@ -9966,6 +10173,28 @@
             const lng = parseFloat(decMatch[2]);
 
             if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+            if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+
+            return new google.maps.LatLng(lat, lng);
+        }
+
+        // ---- Decimal degrees with hemisphere letters ----
+        const decHemMatch = str.match(
+            /^\s*\(?\s*(\d+(?:\.\d+)?)\s*(?:[°º]\s*)?([NS])\s*,?\s+(\d+(?:\.\d+)?)\s*(?:[°º]\s*)?([EW])\s*\)?\s*$/i
+        );
+
+        if (decHemMatch) {
+            let lat = parseFloat(decHemMatch[1]);
+            const latHem = decHemMatch[2].toUpperCase();
+
+            let lng = parseFloat(decHemMatch[3]);
+            const lngHem = decHemMatch[4].toUpperCase();
+
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+            if (latHem === "S") lat *= -1;
+            if (lngHem === "W") lng *= -1;
+
             if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
 
             return new google.maps.LatLng(lat, lng);
@@ -10159,7 +10388,7 @@
                 lat: lastFetchLat,
                 lng: lastFetchLng
             },
-            radiusMeters: radius,
+            radiusMeters: RADIUS_FOR_LIVE_POIS_API,
             style: userSettings.map.nearbyRadius
         });
     }
