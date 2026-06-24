@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.10.0
+// @version      3.11.0
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -1652,20 +1652,17 @@
 
         // ----- Multiple photos icon/link -----
         if (multiplePhotosEl && multiplePhotosLinkEl) {
-            const hasMore = !!poi?.hasAdditionalImages;
+            updateSelectedPoiGalleryButton(poi);
 
-            multiplePhotosEl.classList.toggle("wfmapmods-is-hidden", !hasMore);
+            const guidAtRequestTime = poi?.guid || null;
 
-            // Always reset handler to the current POI
-            multiplePhotosLinkEl.onclick = (ev) => {
-                ev.preventDefault();
-                ev.stopPropagation();
-                openPoiGalleryModal(poi);
-            };
-
-            if (hasMore) {
-                ensurePoiAdditionalImagesLoaded(poi);
-            }
+            ensurePoiImagesLoaded(poi, { onlyIfStillSelected: false })
+                .then(() => {
+                refreshSelectedPoiGalleryButtonFromLoadedImages(poi, guidAtRequestTime);
+            })
+                .catch(err => {
+                console.warn("[WFMM] Failed to update gallery button from poi-images:", err);
+            });
         }
 
         // ----- Coordinates + deep link -----
@@ -5543,23 +5540,31 @@
     // Wayspot Details Overlay
     // ==================================
 
-    function getOverlayImageUrls(poi) {
+    function getOverlayImageRecords(poi) {
+        const records = buildPoiImageRecordList(poi);
         const mainUrl = poi?.imageUrl || NIANTIC_PLACEHOLDER_IMAGE_URL;
 
-        const additional = Array.isArray(poi?.additionalImages) ? poi.additionalImages : [];
-        const additionalUrls = additional.map(x => x?.imageUrl).filter(Boolean);
-
-        const out = [];
-        const seen = new Set();
-        for (const u of [mainUrl, ...additionalUrls]) {
-            if (!u || seen.has(u)) continue;
-            seen.add(u);
-            out.push(u);
+        if (records.length) {
+            return {
+                mainUrl: getImageRecordUrl(records[0]),
+                imageRecords: records
+            };
         }
-        return { mainUrl, allUrls: out };
+
+        return {
+            mainUrl,
+            imageRecords: [{
+                imageGuid: null,
+                imageUrl: mainUrl,
+                creationTimestampMs: null,
+                playerVoted: null,
+                playerVotes: null,
+                photographerTrainerName: null
+            }]
+        };
     }
 
-    function createWayspotOverlayDom(poi, mainUrl, allUrls) {
+    function createWayspotOverlayDom(poi, mainUrl, imageRecords) {
         const backdrop = document.createElement("div");
         backdrop.id = "wfmapmods-wayspot-overlay";
         backdrop.className = "wfmapmods-wayspot-overlay-backdrop";
@@ -5584,19 +5589,20 @@
         header.appendChild(closeBtn);
         dialog.appendChild(header);
 
-        // Carousel only if >1
         let carouselEl = null;
-        if (allUrls.length > 1) {
+        if (imageRecords.length > 1) {
             carouselEl = document.createElement("div");
             carouselEl.className = "wfmapmods-wayspot-overlay-carousel";
             dialog.appendChild(carouselEl);
         }
 
+        const imageFrame = document.createElement("div");
+        imageFrame.className = "wfmapmods-wayspot-overlay-image-frame";
+
         const imageWrapper = document.createElement("a");
-        imageWrapper.href = mainUrl + "=s0";
-        imageWrapper.target = "_blank";
-        imageWrapper.rel = "noopener noreferrer";
+        imageWrapper.href = withS0(mainUrl);
         imageWrapper.className = "wfmapmods-wayspot-overlay-image-link";
+        // imageWrapper.title = "Open fullscreen viewer";
 
         const imgEl = document.createElement("img");
         imgEl.src = mainUrl;
@@ -5605,6 +5611,12 @@
 
         imageWrapper.appendChild(imgEl);
 
+        const imageVoteHost = document.createElement("div");
+        imageVoteHost.className = "wfmapmods-photo-vote-host wfmapmods-photo-vote-host--overlay";
+
+        imageFrame.appendChild(imageWrapper);
+        imageFrame.appendChild(imageVoteHost);
+
         const descEl = document.createElement("div");
         descEl.className = "wfmapmods-wayspot-overlay-desc";
         descEl.textContent = poi?.description || "";
@@ -5612,40 +5624,60 @@
         const body = document.createElement("div");
         body.className = "wfmapmods-wayspot-overlay-body";
 
-        body.appendChild(imageWrapper);
+        body.appendChild(imageFrame);
         body.appendChild(descEl);
 
         dialog.appendChild(body);
-
         backdrop.appendChild(dialog);
 
-        return { backdrop, dialog, closeBtn, carouselEl, imageWrapper, imgEl };
+        return {
+            backdrop,
+            dialog,
+            closeBtn,
+            carouselEl,
+            imageWrapper,
+            imageVoteHost,
+            imgEl
+        };
     }
 
-    function setOverlayMainImage(state, url) {
-        if (!state || !url) return;
+    function setOverlayMainImage(state, imageRecordOrUrl) {
+        if (!state || !imageRecordOrUrl) return;
+
+        const record = typeof imageRecordOrUrl === "string"
+        ? state.imageRecords.find(x => getImageRecordUrl(x) === imageRecordOrUrl)
+        : imageRecordOrUrl;
+
+        const url = getImageRecordUrl(record);
+        if (!url) return;
 
         state.currentMainUrl = url;
+        state.currentImageRecord = record || null;
+
         state.imgEl.src = url;
-        state.imageWrapper.href = url + "=s0";
+        state.imageWrapper.href = withS0(url);
+
+        renderPoiImageVoteBadgeIntoHost(state.imageVoteHost, state.poi, state.currentImageRecord);
 
         const carouselEl = state.carouselEl;
         if (!carouselEl) return;
 
-        // Toggle an "active" class instead of inline styles
         const thumbs = carouselEl.querySelectorAll('img[data-url]');
         thumbs.forEach(t => {
             t.classList.toggle("is-active", t.getAttribute("data-url") === url);
         });
     }
 
-    function buildOverlayCarousel(state, allUrls) {
+    function buildOverlayCarousel(state, imageRecords) {
         const carouselEl = state.carouselEl;
         if (!carouselEl) return;
 
         carouselEl.innerHTML = "";
 
-        for (const url of allUrls) {
+        for (const record of imageRecords) {
+            const url = getImageRecordUrl(record);
+            if (!url) continue;
+
             const t = document.createElement("img");
             t.src = url;
             t.alt = state.poi?.title || "";
@@ -5655,7 +5687,7 @@
             t.addEventListener("click", (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                setOverlayMainImage(state, url);
+                setOverlayMainImage(state, record);
             });
 
             carouselEl.appendChild(t);
@@ -5677,25 +5709,48 @@
 
         closeWayspotDetailOverlay();
 
-        const { mainUrl, allUrls } = getOverlayImageUrls(poi);
+        const { mainUrl, imageRecords } = getOverlayImageRecords(poi);
 
-        const dom = createWayspotOverlayDom(poi, mainUrl, allUrls);
+        const dom = createWayspotOverlayDom(poi, mainUrl, imageRecords);
         document.body.appendChild(dom.backdrop);
 
         const state = {
             poi,
             backdrop: dom.backdrop,
+            dialog: dom.dialog,
             carouselEl: dom.carouselEl,
             imageWrapper: dom.imageWrapper,
+            imageVoteHost: dom.imageVoteHost,
             imgEl: dom.imgEl,
+            imageRecords,
             currentMainUrl: mainUrl,
+            currentImageRecord: imageRecords[0] || null,
             escHandler: null
         };
 
         if (state.carouselEl) {
-            buildOverlayCarousel(state, allUrls);
-            setOverlayMainImage(state, state.currentMainUrl);
+            buildOverlayCarousel(state, imageRecords);
+            setOverlayMainImage(state, state.currentImageRecord);
+        } else {
+            setOverlayMainImage(state, state.currentImageRecord);
         }
+
+        state.imageWrapper.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const currentUrl = state.currentMainUrl;
+            const startIndex = Math.max(
+                0,
+                state.imageRecords.findIndex(record => getImageRecordUrl(record) === currentUrl)
+            );
+
+            openGalleryFullscreenViewer({
+                dialogEl: state.dialog,
+                imageRecords: state.imageRecords,
+                startIndex
+            });
+        });
 
         dom.closeBtn.addEventListener("click", (e) => {
             e.stopPropagation();
@@ -5707,32 +5762,45 @@
         });
 
         state.escHandler = (ev) => {
-            if (ev.key === "Escape") closeWayspotDetailOverlay();
+            if (ev.key === "Escape" && !document.querySelector(".wfmapmods-gallery-fs")) {
+                closeWayspotDetailOverlay();
+            }
         };
 
         wayspotOverlayState = state;
         document.addEventListener("keydown", state.escHandler);
 
-        // Optional: fetch additional images if needed
-        if (
-            shouldFetchAdditionalImages(poi) &&
-            (!Array.isArray(poi.additionalImages) || poi.additionalImages.length === 0)
-        ) {
-            const guid = poi.guid;
+        ensurePoiImagesLoaded(poi, { onlyIfStillSelected: false })
+            .then(() => {
+            if (wayspotOverlayState?.backdrop !== state.backdrop) return;
+            if (!document.body.contains(state.backdrop)) return;
 
-            fetchPoiImagesForGuid(guid).then((images) => {
-                if (wayspotOverlayState?.backdrop !== state.backdrop) return;
-                if (!document.body.contains(state.backdrop)) return;
+            const refreshed = getOverlayImageRecords(poi);
+            const previousUrl = state.currentMainUrl;
 
-                poi.additionalImages = images;
+            state.imageRecords = refreshed.imageRecords;
 
-                const { allUrls } = getOverlayImageUrls(poi);
-                if (allUrls.length <= 1) return;
-
+            if (state.imageRecords.length > 1 && !state.carouselEl) {
                 closeWayspotDetailOverlay();
                 openWayspotDetailOverlay(poi);
-            });
-        }
+                return;
+            }
+
+            if (state.carouselEl) {
+                buildOverlayCarousel(state, state.imageRecords);
+            }
+
+            const matchingRecord = state.imageRecords.find(record => getImageRecordUrl(record) === previousUrl)
+            || state.imageRecords[0]
+            || null;
+
+            if (matchingRecord) {
+                setOverlayMainImage(state, matchingRecord);
+            }
+        })
+            .catch(err => {
+            console.warn("[WFMM - Base] Overlay image metadata load failed:", err);
+        });
     }
 
     // ==================================
@@ -8335,97 +8403,187 @@
     }
 
     // ==================================
-    // Mapview POI additional images (carousel support)
+    // Mapview POI enrichment: details, images, and image voting
     // ==================================
 
-    // Cache: guid -> { images: [{imageGuid, imageUrl}], fetchedAt }
-    // Note: we keep it separate from your IDB; this is purely mapview detail enrichment.
+    // Cache: guid -> { images: [{ imageGuid, imageUrl, creationTimestampMs, playerVoted, playerVotes, photographerTrainerName }], fetchedAt }
     const poiImagesByGuid = new Map();
+
+    // Cache: guid -> { details: { creationTimestampMs, submitterTrainerName }, fetchedAt }
+    const poiDetailsByGuid = new Map();
 
     // Optional: limit cache growth
     const POI_IMAGES_CACHE_MAX = 500;
+    const POI_DETAILS_CACHE_MAX = 500;
 
     // Track in-flight fetches to avoid duplicate calls
-    const poiImagesInFlight = new Map(); // guid -> Promise
+    const poiImagesInFlight = new Map();  // guid -> Promise
+    const poiDetailsInFlight = new Map(); // guid -> Promise
 
-    function shouldFetchAdditionalImages(poi) {
-        // Your rule: fetch if hasAdditionalImages is NOT false (true/null/undefined allowed)
-        if (!poi) return false;
-        if (poi.hasAdditionalImages === false) return false;
-        if (!poi.guid) return false;
-        return true;
+    function normaliseNullableTimestampMs(value) {
+        if (value === null || value === undefined) return null;
+
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+    }
+
+    function normaliseNullableInteger(value) {
+        if (value === null || value === undefined) return null;
+
+        const n = Number(value);
+        return Number.isInteger(n) ? n : null;
+    }
+
+    function normaliseNullableBoolean(value) {
+        return typeof value === "boolean" ? value : null;
+    }
+
+    function normaliseNullableString(value) {
+        return typeof value === "string" ? value : null;
+    }
+
+    function normalisePoiDetailsResponse(json) {
+        const result = json?.result || {};
+
+        return {
+            creationTimestampMs: normaliseNullableTimestampMs(result.creationTimestampMs),
+            submitterTrainerName: normaliseNullableString(result.submitterTrainerName)
+        };
     }
 
     function normalisePoiImagesResponse(json) {
         const imgs = Array.isArray(json?.result?.images) ? json.result.images : [];
+
         return imgs
             .map(x => ({
-            imageGuid: x?.imageGuid || null,
-            imageUrl: x?.imageUrl || null
+            imageGuid: normaliseNullableString(x?.imageGuid),
+            imageUrl: normaliseNullableString(x?.imageUrl),
+            creationTimestampMs: normaliseNullableTimestampMs(x?.creationTimestampMs),
+            playerVoted: normaliseNullableBoolean(x?.playerVoted),
+            playerVotes: normaliseNullableInteger(x?.playerVotes),
+            photographerTrainerName: normaliseNullableString(x?.photographerTrainerName)
         }))
             .filter(x => !!x.imageUrl);
     }
 
-    function evictOldPoiImagesCacheIfNeeded() {
-        if (poiImagesByGuid.size <= POI_IMAGES_CACHE_MAX) return;
+    function evictOldCacheEntryIfNeeded(cacheMap, maxSize) {
+        if (cacheMap.size <= maxSize) return;
 
-        // simple FIFO-ish eviction: remove oldest fetchedAt
         let oldestKey = null;
         let oldestAt = Infinity;
 
-        for (const [k, v] of poiImagesByGuid.entries()) {
+        for (const [k, v] of cacheMap.entries()) {
             const t = v?.fetchedAt || 0;
             if (t < oldestAt) {
                 oldestAt = t;
                 oldestKey = k;
             }
         }
-        if (oldestKey) poiImagesByGuid.delete(oldestKey);
+
+        if (oldestKey) cacheMap.delete(oldestKey);
     }
 
-    function fetchPoiImagesForGuid(guid) {
-        if (!guid) return Promise.resolve([]);
+    function attachPoiDetailsToPoi(poi, details) {
+        if (!poi || !details) return;
 
-        // cache hit
-        const cached = poiImagesByGuid.get(guid);
-        if (cached && Array.isArray(cached.images)) return Promise.resolve(cached.images);
+        poi.poiDetails = details;
+        poi.creationTimestampMs = details.creationTimestampMs;
+        poi.submitterTrainerName = details.submitterTrainerName;
+        poi.poiDetailsFetched = true;
+    }
 
-        // in-flight de-dup
-        if (poiImagesInFlight.has(guid)) return poiImagesInFlight.get(guid);
+    function attachPoiImagesToPoi(poi, images) {
+        if (!poi) return;
 
-        const p = new Promise((resolve) => {
-            const url = `/api/v1/vault/mapview/poi-images?poiId=${encodeURIComponent(guid)}`;
+        const safeImages = Array.isArray(images) ? images : [];
 
-            const xhr = new XMLHttpRequest();
-            xhr.open("GET", url, true);
+        poi.poiImages = safeImages;
+        poi.additionalImages = safeImages;
+        poi.poiImagesFetched = true;
 
-            xhr.onload = function () {
-                try {
-                    if (xhr.status < 200 || xhr.status >= 300) {
-                        resolve([]);
-                        return;
-                    }
-                    const json = JSON.parse(xhr.responseText || "{}");
-                    const images = normalisePoiImagesResponse(json);
+        // Keep the old flag useful, but base it on the actual image count once
+        // poi-images has returned. buildPoiImageRecordList also dedupes the GCS
+        // main image against the poi-images response.
+        poi.hasAdditionalImages = buildPoiImageRecordList(poi).length > 1;
+    }
 
-                    poiImagesByGuid.set(guid, {
-                        images,
-                        fetchedAt: Date.now()
-                    });
-                    evictOldPoiImagesCacheIfNeeded();
+    async function fetchPoiDetailsForGuid(guid, options = {}) {
+        if (!guid) return null;
 
-                    resolve(images);
-                } catch {
-                    resolve([]);
+        const force = options.force === true;
+
+        if (!force) {
+            const cached = poiDetailsByGuid.get(guid);
+            if (cached && cached.details) return cached.details;
+
+            if (poiDetailsInFlight.has(guid)) return poiDetailsInFlight.get(guid);
+        }
+
+        const p = (async () => {
+            try {
+                const url = `/api/v1/vault/mapview/poi-details?poiId=${encodeURIComponent(guid)}`;
+                const json = await getJson(url);
+
+                if (!json || json.captcha || (json.code && json.code !== "OK")) {
+                    return null;
                 }
-            };
 
-            xhr.onerror = function () {
-                resolve([]);
-            };
+                const details = normalisePoiDetailsResponse(json);
 
-            xhr.send();
-        }).finally(() => {
+                poiDetailsByGuid.set(guid, {
+                    details,
+                    fetchedAt: Date.now()
+                });
+                evictOldCacheEntryIfNeeded(poiDetailsByGuid, POI_DETAILS_CACHE_MAX);
+
+                return details;
+            } catch (err) {
+                console.warn("[WFMM - Base] Failed to fetch POI details:", err);
+                return null;
+            }
+        })().finally(() => {
+            poiDetailsInFlight.delete(guid);
+        });
+
+        poiDetailsInFlight.set(guid, p);
+        return p;
+    }
+
+    async function fetchPoiImagesForGuid(guid, options = {}) {
+        if (!guid) return [];
+
+        const force = options.force === true;
+
+        if (!force) {
+            const cached = poiImagesByGuid.get(guid);
+            if (cached && Array.isArray(cached.images)) return cached.images;
+
+            if (poiImagesInFlight.has(guid)) return poiImagesInFlight.get(guid);
+        }
+
+        const p = (async () => {
+            try {
+                const url = `/api/v1/vault/mapview/poi-images?poiId=${encodeURIComponent(guid)}`;
+                const json = await getJson(url);
+
+                if (!json || json.captcha || (json.code && json.code !== "OK")) {
+                    return [];
+                }
+
+                const images = normalisePoiImagesResponse(json);
+
+                poiImagesByGuid.set(guid, {
+                    images,
+                    fetchedAt: Date.now()
+                });
+                evictOldCacheEntryIfNeeded(poiImagesByGuid, POI_IMAGES_CACHE_MAX);
+
+                return images;
+            } catch (err) {
+                console.warn("[WFMM - Base] Failed to fetch POI images:", err);
+                return [];
+            }
+        })().finally(() => {
             poiImagesInFlight.delete(guid);
         });
 
@@ -8433,31 +8591,171 @@
         return p;
     }
 
-    /**
-     * Enrich a POI object with additionalImages (array) if available.
-     * This is safe to call repeatedly; it only writes if the POI is still selected.
-     */
-    function ensurePoiAdditionalImagesLoaded(poi) {
-        if (!shouldFetchAdditionalImages(poi)) return;
+    async function ensurePoiDetailsLoaded(poi, options = {}) {
+        if (!poi || !poi.guid) return null;
 
         const guid = poi.guid;
+        const onlyIfStillSelected = options.onlyIfStillSelected !== false;
 
-        // If already present on the POI, don't refetch
-        if (Array.isArray(poi.additionalImages) && poi.additionalImages.length) return;
+        if (!options.force && poi.poiDetailsFetched && poi.poiDetails) {
+            return poi.poiDetails;
+        }
 
-        fetchPoiImagesForGuid(guid).then((images) => {
-            // If selection changed since request started, ignore
-            if (selectedPoiGuid !== guid) return;
+        const details = await fetchPoiDetailsForGuid(guid, options);
+        if (!details) return null;
 
-            // Attach to lastSelectedPoi (and the current arg if it's the same object)
-            // images = [{imageGuid, imageUrl}]
-            if (lastSelectedPoi && lastSelectedPoi.guid === guid) {
-                lastSelectedPoi.additionalImages = images;
-            }
-            if (poi && poi.guid === guid) {
-                poi.additionalImages = images;
-            }
+        if (onlyIfStillSelected && selectedPoiGuid !== guid) {
+            return details;
+        }
+
+        if (lastSelectedPoi && lastSelectedPoi.guid === guid) {
+            attachPoiDetailsToPoi(lastSelectedPoi, details);
+        }
+
+        if (poi && poi.guid === guid) {
+            attachPoiDetailsToPoi(poi, details);
+        }
+
+        const markerPoi = markersByGuid?.[guid]?.poi;
+        if (markerPoi) {
+            attachPoiDetailsToPoi(markerPoi, details);
+        }
+
+        return details;
+    }
+
+    async function ensurePoiImagesLoaded(poi, options = {}) {
+        if (!poi || !poi.guid) return [];
+
+        const guid = poi.guid;
+        const onlyIfStillSelected = options.onlyIfStillSelected !== false;
+
+        if (!options.force && poi.poiImagesFetched && Array.isArray(poi.poiImages)) {
+            return poi.poiImages;
+        }
+
+        const images = await fetchPoiImagesForGuid(guid, options);
+
+        if (onlyIfStillSelected && selectedPoiGuid !== guid) {
+            return images;
+        }
+
+        if (lastSelectedPoi && lastSelectedPoi.guid === guid) {
+            attachPoiImagesToPoi(lastSelectedPoi, images);
+        }
+
+        if (poi && poi.guid === guid) {
+            attachPoiImagesToPoi(poi, images);
+        }
+
+        const markerPoi = markersByGuid?.[guid]?.poi;
+        if (markerPoi) {
+            attachPoiImagesToPoi(markerPoi, images);
+        }
+
+        return images;
+    }
+
+    // Backwards-compatible name for existing callers.
+    function ensurePoiAdditionalImagesLoaded(poi, options = {}) {
+        return ensurePoiImagesLoaded(poi, options);
+    }
+
+    function ensureSelectedPoiEnrichmentLoaded(poi) {
+        if (!poi || !poi.guid) return;
+
+        const guidAtRequestTime = poi.guid;
+
+        ensurePoiDetailsLoaded(poi).catch(err => {
+            console.warn("[WFMM] POI details enrichment failed:", err);
         });
+
+        ensurePoiImagesLoaded(poi)
+            .then(() => {
+            refreshSelectedPoiGalleryButtonFromLoadedImages(poi, guidAtRequestTime);
+        })
+            .catch(err => {
+            console.warn("[WFMM] POI image enrichment failed:", err);
+        });
+    }
+
+    function getCachedPoiImageRecord(poiId, imageGuid) {
+        if (!poiId || !imageGuid) return null;
+
+        const cached = poiImagesByGuid.get(poiId);
+        const images = Array.isArray(cached?.images) ? cached.images : [];
+
+        return images.find(img => img?.imageGuid === imageGuid) || null;
+    }
+
+    function updateCachedPoiImageVoteState(poiId, imageGuid, playerVoted) {
+        if (!poiId || !imageGuid || typeof playerVoted !== "boolean") return;
+
+        const cached = poiImagesByGuid.get(poiId);
+        const images = Array.isArray(cached?.images) ? cached.images : [];
+
+        for (const img of images) {
+            if (!img || img.imageGuid !== imageGuid) continue;
+
+            const previousVoted = img.playerVoted;
+            img.playerVoted = playerVoted;
+
+            if (typeof img.playerVotes === "number" && previousVoted !== playerVoted) {
+                img.playerVotes += playerVoted ? 1 : -1;
+                if (img.playerVotes < 0) img.playerVotes = 0;
+            }
+
+            break;
+        }
+
+        const selectedImages = Array.isArray(lastSelectedPoi?.poiImages) ? lastSelectedPoi.poiImages : [];
+        for (const img of selectedImages) {
+            if (!img || img.imageGuid !== imageGuid) continue;
+
+            const previousVoted = img.playerVoted;
+            img.playerVoted = playerVoted;
+
+            if (typeof img.playerVotes === "number" && previousVoted !== playerVoted) {
+                img.playerVotes += playerVoted ? 1 : -1;
+                if (img.playerVotes < 0) img.playerVotes = 0;
+            }
+
+            break;
+        }
+    }
+
+    async function setPoiImageVoteForGuid(poiId, imageGuid, shouldVote) {
+        if (!poiId) {
+            throw new Error("Cannot vote for image: missing POI id.");
+        }
+
+        if (!imageGuid) {
+            throw new Error("Cannot vote for image: missing image id.");
+        }
+
+        const payload = {
+            poiId,
+            imageIdsToVoteFor: shouldVote ? [imageGuid] : [],
+            imageIdsToUnvote: shouldVote ? [] : [imageGuid]
+        };
+
+        const resp = await postJsonWithCsrf("/api/v1/vault/mapview/poi-image-vote", payload);
+
+        if (!resp || resp.captcha || (resp.code && resp.code !== "OK")) {
+            throw new Error("POI image vote request failed.");
+        }
+
+        updateCachedPoiImageVoteState(poiId, imageGuid, shouldVote);
+
+        return resp;
+    }
+
+    function votePoiImageForGuid(poiId, imageGuid) {
+        return setPoiImageVoteForGuid(poiId, imageGuid, true);
+    }
+
+    function unvotePoiImageForGuid(poiId, imageGuid) {
+        return setPoiImageVoteForGuid(poiId, imageGuid, false);
     }
 
     // ==============================
@@ -8479,24 +8777,117 @@
         return withGoogleSize(url, 1200);
     }
 
-    function buildPoiImageList(poi) {
+    function buildPoiImageRecordList(poi) {
         const out = [];
-        const seen = new Set();
+        const seenGuids = new Set();
+        const seenUrls = new Set();
 
-        function add(url) {
-            if (!url) return;
-            if (seen.has(url)) return;
-            seen.add(url);
-            out.push(url);
+        function add(record) {
+            if (!record) return;
+
+            const imageGuid = record.imageGuid || null;
+            const imageUrl = record.imageUrl || record.url || null;
+            if (!imageUrl) return;
+
+            // GCS may provide the main image without an imageGuid. poi-images may
+            // later return the same imageUrl with metadata and an imageGuid.
+            if ((imageGuid && seenGuids.has(imageGuid)) || seenUrls.has(imageUrl)) {
+                return;
+            }
+
+            seenUrls.add(imageUrl);
+            if (imageGuid) seenGuids.add(imageGuid);
+
+            out.push({
+                imageGuid,
+                imageUrl,
+                creationTimestampMs: normaliseNullableTimestampMs(record.creationTimestampMs),
+                playerVoted: normaliseNullableBoolean(record.playerVoted),
+                playerVotes: normaliseNullableInteger(record.playerVotes),
+                photographerTrainerName: normaliseNullableString(record.photographerTrainerName)
+            });
         }
 
-        // Include the main image first (if present)
-        add(poi?.imageUrl);
+        const apiImages = Array.isArray(poi?.poiImages)
+        ? poi.poiImages
+        : (Array.isArray(poi?.additionalImages) ? poi.additionalImages : []);
 
-        const arr = Array.isArray(poi?.additionalImages) ? poi.additionalImages : [];
-        for (const it of arr) add(it?.imageUrl);
+        for (const img of apiImages) {
+            add(img);
+        }
+
+        // Fallback to the GCS main image if poi-images has not loaded yet, failed,
+        // or did not include the main image for some reason.
+        add({
+            imageGuid: poi?.imageGuid || null,
+            imageUrl: poi?.imageUrl || null,
+            creationTimestampMs: null,
+            playerVoted: null,
+            playerVotes: null,
+            photographerTrainerName: null
+        });
 
         return out;
+    }
+
+    function buildPoiImageList(poi) {
+        return buildPoiImageRecordList(poi)
+            .map(img => img.imageUrl)
+            .filter(Boolean);
+    }
+
+    function poiHasMultipleGalleryImages(poi) {
+        if (!poi) return false;
+
+        // hasAdditionalImages is a useful early hint from GCS, so use it before
+        // poi-images has returned.
+        if (poi.hasAdditionalImages === true) return true;
+
+        // Once poi-images has been fetched, trust the actual deduped image count.
+        if (poi.poiImagesFetched === true) {
+            return buildPoiImageRecordList(poi).length > 1;
+        }
+
+        return false;
+    }
+
+    function getSelectedPoiSidePanelGalleryElements() {
+        if (!sidePanelEl) {
+            return {
+                multiplePhotosEl: null,
+                multiplePhotosLinkEl: null
+            };
+        }
+
+        return {
+            multiplePhotosEl: sidePanelEl.querySelector(".wfmapmods-detail-multiple-photos"),
+            multiplePhotosLinkEl: sidePanelEl.querySelector(".wfmapmods-detail-multiple-photos-link")
+        };
+    }
+
+    function updateSelectedPoiGalleryButton(poi) {
+        const { multiplePhotosEl, multiplePhotosLinkEl } = getSelectedPoiSidePanelGalleryElements();
+
+        if (!multiplePhotosEl || !multiplePhotosLinkEl || !poi) return;
+
+        const hasMore = poiHasMultipleGalleryImages(poi);
+
+        multiplePhotosEl.classList.toggle("wfmapmods-is-hidden", !hasMore);
+
+        multiplePhotosLinkEl.onclick = (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            openPoiGalleryModal(poi);
+        };
+    }
+
+    function refreshSelectedPoiGalleryButtonFromLoadedImages(poi, guidAtRequestTime) {
+        if (!poi || !guidAtRequestTime) return;
+
+        // Avoid updating the side panel for a POI that is no longer selected.
+        if (selectedPoiGuid !== guidAtRequestTime) return;
+
+        updateSelectedPoiGalleryButton(poi);
     }
 
     function openPoiGalleryModal(poi) {
@@ -8523,77 +8914,355 @@
                 wrap.appendChild(grid);
                 dialog.appendChild(wrap);
 
-                // Renders tiles
-                function renderTiles(urls) {
+                function renderTiles(imageRecords) {
                     grid.innerHTML = "";
-                    if (!urls || !urls.length) {
-                        loading.textContent = "No additional photos found.";
+
+                    const records = Array.isArray(imageRecords) ? imageRecords : [];
+
+                    if (!records.length) {
+                        loading.classList.remove("wfmapmods-is-hidden");
+                        loading.textContent = "No photos found.";
                         return;
                     }
 
                     loading.classList.add("wfmapmods-is-hidden");
 
-                    urls.forEach((url, idx) => {
-                        const tileA = document.createElement("a");
-                        tileA.href = "#";
-                        tileA.className = "wfmapmods-gallery-tile";
-                        tileA.title = "Open fullscreen viewer";
+                    records.forEach((record, idx) => {
+                        const url = getImageRecordUrl(record);
+                        if (!url) return;
+
+                        const tile = document.createElement("div");
+                        tile.className = "wfmapmods-gallery-tile";
+                        tile.role = "button";
+                        tile.tabIndex = 0;
+                        // tile.title = "Open fullscreen viewer";
 
                         const img = document.createElement("img");
                         img.src = url;
-                        img.alt = poi.title ? `${poi.title} (${idx + 1}/${urls.length})` : `Photo ${idx + 1}`;
+                        img.alt = poi.title ? `${poi.title} (${idx + 1}/${records.length})` : `Photo ${idx + 1}`;
                         img.loading = "lazy";
 
-                        tileA.appendChild(img);
+                        const voteHost = document.createElement("div");
+                        voteHost.className = "wfmapmods-photo-vote-host wfmapmods-photo-vote-host--gallery";
 
-                        tileA.addEventListener("click", (ev) => {
-                            ev.preventDefault();
-                            ev.stopPropagation();
+                        tile.appendChild(img);
+                        tile.appendChild(voteHost);
+
+                        renderPoiImageVoteBadgeIntoHost(voteHost, poi, record);
+
+                        function openFullscreen() {
                             openGalleryFullscreenViewer({
                                 dialogEl: dialog,
-                                imageUrls: urls,
+                                imageRecords: records,
                                 startIndex: idx
                             });
+                        }
+
+                        tile.addEventListener("click", (ev) => {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            openFullscreen();
                         });
 
-                        grid.appendChild(tileA);
+                        tile.addEventListener("keydown", (ev) => {
+                            if (ev.key !== "Enter" && ev.key !== " ") return;
+
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            openFullscreen();
+                        });
+
+                        grid.appendChild(tile);
                     });
                 }
 
-                // Ensure we have images; if not yet loaded, fetch then render.
-                const initialUrls = buildPoiImageList(poi);
-                if (initialUrls.length > 1) {
-                    renderTiles(initialUrls);
+                if (poi.poiImagesFetched) {
+                    renderTiles(buildPoiImageRecordList(poi));
                 } else {
-                    // Show loading, then fetch and render
-                    ensurePoiAdditionalImagesLoaded(poi);
-
-                    // Poll lightly for a short time (since your fetch is async and writes onto poi)
-                    // (No promises from ensurePoiAdditionalImagesLoaded)
-                    let tries = 0;
-                    const t = setInterval(() => {
-                        tries += 1;
-                        const urls = buildPoiImageList(poi);
-                        if (urls.length > 1 || tries > 30) {
-                            clearInterval(t);
-                            renderTiles(urls);
-                        }
-                    }, 150);
+                    ensurePoiImagesLoaded(poi, { onlyIfStillSelected: false })
+                        .then(() => {
+                        renderTiles(buildPoiImageRecordList(poi));
+                    })
+                        .catch(err => {
+                        console.warn("[WFMM - Base] Gallery image load failed:", err);
+                        renderTiles(buildPoiImageRecordList(poi));
+                    });
                 }
 
-                // return context if you ever need it
                 return { closeModal };
             }
         });
     }
 
-    function openGalleryFullscreenViewer({ dialogEl, imageUrls, startIndex = 0 }) {
-        if (!dialogEl || !Array.isArray(imageUrls) || !imageUrls.length) return;
+    function getPhotoSubmittedText(imageRecord) {
+        if (!imageRecord) return "";
+
+        const timestampMs = normaliseNullableTimestampMs(imageRecord.creationTimestampMs);
+        const trainerName = normaliseNullableString(imageRecord.photographerTrainerName)?.trim() || "";
+
+        const parts = [];
+
+        if (timestampMs !== null) {
+            const date = new Date(timestampMs);
+            if (!Number.isNaN(date.getTime())) {
+                const formattedDate = new Intl.DateTimeFormat(undefined, {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric"
+                }).format(date);
+
+                parts.push(formattedDate);
+            }
+        }
+
+        if (trainerName) {
+            parts.push(`by ${trainerName}`);
+        }
+
+        if (!parts.length) return "";
+
+        return `Submitted ${parts.join(" ")}`;
+    }
+
+    function buildImageRecordsFromUrls(imageUrls) {
+        if (!Array.isArray(imageUrls)) return [];
+
+        return imageUrls
+            .filter(Boolean)
+            .map(url => ({
+            imageGuid: null,
+            imageUrl: url,
+            creationTimestampMs: null,
+            playerVoted: null,
+            playerVotes: null,
+            photographerTrainerName: null
+        }));
+    }
+
+    function getImageRecordUrl(imageRecord) {
+        return imageRecord?.imageUrl || imageRecord?.url || "";
+    }
+
+    function getImageVoteCount(imageRecord) {
+        const n = normaliseNullableInteger(imageRecord?.playerVotes);
+        return n === null ? null : Math.max(0, n);
+    }
+
+    function imageRecordVoteFeatureEnabled(imageRecord) {
+        // playerVotes === null means photo voting is disabled or unavailable.
+        // playerVotes === 0 means photo voting is enabled and the photo currently has no votes.
+        return normaliseNullableInteger(imageRecord?.playerVotes) !== null;
+    }
+
+    function imageRecordCanBeVotedOn(poi, imageRecord) {
+        return !!poi?.guid
+        && !!imageRecord?.imageGuid
+        && imageRecordVoteFeatureEnabled(imageRecord);
+    }
+
+    function applyVoteStateToDetachedImageRecord(imageRecord, shouldVote) {
+        if (!imageRecord || typeof shouldVote !== "boolean") return;
+
+        const previousVoted = imageRecord.playerVoted;
+        imageRecord.playerVoted = shouldVote;
+
+        if (previousVoted === shouldVote) return;
+
+        const existingVotes = normaliseNullableInteger(imageRecord.playerVotes);
+
+        if (existingVotes === null) {
+            imageRecord.playerVotes = null;
+            return;
+        }
+
+        imageRecord.playerVotes = existingVotes + (shouldVote ? 1 : -1);
+        if (imageRecord.playerVotes < 0) imageRecord.playerVotes = 0;
+    }
+
+    function syncDetachedImageRecordFromCachedRecord(detachedRecord, cachedRecord) {
+        if (!detachedRecord || !cachedRecord) return;
+
+        detachedRecord.playerVoted = normaliseNullableBoolean(cachedRecord.playerVoted);
+        detachedRecord.playerVotes = normaliseNullableInteger(cachedRecord.playerVotes);
+    }
+
+    function findCurrentCachedImageRecord(poiId, imageGuid, fallbackRecord = null) {
+        if (!poiId || !imageGuid) return fallbackRecord;
+
+        const cached = getCachedPoiImageRecord(poiId, imageGuid);
+        return cached || fallbackRecord;
+    }
+
+    function cssEscapeValue(value) {
+        if (window.CSS && typeof window.CSS.escape === "function") {
+            return window.CSS.escape(value);
+        }
+
+        return String(value).replace(/["\\]/g, "\\$&");
+    }
+
+    function updatePoiImageVoteBadgeElement(button, imageRecord) {
+        if (!button || !imageRecord) return;
+
+        const voteCount = getImageVoteCount(imageRecord);
+
+        if (voteCount === null) {
+            button.remove();
+            return;
+        }
+
+        const voted = imageRecord.playerVoted === true;
+
+        button.classList.toggle("wfmapmods-photo-vote-badge--voted", voted);
+        button.classList.remove("wfmapmods-photo-vote-badge--pending");
+        button.disabled = false;
+        button.setAttribute("aria-pressed", voted ? "true" : "false");
+        button.title = voted ? "Remove vote from this photo" : "Vote for this photo";
+
+        const countEl = button.querySelector(".wfmapmods-photo-vote-count");
+        if (countEl) countEl.textContent = String(voteCount);
+    }
+
+    function refreshPoiImageVoteBadges(poiId, imageGuid, fallbackRecord = null) {
+        if (!poiId || !imageGuid) return;
+
+        const currentRecord = findCurrentCachedImageRecord(poiId, imageGuid, fallbackRecord);
+        if (!currentRecord) return;
+
+        const selector = `.wfmapmods-photo-vote-badge[data-poi-id="${cssEscapeValue(poiId)}"][data-image-guid="${cssEscapeValue(imageGuid)}"]`;
+        const buttons = document.querySelectorAll(selector);
+
+        buttons.forEach(button => {
+            updatePoiImageVoteBadgeElement(button, currentRecord);
+        });
+    }
+
+    function createThumbUpSvg() {
+        const span = document.createElement("span");
+        span.className = "wfmapmods-photo-vote-icon";
+        span.setAttribute("aria-hidden", "true");
+
+        span.innerHTML = `
+        <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"></path>
+        </svg>
+    `;
+
+        return span;
+    }
+
+    function createPoiImageVoteBadge(poi, imageRecord, options = {}) {
+        if (!imageRecordCanBeVotedOn(poi, imageRecord)) {
+            return null;
+        }
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "wfmapmods-photo-vote-badge";
+        button.dataset.poiId = poi.guid;
+        button.dataset.imageGuid = imageRecord.imageGuid;
+
+        const countEl = document.createElement("span");
+        countEl.className = "wfmapmods-photo-vote-count";
+
+        button.appendChild(countEl);
+        button.appendChild(createThumbUpSvg());
+
+        updatePoiImageVoteBadgeElement(button, imageRecord);
+
+        button.addEventListener("click", async (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            if (button.dataset.votePending === "true") return;
+
+            const poiId = poi.guid;
+            const imageGuid = imageRecord.imageGuid;
+            const previousVoted = imageRecord.playerVoted === true;
+            const previousVotes = normaliseNullableInteger(imageRecord.playerVotes);
+            const shouldVote = !previousVoted;
+
+            button.dataset.votePending = "true";
+
+            // Optimistically update immediately so the UI feels responsive.
+            applyVoteStateToDetachedImageRecord(imageRecord, shouldVote);
+            updateCachedPoiImageVoteState(poiId, imageGuid, shouldVote);
+            refreshPoiImageVoteBadges(poiId, imageGuid, imageRecord);
+
+            if (typeof options.onVoteChanged === "function") {
+                options.onVoteChanged({
+                    poiId,
+                    imageGuid,
+                    imageRecord,
+                    playerVoted: shouldVote
+                });
+            }
+
+            try {
+                await setPoiImageVoteForGuid(poiId, imageGuid, shouldVote);
+
+                const cachedRecord = getCachedPoiImageRecord(poiId, imageGuid);
+                if (cachedRecord) {
+                    syncDetachedImageRecordFromCachedRecord(imageRecord, cachedRecord);
+                    refreshPoiImageVoteBadges(poiId, imageGuid, imageRecord);
+                }
+            } catch (err) {
+                console.warn("[WFMM - Base] Failed to update photo vote:", err);
+
+                // Revert to the previous local state if the server rejects/fails.
+                imageRecord.playerVoted = previousVoted;
+                imageRecord.playerVotes = previousVotes;
+
+                const cachedRecord = getCachedPoiImageRecord(poiId, imageGuid);
+                if (cachedRecord) {
+                    cachedRecord.playerVoted = previousVoted;
+                    cachedRecord.playerVotes = previousVotes;
+                }
+
+                refreshPoiImageVoteBadges(poiId, imageGuid, imageRecord);
+            } finally {
+                delete button.dataset.votePending;
+            }
+        });
+
+        return button;
+    }
+
+    function renderPoiImageVoteBadgeIntoHost(hostEl, poi, imageRecord, options = {}) {
+        if (!hostEl) return;
+
+        hostEl.innerHTML = "";
+
+        const badge = createPoiImageVoteBadge(poi, imageRecord, options);
+
+        if (!badge) {
+            hostEl.classList.add("wfmapmods-is-hidden");
+            return;
+        }
+
+        hostEl.classList.remove("wfmapmods-is-hidden");
+        hostEl.appendChild(badge);
+    }
+
+    function openGalleryFullscreenViewer({ dialogEl, imageUrls, imageRecords, startIndex = 0 }) {
+        const records = Array.isArray(imageRecords) && imageRecords.length
+        ? imageRecords
+        : buildImageRecordsFromUrls(imageUrls);
+
+        if (!dialogEl || !records.length) return;
 
         // Prevent multiple fullscreen layers
         if (document.querySelector(".wfmapmods-gallery-fs")) return;
 
-        let idx = Math.max(0, Math.min(startIndex, imageUrls.length - 1));
+        let idx = Math.max(0, Math.min(startIndex, records.length - 1));
+
+        function currentRecord() {
+            return records[idx] || null;
+        }
+
+        function currentUrl() {
+            return getImageRecordUrl(currentRecord());
+        }
 
         const fs = document.createElement("div");
         fs.className = "wfmapmods-gallery-fs";
@@ -8616,46 +9285,57 @@
         rightBtn.setAttribute("aria-label", "Next photo");
         rightBtn.innerHTML = "›";
 
+        const metaEl = document.createElement("div");
+        metaEl.className = "wfmapmods-gallery-fs-meta";
+
         const imgLink = document.createElement("a");
         imgLink.className = "wfmapmods-gallery-fs-imglink";
-        imgLink.href = withS0(imageUrls[idx]);         // NEW TAB: full res
+        imgLink.href = withS0(currentUrl());
         imgLink.target = "_blank";
         imgLink.rel = "noopener noreferrer";
         imgLink.title = "Open image in new tab";
 
         const img = document.createElement("img");
         img.className = "wfmapmods-gallery-fs-img";
-        img.src = withS1200(imageUrls[idx]);           // VIEWER: fast load
-        img.alt = `Photo ${idx + 1} of ${imageUrls.length}`;
+        img.src = withS1200(currentUrl());
+        img.alt = `Photo ${idx + 1} of ${records.length}`;
 
         imgLink.appendChild(img);
 
         const counter = document.createElement("div");
         counter.className = "wfmapmods-gallery-fs-counter";
-        counter.textContent = `${idx + 1}/${imageUrls.length}`;
+        counter.textContent = `${idx + 1}/${records.length}`;
 
         fs.appendChild(closeBtn);
         fs.appendChild(leftBtn);
         fs.appendChild(rightBtn);
+        fs.appendChild(metaEl);
         fs.appendChild(imgLink);
         fs.appendChild(counter);
 
         document.body.appendChild(fs);
 
+        function updateMeta() {
+            const text = getPhotoSubmittedText(currentRecord());
+            metaEl.textContent = text;
+            metaEl.classList.toggle("wfmapmods-is-hidden", !text);
+        }
+
         function setIndex(next) {
-            idx = (next + imageUrls.length) % imageUrls.length;
+            idx = (next + records.length) % records.length;
 
-            // Update viewer image (fast)
-            img.src = withS1200(imageUrls[idx]);
+            const url = currentUrl();
 
-            // Update link target (full)
-            imgLink.href = withS0(imageUrls[idx]);
+            img.src = withS1200(url);
+            imgLink.href = withS0(url);
 
-            img.alt = `Photo ${idx + 1} of ${imageUrls.length}`;
-            counter.textContent = `${idx + 1}/${imageUrls.length}`;
+            img.alt = `Photo ${idx + 1} of ${records.length}`;
+            counter.textContent = `${idx + 1}/${records.length}`;
 
-            // Optional: prefetch neighbors for faster arrowing
-            prefetchNeighborImages(imageUrls, idx);
+            updateMeta();
+
+            const urls = records.map(getImageRecordUrl).filter(Boolean);
+            prefetchNeighborImages(urls, idx);
         }
 
         function closeFs() {
@@ -8663,40 +9343,61 @@
             fs.remove();
         }
 
-        // Prefetch current neighbors once on open
-        prefetchNeighborImages(imageUrls, idx);
-
-        // Buttons
-        leftBtn.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); setIndex(idx - 1); });
-        rightBtn.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); setIndex(idx + 1); });
-        closeBtn.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); closeFs(); });
-
-        fs.addEventListener("pointerdown", (ev) => {
-            if (ev.target === fs) closeFs();
-        });
+        const initialUrls = records.map(getImageRecordUrl).filter(Boolean);
+        prefetchNeighborImages(initialUrls, idx);
+        updateMeta();
 
         function keyHandlerCapture(ev) {
-            const k = ev.key;
-            if (k === "Escape") {
+            if (ev.key === "Escape") {
                 ev.preventDefault();
                 ev.stopPropagation();
                 closeFs();
                 return;
             }
-            if (k === "ArrowLeft") {
+
+            if (ev.key === "ArrowLeft") {
                 ev.preventDefault();
                 ev.stopPropagation();
                 setIndex(idx - 1);
                 return;
             }
-            if (k === "ArrowRight") {
+
+            if (ev.key === "ArrowRight") {
                 ev.preventDefault();
                 ev.stopPropagation();
                 setIndex(idx + 1);
-                return;
             }
         }
+
+        closeBtn.addEventListener("click", (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            closeFs();
+        });
+
+        leftBtn.addEventListener("click", (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            setIndex(idx - 1);
+        });
+
+        rightBtn.addEventListener("click", (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            setIndex(idx + 1);
+        });
+
+        fs.addEventListener("click", (ev) => {
+            if (ev.target === fs) closeFs();
+        });
+
         document.addEventListener("keydown", keyHandlerCapture, true);
+
+        if (records.length <= 1) {
+            leftBtn.classList.add("wfmapmods-is-hidden");
+            rightBtn.classList.add("wfmapmods-is-hidden");
+            counter.classList.add("wfmapmods-is-hidden");
+        }
     }
 
     const _prefetchCache = new Set();
@@ -12190,7 +12891,7 @@
         if (prevGuid && markersByGuid?.[prevGuid]) refreshPoiMarkerIcon(markersByGuid[prevGuid]);
         if (nextGuid && markersByGuid?.[nextGuid]) refreshPoiMarkerIcon(markersByGuid[nextGuid]);
 
-        ensurePoiAdditionalImagesLoaded(poi);
+        ensureSelectedPoiEnrichmentLoaded(poi);
         updateSelectedPoiCircle(poi.lat, poi.lng);
 
         if (currentMapMode === MAP_MODE.MOBILE) {
@@ -13729,6 +14430,23 @@
   display: block;
 }
 
+.wfmapmods-gallery-fs-meta {
+  position: absolute;
+  top: 18px;
+  left: 32px;
+  z-index: 10003;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  pointer-events: none;
+  max-width: calc(100vw - 120px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wfmapmods-gallery-fs-close {
   position: absolute;
   top: 10px;
@@ -13774,6 +14492,126 @@
   padding: 4px 10px;
   border-radius: 9999px;
 }
+
+/* =============================================================================
+   Photo voting buttons
+   ============================================================================= */
+
+.wfmapmods-gallery-tile {
+  position: relative;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+  text-align: inherit;
+  font: inherit;
+}
+
+.wfmapmods-photo-vote-host {
+  position: absolute;
+  z-index: 3;
+  right: 8px;
+  bottom: 8px;
+}
+
+.wfmapmods-photo-vote-host--overlay {
+  right: 10px;
+  bottom: 10px;
+}
+
+.wfmapmods-photo-vote-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+
+  min-width: 42px;
+  height: 24px;
+  padding: 0 8px;
+
+  border: 0;
+  border-radius: 999px;
+  background: rgba(32, 32, 32, 0.52);
+  color: rgba(255, 255, 255, 0.86);
+
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+
+  cursor: pointer;
+  box-shadow: none;
+  backdrop-filter: blur(1px);
+
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    transform 80ms ease,
+    opacity 120ms ease;
+}
+
+.wfmapmods-photo-vote-badge:hover {
+  background: rgba(20, 20, 20, 0.76);
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.wfmapmods-photo-vote-badge:active {
+  transform: scale(0.97);
+}
+
+.wfmapmods-photo-vote-badge:disabled {
+  cursor: wait;
+  opacity: 0.75;
+}
+
+.wfmapmods-photo-vote-badge--voted {
+  color: #ffffff;
+}
+
+.wfmapmods-photo-vote-badge--pending {
+  opacity: 0.7;
+}
+
+.wfmapmods-photo-vote-count {
+  min-width: 1ch;
+  text-align: right;
+}
+
+.wfmapmods-photo-vote-icon {
+  width: 15px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wfmapmods-photo-vote-icon svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+  fill: rgba(255, 255, 255, 0.62);
+}
+
+.wfmapmods-photo-vote-icon svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+  fill: rgba(255, 255, 255, 0.62);
+}
+
+.wfmapmods-photo-vote-badge--voted .wfmapmods-photo-vote-icon svg {
+  fill: #ffffff;
+}
+
+.wfmapmods-wayspot-overlay-image-frame {
+  position: relative;
+  display: block;
+}
+
+/* =============================================================================
+   Canvas system
+   ============================================================================= */
 
 /* Canvas-rendered generic POI markers */
 #wfmapmods-poi-canvas {
