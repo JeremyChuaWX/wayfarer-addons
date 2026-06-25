@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.11.0
+// @version      3.12.0
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -346,6 +346,8 @@
             rememberLastView: true,
             hideZoomText: false,
             showAddress: false,
+            showWayspotApprovalDate: true,
+            showWayspotSubmitterCodename: true,
             showPowerSpotRadiusAroundPokestopsAndGyms: false,
             displayInactivePowerSpotsAsActive: false,
             defaultDraftSaveLocation: "remote",
@@ -1168,7 +1170,14 @@
             const addressValue = document.createElement("div");
             addressValue.className = "wfmapmods-detail-address";
             addressValue.textContent = "";
-            detailsBody.appendChild(addressValue);
+
+            const approvalDateValue = document.createElement("div");
+            approvalDateValue.className = "wfmapmods-detail-poi-approval-date";
+            approvalDateValue.textContent = "";
+
+            const submitterValue = document.createElement("div");
+            submitterValue.className = "wfmapmods-detail-poi-submitter";
+            submitterValue.textContent = "";
 
             const statusValue = document.createElement("div");
             statusValue.className = "wfmapmods-detail-status";
@@ -1211,6 +1220,8 @@
             detailsBody.appendChild(imageBox);
             detailsBody.appendChild(coordsValue);
             detailsBody.appendChild(addressValue);
+            detailsBody.appendChild(approvalDateValue);
+            detailsBody.appendChild(submitterValue);
             detailsBody.appendChild(statusValue);
             detailsSection.appendChild(detailsBody);
 
@@ -1506,6 +1517,8 @@
         const statusEl             = sidePanelEl.querySelector(".wfmapmods-detail-status-tag-container");
         const coordsEl             = sidePanelEl.querySelector(".wfmapmods-detail-coords");
         const addressEl            = sidePanelEl.querySelector(".wfmapmods-detail-address");
+        const approvalDateEl       = sidePanelEl.querySelector(".wfmapmods-detail-poi-approval-date");
+        const submitterEl          = sidePanelEl.querySelector(".wfmapmods-detail-poi-submitter");
         const imgBox               = sidePanelEl.querySelector(".wfmapmods-detail-image-box");
         const sourceLogoEl         = sidePanelEl.querySelector(".wfmapmods-detail-poi-source");
         const pgoEntityLogoEl      = sidePanelEl.querySelector(".wfmapmods-detail-pgo-entity-logo");
@@ -1724,6 +1737,17 @@
             }
         }
 
+        // ----- POI details metadata from poi-details -----
+        if (approvalDateEl || submitterEl) {
+            updateSelectedPoiDetailsMetadataFromPoi(poi);
+
+            if (userSettings?.map?.showWayspotApprovalDate || userSettings?.map?.showWayspotSubmitterCodename) {
+                ensureSelectedPoiDetailsMetadataLoaded(poi).catch(err => {
+                    console.warn("[WFMM - Base] Failed to load POI details metadata:", err);
+                });
+            }
+        }
+
         // ----- Image -----
         if (imgBox) {
             imgBox.innerHTML = "";
@@ -1820,6 +1844,96 @@
         el.onclick = () => {
             copyAddressToClipboard(text).catch(() => {});
         };
+    }
+
+    function formatPoiDetailsDateFromTimestampMs(timestampMs) {
+        const safeTimestamp = normaliseNullableTimestampMs(timestampMs);
+        if (safeTimestamp === null) return "";
+
+        const date = new Date(safeTimestamp);
+        if (Number.isNaN(date.getTime())) return "";
+
+        const locales = Array.isArray(navigator.languages) && navigator.languages.length
+        ? navigator.languages
+        : (navigator.language || undefined);
+
+        return new Intl.DateTimeFormat(locales, {
+            year: "numeric",
+            month: "short",
+            day: "numeric"
+        }).format(date);
+    }
+
+    function getPoiApprovalDateText(poi) {
+        return formatPoiDetailsDateFromTimestampMs(poi?.creationTimestampMs);
+    }
+
+    function getPoiSubmitterCodenameText(poi) {
+        return normaliseNullableString(poi?.submitterTrainerName)?.trim() || "";
+    }
+
+    function clearSelectedPoiDetailsMetadataInPanel() {
+        if (!sidePanelEl) return;
+
+        const approvalEl = sidePanelEl.querySelector(".wfmapmods-detail-poi-approval-date");
+        const submitterEl = sidePanelEl.querySelector(".wfmapmods-detail-poi-submitter");
+
+        if (approvalEl) {
+            approvalEl.textContent = "";
+            approvalEl.classList.add("wfmapmods-is-hidden");
+        }
+
+        if (submitterEl) {
+            submitterEl.textContent = "";
+            submitterEl.classList.add("wfmapmods-is-hidden");
+        }
+    }
+
+    function updateSelectedPoiDetailsMetadataFromPoi(poi) {
+        if (!sidePanelEl || !poi) return;
+
+        const approvalEl = sidePanelEl.querySelector(".wfmapmods-detail-poi-approval-date");
+        const submitterEl = sidePanelEl.querySelector(".wfmapmods-detail-poi-submitter");
+
+        const approvalDate = getPoiApprovalDateText(poi);
+        const submitterName = getPoiSubmitterCodenameText(poi);
+
+        if (approvalEl) {
+            const shouldShowApprovalDate = !!userSettings?.map?.showWayspotApprovalDate && !!approvalDate;
+
+            approvalEl.textContent = shouldShowApprovalDate ? `Approved ${approvalDate}` : "";
+            approvalEl.classList.toggle("wfmapmods-is-hidden", !shouldShowApprovalDate);
+        }
+
+        if (submitterEl) {
+            const shouldShowSubmitter = !!userSettings?.map?.showWayspotSubmitterCodename && !!submitterName;
+
+            submitterEl.textContent = shouldShowSubmitter ? `Submitted by ${submitterName}` : "";
+            submitterEl.classList.toggle("wfmapmods-is-hidden", !shouldShowSubmitter);
+        }
+    }
+
+    async function ensureSelectedPoiDetailsMetadataLoaded(poi) {
+        if (!poi || !poi.guid) {
+            clearSelectedPoiDetailsMetadataInPanel();
+            return;
+        }
+
+        if (!userSettings?.map?.showWayspotApprovalDate && !userSettings?.map?.showWayspotSubmitterCodename) {
+            clearSelectedPoiDetailsMetadataInPanel();
+            return;
+        }
+
+        const guidAtRequestTime = poi.guid;
+
+        updateSelectedPoiDetailsMetadataFromPoi(poi);
+
+        const details = await ensurePoiDetailsLoaded(poi, { onlyIfStillSelected: false });
+        if (!details) return;
+
+        if (selectedPoiGuid !== guidAtRequestTime) return;
+
+        updateSelectedPoiDetailsMetadataFromPoi(poi);
     }
 
     // ==================================
@@ -5602,7 +5716,6 @@
         const imageWrapper = document.createElement("a");
         imageWrapper.href = withS0(mainUrl);
         imageWrapper.className = "wfmapmods-wayspot-overlay-image-link";
-        // imageWrapper.title = "Open fullscreen viewer";
 
         const imgEl = document.createElement("img");
         imgEl.src = mainUrl;
@@ -5611,10 +5724,14 @@
 
         imageWrapper.appendChild(imgEl);
 
+        const imageMetaLabel = document.createElement("div");
+        imageMetaLabel.className = "wfmapmods-photo-meta-overlay-label wfmapmods-photo-meta-overlay-label--overlay";
+
         const imageVoteHost = document.createElement("div");
         imageVoteHost.className = "wfmapmods-photo-vote-host wfmapmods-photo-vote-host--overlay";
 
         imageFrame.appendChild(imageWrapper);
+        imageFrame.appendChild(imageMetaLabel);
         imageFrame.appendChild(imageVoteHost);
 
         const descEl = document.createElement("div");
@@ -5636,6 +5753,7 @@
             closeBtn,
             carouselEl,
             imageWrapper,
+            imageMetaLabel,
             imageVoteHost,
             imgEl
         };
@@ -5656,6 +5774,12 @@
 
         state.imgEl.src = url;
         state.imageWrapper.href = withS0(url);
+
+        if (state.imageMetaLabel) {
+            const metaText = getPhotoAbbreviatedMetaText(state.currentImageRecord);
+            state.imageMetaLabel.textContent = metaText;
+            state.imageMetaLabel.classList.toggle("wfmapmods-is-hidden", !metaText);
+        }
 
         renderPoiImageVoteBadgeIntoHost(state.imageVoteHost, state.poi, state.currentImageRecord);
 
@@ -5720,6 +5844,7 @@
             dialog: dom.dialog,
             carouselEl: dom.carouselEl,
             imageWrapper: dom.imageWrapper,
+            imageMetaLabel: dom.imageMetaLabel,
             imageVoteHost: dom.imageVoteHost,
             imgEl: dom.imgEl,
             imageRecords,
@@ -5849,6 +5974,26 @@
                 showAddressChk.checked = !!mapCfg.showAddress;
                 generalSection.appendChild(
                     createSettingsRow("Show Wayspot address", showAddressChk, {
+                        checkboxLeft: true
+                    })
+                );
+
+                const showApprovalDateChk = document.createElement("input");
+                showApprovalDateChk.type = "checkbox";
+                showApprovalDateChk.className = "wfmapmods-modal-checkbox";
+                showApprovalDateChk.checked = mapCfg.showWayspotApprovalDate !== false;
+                generalSection.appendChild(
+                    createSettingsRow("Show Wayspot approval date", showApprovalDateChk, {
+                        checkboxLeft: true
+                    })
+                );
+
+                const showSubmitterCodenameChk = document.createElement("input");
+                showSubmitterCodenameChk.type = "checkbox";
+                showSubmitterCodenameChk.className = "wfmapmods-modal-checkbox";
+                showSubmitterCodenameChk.checked = mapCfg.showWayspotSubmitterCodename !== false;
+                generalSection.appendChild(
+                    createSettingsRow("Show Wayspot submitter codename", showSubmitterCodenameChk, {
                         checkboxLeft: true
                     })
                 );
@@ -6246,6 +6391,8 @@
                     rememberChk,
                     hideZoomTextChk,
                     showAddressChk,
+                    showApprovalDateChk,
+                    showSubmitterCodenameChk,
                     showPsrAllChk,
                     inactivePsAsActiveChk,
                     nr,
@@ -6283,6 +6430,8 @@
                     rememberChk,
                     hideZoomTextChk,
                     showAddressChk,
+                    showApprovalDateChk,
+                    showSubmitterCodenameChk,
                     showPsrAllChk,
                     inactivePsAsActiveChk,
                     nr,
@@ -6318,6 +6467,8 @@
                 mapCfg.rememberLastView = !!rememberChk.checked;
                 mapCfg.hideZoomText = !!hideZoomTextChk.checked;
                 mapCfg.showAddress = !!showAddressChk.checked;
+                mapCfg.showWayspotApprovalDate = !!showApprovalDateChk.checked;
+                mapCfg.showWayspotSubmitterCodename = !!showSubmitterCodenameChk.checked;
                 mapCfg.showPowerSpotRadiusAroundPokestopsAndGyms = !!showPsrAllChk.checked;
 
                 // if this changes, marker classification/styling changes (inactive powerspots become "powerspot")
@@ -6382,6 +6533,16 @@
                 } else if (lastSelectedPoi && lastSelectedPoi.lat && lastSelectedPoi.lng) {
                     // best-effort refresh for current selection
                     ensureSelectedPoiAddressLoaded(lastSelectedPoi);
+                }
+
+                if (!mapCfg.showWayspotApprovalDate && !mapCfg.showWayspotSubmitterCodename) {
+                    clearSelectedPoiDetailsMetadataInPanel();
+                } else if (lastSelectedPoi && lastSelectedPoi.guid) {
+                    updateSelectedPoiDetailsMetadataFromPoi(lastSelectedPoi);
+
+                    ensureSelectedPoiDetailsMetadataLoaded(lastSelectedPoi).catch(err => {
+                        console.warn("[WFMM - Base] Failed to refresh POI details metadata:", err);
+                    });
                 }
 
                 // Refresh selected POI circle if one is active
@@ -8666,7 +8827,12 @@
 
         const guidAtRequestTime = poi.guid;
 
-        ensurePoiDetailsLoaded(poi).catch(err => {
+        ensurePoiDetailsLoaded(poi)
+            .then(() => {
+            if (selectedPoiGuid !== guidAtRequestTime) return;
+            updateSelectedPoiDetailsMetadataFromPoi(poi);
+        })
+            .catch(err => {
             console.warn("[WFMM] POI details enrichment failed:", err);
         });
 
@@ -8935,17 +9101,24 @@
                         tile.className = "wfmapmods-gallery-tile";
                         tile.role = "button";
                         tile.tabIndex = 0;
-                        // tile.title = "Open fullscreen viewer";
 
                         const img = document.createElement("img");
                         img.src = url;
                         img.alt = poi.title ? `${poi.title} (${idx + 1}/${records.length})` : `Photo ${idx + 1}`;
                         img.loading = "lazy";
 
+                        tile.appendChild(img);
+
+                        const metaText = getPhotoAbbreviatedMetaText(record);
+                        if (metaText) {
+                            const metaLabel = document.createElement("div");
+                            metaLabel.className = "wfmapmods-photo-meta-overlay-label";
+                            metaLabel.textContent = metaText;
+                            tile.appendChild(metaLabel);
+                        }
+
                         const voteHost = document.createElement("div");
                         voteHost.className = "wfmapmods-photo-vote-host wfmapmods-photo-vote-host--gallery";
-
-                        tile.appendChild(img);
                         tile.appendChild(voteHost);
 
                         renderPoiImageVoteBadgeIntoHost(voteHost, poi, record);
@@ -8994,34 +9167,83 @@
         });
     }
 
-    function getPhotoSubmittedText(imageRecord) {
+    function getUserPreferredLocales() {
+        if (Array.isArray(navigator.languages) && navigator.languages.length) {
+            return navigator.languages;
+        }
+
+        if (navigator.language) {
+            return navigator.language;
+        }
+
+        return undefined;
+    }
+
+    function formatUserLocaleDateFromTimestampMs(timestampMs) {
+        const safeTimestamp = normaliseNullableTimestampMs(timestampMs);
+        if (safeTimestamp === null) return "";
+
+        const date = new Date(safeTimestamp);
+        if (Number.isNaN(date.getTime())) return "";
+
+        return new Intl.DateTimeFormat(getUserPreferredLocales(), {
+            year: "numeric",
+            month: "short",
+            day: "numeric"
+        }).format(date);
+    }
+
+    function getPhotoApprovedDateText(imageRecord) {
+        return formatUserLocaleDateFromTimestampMs(imageRecord?.creationTimestampMs);
+    }
+
+    function getPhotoSubmitterNameText(imageRecord) {
+        return normaliseNullableString(imageRecord?.photographerTrainerName)?.trim() || "";
+    }
+
+    function getPhotoFullscreenMetaText(imageRecord) {
         if (!imageRecord) return "";
 
-        const timestampMs = normaliseNullableTimestampMs(imageRecord.creationTimestampMs);
-        const trainerName = normaliseNullableString(imageRecord.photographerTrainerName)?.trim() || "";
+        const approvedDate = getPhotoApprovedDateText(imageRecord);
+        const submitterName = getPhotoSubmitterNameText(imageRecord);
 
-        const parts = [];
+        const lines = [];
 
-        if (timestampMs !== null) {
-            const date = new Date(timestampMs);
-            if (!Number.isNaN(date.getTime())) {
-                const formattedDate = new Intl.DateTimeFormat(undefined, {
-                    year: "numeric",
-                    month: "short",
-                    day: "numeric"
-                }).format(date);
-
-                parts.push(formattedDate);
-            }
+        if (approvedDate) {
+            lines.push(`Approved ${approvedDate}`);
         }
 
-        if (trainerName) {
-            parts.push(`by ${trainerName}`);
+        if (submitterName) {
+            lines.push(`Submitted by ${submitterName}`);
         }
 
-        if (!parts.length) return "";
+        return lines.join("\n");
+    }
 
-        return `Submitted ${parts.join(" ")}`;
+    function getPhotoAbbreviatedMetaText(imageRecord) {
+        if (!imageRecord) return "";
+
+        const approvedDate = getPhotoApprovedDateText(imageRecord);
+        const submitterName = getPhotoSubmitterNameText(imageRecord);
+
+        if (approvedDate && submitterName) {
+            return `${approvedDate}, ${submitterName}`;
+        }
+
+        if (approvedDate) {
+            return approvedDate;
+        }
+
+        if (submitterName) {
+            return submitterName;
+        }
+
+        return "";
+    }
+
+    // Backwards-compatible name used by openGalleryFullscreenViewer().
+    function getPhotoSubmittedText(imageRecord) {
+        return getPhotoFullscreenMetaText(imageRecord);
     }
 
     function buildImageRecordsFromUrls(imageUrls) {
@@ -13585,6 +13807,25 @@
   display: block;
 }
 
+.wfmapmods-detail-poi-approval-date,
+.wfmapmods-detail-poi-submitter {
+  font-size: 11px;
+  line-height: 1.05;
+  color: #777;
+  text-align: center;
+  margin: 0;
+  padding: 0;
+  word-break: break-word;
+}
+
+.wfmapmods-detail-poi-approval-date {
+  margin-top: 2px;
+}
+
+.wfmapmods-detail-poi-submitter {
+  margin-top: 1px;
+}
+
 /* =============================================================================
    07) Status tags
    ============================================================================= */
@@ -14438,13 +14679,13 @@
   color: #ffffff;
   font-size: 14px;
   font-weight: 600;
-  line-height: 1.3;
+  line-height: 1.35;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
   pointer-events: none;
   max-width: calc(100vw - 120px);
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: pre-line;
 }
 
 .wfmapmods-gallery-fs-close {
@@ -14606,7 +14847,33 @@
 
 .wfmapmods-wayspot-overlay-image-frame {
   position: relative;
-  display: block;
+  display: table;
+  margin: 0 auto;
+  max-width: 100%;
+}
+
+.wfmapmods-photo-meta-overlay-label {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  left: 8px;
+  max-width: calc(100% - 16px);
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(32, 32, 32, 0.56);
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+  pointer-events: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wfmapmods-photo-meta-overlay-label--overlay {
+  top: 10px;
+  left: 10px;
 }
 
 /* =============================================================================
