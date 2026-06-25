@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.12.0
+// @version      3.12.1
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -5715,6 +5715,8 @@
 
         const imageWrapper = document.createElement("a");
         imageWrapper.href = withS0(mainUrl);
+        imageWrapper.target = "_blank";
+        imageWrapper.rel = "noopener noreferrer";
         imageWrapper.className = "wfmapmods-wayspot-overlay-image-link";
 
         const imgEl = document.createElement("img");
@@ -5859,23 +5861,6 @@
         } else {
             setOverlayMainImage(state, state.currentImageRecord);
         }
-
-        state.imageWrapper.addEventListener("click", (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-
-            const currentUrl = state.currentMainUrl;
-            const startIndex = Math.max(
-                0,
-                state.imageRecords.findIndex(record => getImageRecordUrl(record) === currentUrl)
-            );
-
-            openGalleryFullscreenViewer({
-                dialogEl: state.dialog,
-                imageRecords: state.imageRecords,
-                startIndex
-            });
-        });
 
         dom.closeBtn.addEventListener("click", (e) => {
             e.stopPropagation();
