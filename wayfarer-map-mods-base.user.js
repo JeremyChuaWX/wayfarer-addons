@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.13.3
+// @version      3.13.4
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -9405,6 +9405,17 @@
         let currentSortMode = getInitialGallerySortMode();
         let renderSortedGallery = null;
 
+        function buildGalleryTitle(photoCount = null) {
+            const baseTitle = poi.title ? `Gallery — ${poi.title}` : "Gallery";
+
+            if (!Number.isInteger(photoCount) || photoCount < 0) {
+                return baseTitle;
+            }
+
+            const photoLabel = photoCount === 1 ? "photo" : "photos";
+            return `${baseTitle} (${photoCount} ${photoLabel})`;
+        }
+
         const sortControls = document.createElement("div");
         sortControls.className = "wfmapmods-gallery-header-sort-controls";
 
@@ -9438,12 +9449,14 @@
 
         openModal({
             id: "wfmapmods-gallery-backdrop",
-            title: poi.title ? `Gallery — ${poi.title}` : "Gallery",
+            title: buildGalleryTitle(),
             width: 600,
             showFooterButtons: false,
             showHeaderClose: true,
             buildHeaderControls: () => sortControls,
             buildContent: (dialog, _okBtn, closeModal) => {
+                const titleEl = dialog.querySelector(".wfmapmods-modal-title");
+
                 const wrap = document.createElement("div");
                 wrap.className = "wfmapmods-gallery-wrap";
 
@@ -9458,6 +9471,11 @@
                 wrap.appendChild(grid);
                 dialog.appendChild(wrap);
 
+                function updateGalleryTitle() {
+                    if (!titleEl) return;
+                    titleEl.textContent = buildGalleryTitle(rawRecords.length);
+                }
+
                 function renderTiles(imageRecords) {
                     grid.innerHTML = "";
 
@@ -9466,6 +9484,7 @@
                     if (!records.length) {
                         loading.classList.remove("wfmapmods-is-hidden");
                         loading.textContent = "No photos found.";
+                        updateGalleryTitle();
                         return;
                     }
 
@@ -9529,6 +9548,7 @@
 
                 renderSortedGallery = function () {
                     const sortedRecords = sortGalleryImageRecords(rawRecords, currentSortMode);
+                    updateGalleryTitle();
                     renderTiles(sortedRecords);
                 };
 
