@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Report Wayspots
-// @version      3.1.4
+// @version      3.2.0
 // @description  Displays Reported Wayspots history on the map and adds additional reporting mechanisms.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
@@ -80,6 +80,7 @@
     // Api endpoint urls
     const WFMM_GCS_ENDPOINT_PART = "/api/v1/vault/mapview/gcs?";
     const WFMM_LIVE_POIS_ENDPOINT_PART = "/api/v1/vault/live-pois-in-radius?";
+    const WFMM_POI_DETAILS_ENDPOINT_PART = "/api/v1/vault/mapview/poi-details?";
 
     // Helpshift form slots
     const HS_SLOTS = {
@@ -530,6 +531,9 @@
         setupWayfarerMessaging();
         setupRouteWatcher();
         injectCss();
+
+        // Backfill old records with submitter names
+        startSubmitterBackfillInBackground();
     }
 
     function isOnMapCapableRoute() {
@@ -1794,6 +1798,8 @@
             }
         }
 
+        await addSubmitterToPayload(basePayload);
+
         openHelpshiftWithData(basePayload, popup);
     }
 
@@ -2098,6 +2104,193 @@
     }
 
     // ======================================================================
+    // Submitter lookup + backfill (rate-limited poi-details)
+    // ======================================================================
+
+    const WFMM_SUBMITTER_BACKFILL = {
+        running: false,
+        abortToken: null,
+    };
+
+    function hasSubmitterLookup(rec) {
+        // Property presence is meaningful:
+        // - missing property = old record, not checked yet
+        // - null = checked, endpoint did not provide a submitter
+        return !!rec &&
+            typeof rec === "object" &&
+            Object.prototype.hasOwnProperty.call(rec, "submitterTrainerName");
+    }
+
+    function normalizeSubmitterTrainerName(value) {
+        if (typeof value !== "string") return null;
+        const s = value.trim();
+        return s ? s : null;
+    }
+
+    async function fetchPoiSubmitterTrainerName(poiId, timeoutMs = 10000) {
+        if (!poiId || typeof poiId !== "string") return null;
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+            const url =
+                  ORIGIN_WAYFARER +
+                  WFMM_POI_DETAILS_ENDPOINT_PART +
+                  "poiId=" +
+                  encodeURIComponent(poiId);
+
+            const res = await fetch(url, {
+                method: "GET",
+                credentials: "include",
+                signal: controller.signal,
+                headers: { "Accept": "application/json" }
+            });
+
+            if (!res.ok) {
+                throw new Error("poi-details HTTP " + res.status);
+            }
+
+            const json = await res.json();
+            return normalizeSubmitterTrainerName(json?.result?.submitterTrainerName);
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    async function addSubmitterToPayload(payload) {
+        if (!payload || typeof payload !== "object") return payload;
+        if (!payload.guid) return payload;
+
+        try {
+            // If endpoint has no submitter, this deliberately stores null.
+            payload.submitterTrainerName =
+                await fetchPoiSubmitterTrainerName(payload.guid);
+        } catch (e) {
+            // Network/API failures should not block reporting.
+            // Leave the property absent so the slow backfill worker can retry later.
+            console.warn("[Report Wayspot] poi-details submitter lookup failed:", e);
+            try { delete payload.submitterTrainerName; } catch {}
+        }
+
+        return payload;
+    }
+
+    async function backfillMissingSubmitterNames({
+        records,
+        onPatched,
+        onDone,
+        delayMs = 5000,
+        timeoutMs = 10000,
+        abortToken,
+    } = {}) {
+        if (!Array.isArray(records) || !records.length) return;
+
+        const todo = records.filter(r =>
+                                    r?.id &&
+                                    r?.guid &&
+                                    !hasSubmitterLookup(r)
+                                   );
+
+        for (const rec of todo) {
+            if (abortToken?.aborted) break;
+
+            // Re-check in case another path already patched this record.
+            if (hasSubmitterLookup(rec)) continue;
+
+            try {
+                const submitterTrainerName =
+                      await fetchPoiSubmitterTrainerName(rec.guid, timeoutMs);
+
+                const patch = { submitterTrainerName };
+
+                const ok = await patchReportedWayspotInIDB(rec.id, patch);
+
+                if (ok) {
+                    Object.assign(rec, patch);
+
+                    if (typeof WFMM_CACHE !== "undefined" && WFMM_CACHE?.byId) {
+                        const cached = WFMM_CACHE.byId.get(rec.id);
+                        if (cached) Object.assign(cached, patch);
+                    }
+
+                    if (typeof onPatched === "function") {
+                        onPatched(rec.id, submitterTrainerName);
+                    }
+                }
+            } catch (e) {
+                // Do not patch on errors; leaving the property absent allows retry later.
+                console.warn("[WFMM] submitter backfill failed for", rec?.id, e);
+            }
+
+            // Rate limit: one lookup every 5 seconds.
+            if (abortToken?.aborted) break;
+            await sleep(delayMs);
+        }
+
+        if (typeof onDone === "function") onDone();
+    }
+
+    function startSubmitterBackfillInBackground() {
+        // Only run on Wayfarer, not Helpshift.
+        if (CURRENT_ORIGIN !== ORIGIN_WAYFARER) return;
+
+        // Only run one submitter backfill worker at a time globally.
+        if (WFMM_SUBMITTER_BACKFILL.running) return;
+
+        WFMM_SUBMITTER_BACKFILL.running = true;
+
+        const token = { aborted: false };
+        WFMM_SUBMITTER_BACKFILL.abortToken = token;
+
+        loadAllReportedWayspotsFromIDB()
+            .then((records) => {
+            if (token.aborted) return;
+
+            return backfillMissingSubmitterNames({
+                records,
+                delayMs: 5000,
+                timeoutMs: 10000,
+                abortToken: token,
+                onPatched: (id, submitterTrainerName) => {
+                    try {
+                        // Update cache if it is already loaded.
+                        if (typeof WFMM_CACHE !== "undefined" && WFMM_CACHE?.byId) {
+                            const cached = WFMM_CACHE.byId.get(id);
+                            if (cached) cached.submitterTrainerName = submitterTrainerName;
+                        }
+
+                        // If the Reporting History modal happens to be open,
+                        // refresh it so the user sees new submitter values appear.
+                        const ctx = WFMM_REPORTING_HISTORY_CTX;
+                        if (ctx) {
+                            const rec = Array.isArray(ctx.allReports)
+                            ? ctx.allReports.find(r => r?.id === id)
+                            : null;
+
+                            if (rec) rec.submitterTrainerName = submitterTrainerName;
+
+                            try {
+                                applyFiltersAndRender(ctx);
+                                updateSortIndicators(ctx);
+                            } catch {}
+                        }
+                    } catch {}
+                },
+                onDone: () => {
+                    WFMM_SUBMITTER_BACKFILL.running = false;
+                    WFMM_SUBMITTER_BACKFILL.abortToken = null;
+                }
+            });
+        })
+            .catch((e) => {
+            console.warn("[WFMM] background submitter backfill failed:", e);
+            WFMM_SUBMITTER_BACKFILL.running = false;
+            WFMM_SUBMITTER_BACKFILL.abortToken = null;
+        });
+    }
+
+    // ======================================================================
     // AddressString backfill (rate-limited reverse geocode)
     // ======================================================================
 
@@ -2240,7 +2433,7 @@
         openModal({
             id: REPORT_HISTORY_MODAL_ID,
             title: "Reporting History",
-            width: 720,
+            width: 800,
             showFooterButtons: false,
             buildContent: (dialog, _okBtn, closeModal) => {
                 const ctx = {
@@ -2265,7 +2458,8 @@
                         status: "all",
                         title: "",
                         ticket: "",
-                        address: ""
+                        address: "",
+                        submitter: ""
                     },
                     filterEls: null,
                     openDetailsId: null,
@@ -2630,6 +2824,23 @@
             return l;
         };
 
+        const makeFilterItem = (labelEl, controlEl, extraClass = "") => {
+            const wrap = document.createElement("div");
+            wrap.className = "wfmapmods-reporting-filter-item" +
+                (extraClass ? " " + extraClass : "");
+
+            wrap.appendChild(labelEl);
+            wrap.appendChild(controlEl);
+
+            return wrap;
+        };
+
+        const fullRowBreak = () => {
+            const br = document.createElement("div");
+            br.className = "wfmapmods-reporting-row-break";
+            return br;
+        };
+
         const starLabel = mkLabel("Star:");
         const flagSel = document.createElement("select");
         flagSel.className = "wfmapmods-reporting-btn wfmapmods-reporting-select";
@@ -2656,7 +2867,7 @@
         titleInput.placeholder = "contains…";
         titleInput.className = "wfmapmods-reporting-input";
 
-        const ticketLabel = mkLabel("Ticket Number:");
+        const ticketLabel = mkLabel("Ticket:");
         const ticketInput = document.createElement("input");
         ticketInput.type = "text";
         ticketInput.placeholder = "contains…";
@@ -2668,9 +2879,15 @@
         addressInput.placeholder = "contains…";
         addressInput.className = "wfmapmods-reporting-input";
 
+        const submitterLabel = mkLabel("Submitter:");
+        const submitterInput = document.createElement("input");
+        submitterInput.type = "text";
+        submitterInput.placeholder = "contains…";
+        submitterInput.className = "wfmapmods-reporting-input";
+
         const clearBtn = document.createElement("button");
         clearBtn.type = "button";
-        clearBtn.className = "wfmapmods-reporting-btn";
+        clearBtn.className = "wfmapmods-reporting-btn wfmapmods-reporting-btn--clear";
         clearBtn.textContent = "Clear filters";
 
         const apply = () => {
@@ -2679,8 +2896,11 @@
             ctx.filters.title = titleInput.value || "";
             ctx.filters.ticket = ticketInput.value || "";
             ctx.filters.address = addressInput.value || "";
+            ctx.filters.submitter = submitterInput.value || "";
+
             ctx.page = 0;
             ctx.openDetailsId = null;
+
             applyFiltersAndRender(ctx);
             updateSortIndicators(ctx);
         };
@@ -2689,18 +2909,10 @@
         statusSel.addEventListener("change", apply);
 
         let t = null;
+
         titleInput.addEventListener("input", () => {
             clearTimeout(t);
             t = setTimeout(apply, 150);
-        });
-
-        clearBtn.addEventListener("click", () => {
-            flagSel.value = "all";
-            statusSel.value = "all";
-            titleInput.value = "";
-            ticketInput.value = "";
-            addressInput.value = "";
-            apply();
         });
 
         ticketInput.addEventListener("input", () => {
@@ -2713,29 +2925,30 @@
             t = setTimeout(apply, 150);
         });
 
+        submitterInput.addEventListener("input", () => {
+            clearTimeout(t);
+            t = setTimeout(apply, 150);
+        });
 
-        row.appendChild(starLabel);
-        row.appendChild(flagSel);
+        clearBtn.addEventListener("click", () => {
+            flagSel.value = "all";
+            statusSel.value = "all";
+            titleInput.value = "";
+            ticketInput.value = "";
+            addressInput.value = "";
+            submitterInput.value = "";
+            apply();
+        });
 
-        row.appendChild(titleLabel);
-        row.appendChild(titleInput);
+        row.appendChild(makeFilterItem(starLabel, flagSel));
+        row.appendChild(makeFilterItem(titleLabel, titleInput, "wfmapmods-reporting-filter-item--title"));
+        row.appendChild(makeFilterItem(statusLabel, statusSel));
+        row.appendChild(makeFilterItem(ticketLabel, ticketInput, "wfmapmods-reporting-filter-item--ticket"));
 
-        row.appendChild(statusLabel);
-        row.appendChild(statusSel);
+        // row.appendChild(fullRowBreak());
 
-        const fullRowBreak = () => {
-            const br = document.createElement("div");
-            br.className = "wfmapmods-reporting-row-break";
-            return br;
-        };
-
-        row.appendChild(fullRowBreak());
-
-        row.appendChild(ticketLabel);
-        row.appendChild(ticketInput);
-
-        row.appendChild(addressLabel);
-        row.appendChild(addressInput);
+        row.appendChild(makeFilterItem(addressLabel, addressInput, "wfmapmods-reporting-filter-item--address"));
+        row.appendChild(makeFilterItem(submitterLabel, submitterInput, "wfmapmods-reporting-filter-item--submitter"));
 
         const spacer = document.createElement("div");
         spacer.className = "wfmapmods-reporting-filters-spacer";
@@ -2743,7 +2956,16 @@
 
         row.appendChild(clearBtn);
 
-        ctx.filterEls = { flagSel, statusSel, titleInput, clearBtn };
+        ctx.filterEls = {
+            flagSel,
+            statusSel,
+            titleInput,
+            ticketInput,
+            addressInput,
+            submitterInput,
+            clearBtn
+        };
+
         return row;
     }
 
@@ -2812,6 +3034,13 @@
             addRow("New Coordinates", `${rec.lat_new.toFixed(6)}, ${rec.lng_new.toFixed(6)}`);
         }
 
+        addRow(
+            "Submitter",
+            hasSubmitterLookup(rec)
+            ? (rec.submitterTrainerName || "Not available")
+            : "Not checked"
+        );
+
         addRow("Address", rec.addressString);
         addRow("Removal Reason", rec.removalReasonText);
         addRow("Supporting Text", rec.supportingText);
@@ -2879,6 +3108,7 @@
         const titleNeedle = (f.title || "").trim().toLowerCase();
         const ticketNeedle = (f.ticket || "").trim().toLowerCase();
         const addressNeedle = (f.address || "").trim().toLowerCase();
+        const submitterNeedle = (f.submitter || "").trim().toLowerCase();
 
         let out = all.filter(rec => {
             if (!rec || typeof rec !== "object") return false;
@@ -2909,6 +3139,17 @@
             if (addressNeedle) {
                 const a = (typeof rec.addressString === "string" ? rec.addressString : "").toLowerCase();
                 if (!a.includes(addressNeedle)) return false;
+            }
+
+            // submitter filter
+            if (submitterNeedle) {
+                const s = (
+                    typeof rec.submitterTrainerName === "string"
+                    ? rec.submitterTrainerName
+                    : ""
+                ).toLowerCase();
+
+                if (!s.includes(submitterNeedle)) return false;
             }
 
             return true;
@@ -3255,6 +3496,7 @@
             { header: "Guid",                 value: (r) => r.guid },
             { header: "Title",                value: (r) => r.title },
             { header: "Description",          value: (r) => r.description },
+            { header: "Submitter",            value: (r) => r.submitterTrainerName },
             { header: "Lat",                  value: (r) => r.lat },
             { header: "Lng",                  value: (r) => r.lng },
             { header: "Map link",             value: (r) => mapLink(r.lat, r.lng) },
@@ -3315,6 +3557,11 @@
 
         if (typeof r.lastKnownStatus !== "string" || !r.lastKnownStatus) {
             r.lastKnownStatus = "Live";
+        }
+
+        if (hasSubmitterLookup(r)) {
+            r.submitterTrainerName =
+                normalizeSubmitterTrainerName(r.submitterTrainerName);
         }
 
         if (typeof r.lastSeenMs !== "number" || !Number.isFinite(r.lastSeenMs)) {
@@ -4906,6 +5153,9 @@
             imageUrl:      (typeof wp.imageUrl === "string") ? wp.imageUrl : null,
             addressString: (typeof wp.addressString === "string") ? wp.addressString : null,
             isCommunityContributed: (typeof wp.isCommunityContributed === "boolean") ? wp.isCommunityContributed : null,
+            ...(hasSubmitterLookup(wp)
+                ? { submitterTrainerName: normalizeSubmitterTrainerName(wp.submitterTrainerName) }
+                : {}),
 
             // Report metadata
             ticket,
@@ -4942,8 +5192,8 @@
   background:#fff; border-radius:10px;
   box-shadow: 0 10px 30px rgba(0,0,0,.25);
   padding:14px;
-  max-width: min(96vw, 860px);
-  width: min(860px, 96vw);
+  max-width: min(96vw, 1040px);
+  width: min(1040px, 96vw);
   overflow: hidden;
 }
 .wfmapmods-reporting-title{
@@ -5083,9 +5333,19 @@
 .wfmapmods-reporting-filters{
   display:flex;
   flex-wrap:wrap;
-  gap:8px;
+  gap:8px 14px;
   align-items:center;
   padding:6px 0;
+}
+
+/* One filter item = label + input/select.
+   This prevents the label wrapping onto one line and the input onto another. */
+.wfmapmods-reporting-filter-item{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  flex:0 0 auto;
+  white-space:nowrap;
 }
 
 /* Label in filters/details */
@@ -5107,6 +5367,25 @@
   border:1px solid #d1d5db;
   border-radius:6px;
   min-width:180px;
+}
+
+/* Filter-specific input widths */
+.wfmapmods-reporting-filter-item .wfmapmods-reporting-input{
+  width:180px;
+}
+
+.wfmapmods-reporting-filter-item--title .wfmapmods-reporting-input,
+.wfmapmods-reporting-filter-item--address .wfmapmods-reporting-input{
+  width:220px;
+}
+
+.wfmapmods-reporting-filter-item--ticket .wfmapmods-reporting-input{
+  min-width:100px;
+  width:120px;
+}
+
+.wfmapmods-reporting-filter-item--submitter .wfmapmods-reporting-input{
+  width:180px;
 }
 
 /* Full-width break in flex row */
@@ -5281,7 +5560,7 @@
 
 /* Narrow Ticket input */
 .wfmapmods-reporting-input--ticket{
-  min-width: 100px;
+  min-width: 500px;
   width: 100px;
 }
 
