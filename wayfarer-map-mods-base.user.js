@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.12.1
+// @version      3.13.0
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -79,6 +79,25 @@
         ACCEPTED: "Accepted",
     };
 
+    // ----- Image gallery -----
+    const GALLERY_SORT_MODES = {
+        PHOTO_VOTES: "photo_votes",
+        PHOTO_AGE_DESC: "photo_age_desc",
+        PHOTO_AGE_ASC: "photo_age_asc",
+        CODENAME_ASC: "codename_asc"
+    };
+
+    const GALLERY_SORT_LABELS = {
+        [GALLERY_SORT_MODES.PHOTO_VOTES]: "Photo Vote ▼",
+        [GALLERY_SORT_MODES.PHOTO_AGE_DESC]: "Photo Age ▼",
+        [GALLERY_SORT_MODES.PHOTO_AGE_ASC]: "Photo Age ▲",
+        [GALLERY_SORT_MODES.CODENAME_ASC]: "Codename A-Z"
+    };
+
+    // ----- Timestamps ------
+    const COURTS_OF_THE_WORLD_IMPORT_TIMESTAMP_MS = 1661286015088;
+    const WAYSPOST_PHOTO_ESTIMATE_CUTOFF_TIMESTAMP_MS = Date.UTC(2019, 7, 1); // 1 Aug 2019
+
     // ----- Logos and image URLs -----
     const WAYFARER_LOGO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 168.64822 385.63867"><g transform="translate(-1713.3254,-206.92756)"><path fill="#000000" d="m 1796.8177,206.93648 c -1.4336,0.0214 -2.8694,0.0811 -4.3086,0.17968 -46.5329,3.18681 -81.4741,42.22048 -79.0664,88.33008 0.6634,12.70543 1.194,14.21682 45.043,128.26758 12.3703,32.17497 22.7806,59.4 23.1328,60.5 0.9228,2.88168 3.7726,6.02575 7.6817,8.47656 7.3893,4.63273 19.8475,0.73709 23.4296,-7.32617 2.4087,-5.42181 55.0508,-143.34771 61.4317,-160.95508 6.7916,-18.74043 8.5934,-28.23315 7.5273,-39.66015 -2.0038,-21.47603 -10.6317,-39.26432 -26.3027,-54.23633 -16.3041,-15.57678 -37.0635,-23.89663 -58.5684,-23.57617 z m 0.6875,51.41406 a 33.067028,33.067028 0 0 1 33.0664,33.0664 33.067028,33.067028 0 0 1 -33.0664,33.06641 33.067028,33.067028 0 0 1 -33.0683,-33.06641 33.067028,33.067028 0 0 1 33.0683,-33.0664 z m 0.8184,269.64648 c -4.5709,-0.16021 -9.2407,0.67626 -13.7168,2.65625 -5.8988,2.6093 -13.0929,9.51789 -16.1582,15.51953 -3.6613,7.16844 -4.2239,17.96942 -1.3359,25.6211 3.4496,9.13947 10.5363,16.08888 19.9726,19.58789 5.5946,2.0745 18.5971,1.31232 24.1582,-1.41602 14.0914,-6.91328 21.5412,-22.84569 17.5488,-37.52539 -3.945,-14.50608 -16.7561,-23.96272 -30.4687,-24.44336 z" /></g></svg>';
     const SUBMISSION_PIN = '<svg width="30" height="47" viewBox="0 0 30 47" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5146 0C22.5308 1.85546e-05 29.0293 6.49846 29.0293 14.5146C29.0293 22.0646 23.2643 28.2678 15.8965 28.9639V44.2354C15.8963 44.9986 15.278 45.6172 14.5146 45.6172C13.7513 45.6172 13.132 44.9986 13.1318 44.2354V28.9639C5.76427 28.2676 1.65052e-05 22.0644 0 14.5146C0 6.49845 6.49845 0 14.5146 0ZM14.5176 9.67676C11.8457 9.67693 9.67969 11.8427 9.67969 14.5146C9.67978 17.1865 11.8457 19.3524 14.5176 19.3525C17.1896 19.3525 19.3564 17.1866 19.3564 14.5146C19.3564 11.8426 17.1896 9.67676 14.5176 9.67676Z" fill="#FF4713"/><path opacity="0.3" d="M14.5145 46.9998C16.4231 46.9998 17.9703 46.2262 17.9703 45.2719C17.9703 44.3176 16.4231 43.5439 14.5145 43.5439C12.6058 43.5439 11.0586 44.3176 11.0586 45.2719C11.0586 46.2262 12.6058 46.9998 14.5145 46.9998Z" fill="#FF4713"/></svg>';
@@ -91,6 +110,7 @@
         gym: `<svg version="1.1" viewBox="0 0 654.32 696.7" xmlns="http://www.w3.org/2000/svg"><g transform="translate(-155.17 -129.6)" fill="#ff0202"><path d="m474.15 825.81c-1.6812-5.2991-19.54-71.464-25.052-92.813-2.7688-10.725-12.779-48.075-22.245-83l-17.211-63.5-26.069-0.0232c-27.672-0.0246-33.369-0.64919-54.77-6.0044-28.239-7.0662-59.671-21.947-82.102-38.869-10.248-7.7317-24.918-21.31-33.948-31.423-8.4062-9.4144-19.299-23.964-18.522-24.74 0.57377-0.57377 28.362-15.482 56.273-30.191 11-5.7969 29.139-15.438 40.308-21.425l20.308-10.885 6.1915 5.6366c26.757 24.359 62.321 32.391 96.168 21.72 14.961-4.7167 24.796-10.595 36.361-21.73 23.599-22.722 34.392-53.022 29.748-83.512-0.87528-5.7458-1.2525-10.754-0.83831-11.129 0.4142-0.3751 9.7531-5.3938 20.753-11.153 19.806-10.369 55.473-29.315 112.5-59.758 16.225-8.6616 34.45-18.353 40.5-21.536s22.925-12.185 37.5-20.004 35.725-19.067 47-24.997c11.275-5.9295 32.134-17.041 46.354-24.692 14.22-7.6508 25.98-13.77 26.134-13.598 0.27904 0.31187-39.844 80.897-232.58 467.13-98.304 196.99-101.74 203.7-102.76 200.5z"/><path d="m376 426.43c-13.74-2.3692-21.701-5.4347-31.639-12.183-11.065-7.5143-20.23-19.67-24.901-33.027-3.561-10.183-4.4975-28.09-2.0248-38.718 4.944-21.25 20.879-39.567 41.564-47.779 17.943-7.1225 39.48-5.845 57.202 3.3929 8.2599 4.3057 23.139 19.137 27.475 27.386 6.2429 11.878 7.8285 18.605 7.778 33-0.0399 11.395-0.38012 14.004-2.7558 21.131-7.081 21.243-26.356 39.571-47.199 44.881-6.1542 1.5677-21.038 2.6869-25.5 1.9175zm20.369-18.937c25.519-6.6468 42.248-32.192 37.652-57.492-6.1338-33.767-42.008-52.047-72.642-37.016-30.462 14.947-37.711 54.882-14.545 80.121 12.111 13.194 31.969 18.962 49.535 14.387z" stroke="#f00" stroke-width="5"/><path d="m167.62 433.75c-7.9115-22.511-11.425-41.875-12.293-67.75-1.6732-49.863 10.689-93.275 38.443-135 22.561-33.917 51.907-59.565 88.735-77.55 37.152-18.144 75.012-25.888 114.37-23.393 58.398 3.7012 111.4 28.197 151.63 70.074 8.7851 9.1457 24.5 28.443 24.5 30.085 0 0.32594-11.362 6.6531-25.25 14.06-59.054 31.498-77.685 41.411-84.924 45.186l-7.6736 4.0015-6.3559-6.1032c-10.452-10.037-23.512-17.491-38.5-21.973-11.914-3.5632-32.913-4.4567-45.379-1.9308-17.615 3.5692-33.758 11.98-47.342 24.666-17.829 16.651-28.514 39.41-30.222 64.378-0.53883 7.8769 0.74469 23.988 2.2167 27.824 0.28936 0.75404-1.058 2.0088-3.2904 3.0643-2.0792 0.98304-20.88 10.907-41.78 22.053-49.614 26.46-72.498 38.559-72.932 38.559-0.19298 0-1.972-4.6125-3.9533-10.25z"/></g></svg>`,
         powerspot: `<svg width="264.47mm" height="253.69mm" version="1.1" viewBox="0 0 264.47 253.69" xml:space="preserve" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><defs><linearGradient id="c" x1="61.207" x2="449.01" y1="103.22" y2="103.22" gradientTransform="translate(-2,-37.5)" gradientUnits="userSpaceOnUse"><stop stop-color="#a260c3" offset="0"/><stop stop-color="#9a6fb4" offset=".5"/><stop stop-color="#a678ca" offset="1"/></linearGradient><linearGradient id="b" x1="58.189" x2="449.44" y1="26.182" y2="26.182" gradientTransform="translate(1,23.5)" gradientUnits="userSpaceOnUse"><stop stop-color="#a271c0" stop-opacity=".99608" offset="0"/><stop stop-color="#a885bd" offset=".25"/><stop stop-color="#a68dbc" offset=".49845"/><stop stop-color="#ad98bf" offset=".75"/><stop stop-color="#b2a2ca" offset=".96478"/><stop stop-color="#ebe7fc" offset="1"/></linearGradient><filter id="f" x="-.045401" y="-.026893" width="1.0908" height="1.0538" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="4.7619707"/></filter><filter id="l" x="-.080472" y="-.065628" width="1.1609" height="1.1313" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="7.9663468"/></filter><filter id="e" x="-.082663" y="-.043292" width="1.1653" height="1.0866" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="4.1877723"/></filter><linearGradient id="a" x1="256.37" x2="255.61" y1="358.89" y2="323.89" gradientUnits="userSpaceOnUse"><stop stop-color="#e8429d" offset="0"/><stop stop-color="#e8429d" stop-opacity="0" offset="1"/></linearGradient><filter id="d" x="-.50929" y="-.1014" width="2.0186" height="1.2028" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="7.1606199"/></filter><filter id="k" x="-1.0421" y="-.0073109" width="3.0843" height="1.0146" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="1.2281692"/></filter><filter id="j" x="-.69224" y="-.12867" width="2.3845" height="1.2573" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="2.5494275"/></filter><filter id="i" x="-.2729" y="-.064634" width="1.5458" height="1.1293" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="1.4472579"/></filter><filter id="h" x="-.2729" y="-.064634" width="1.5458" height="1.1293" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="1.4472579"/></filter><filter id="g" x="-.2729" y="-.064634" width="1.5458" height="1.1293" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="1.4472579"/></filter></defs><g transform="translate(26.603 -30.162)"><path transform="matrix(.91985 0 0 .40137 -124.58 58.711)" d="m252.08 490.73s-8.4853-10.253-7.0711-13.081 8.1317-6.7175 3.8891-13.789-8.1317-14.849-4.2426-22.981c3.8891-8.1317 7.4246-15.91 2.4749-22.274-4.9498-6.364-6.364-8.4853-2.1213-16.263 4.2426-7.7782 10.607-11.667 6.0104-27.577-4.5962-15.91-5.3033-32.173-10.253-38.537-4.9498-6.364-4.9498-4.9497-7.7782-19.445-2.8284-14.496 1.4142-20.153-6.0104-27.931s-29.345-33.234-28.638-50.205c0.70711-16.971-73.893-167.94-73.893-167.94l251.73-3.5355-87.681 197.28s-6.7175 8.1317-6.364 15.556c0.35355 7.4246 0.35355 10.96-3.182 16.617-3.5355 5.6569-10.607 19.799-8.4853 24.042 2.1213 4.2426-8.8388 25.809-8.8388 31.113s-3.8891 39.244-1.4142 41.719c2.4749 2.4749 7.4246 3.8891 6.0104 7.4246-1.4142 3.5355-8.1317 11.314-7.7782 12.374s10.607 9.8995 8.1317 14.849c-2.4749 4.9497-8.8388 19.799-6.7175 22.627 2.1213 2.8284 8.1317 17.678 5.6569 22.274-2.4749 4.5962-7.7782 19.092-7.7782 19.092z" fill="#d14e9e" filter="url(#f)" opacity=".84552"/><path transform="matrix(.71076 0 0 .26289 -74.586 77.669)" d="m132.23 73.539 237.59 0.70711-113.84 290.62z" fill="#ed61e2" filter="url(#l)" stroke-linejoin="round" stroke-miterlimit="20" stroke-width="3.954" style="mix-blend-mode:normal"/><path transform="matrix(.91298 0 0 .37461 -124.86 68.513)" d="m188.09 82.024c6.4328 10.613 15.349 19.707 18.819 31.933 9.6899 20.348 15.989 42.191 18.678 64.555 2.0983 13.108 7.1957 25.398 11.885 37.698 3.4875 10.673 3.6002 21.985 2.8226 33.045 1.1596 13.044 10 23.731 12.268 36.515 2.8673 6.8333 7.8417 19.825 9.0545 23.3 4.4958-12.021 10.609-23.762 10.759-36.927 2.0724-23.824-6.6382-48.321 1.9312-71.516 3.402-11.987 7.5436-23.729 9.5663-36.041 3.3059-11.552 4.747-23.457 5.9936-35.365 2.368-10.427 9.766-18.772 12.953-29.022 1.6534-6.7536 13.918-19.255 1.02-21.44-15.322 0.71665-30.71 1.0726-46.001-0.30055-18.384 0.38057-36.752-0.31045-55.088-1.546-1.8242-0.01585-3.6495 0.02954-5.4692 0.16241" fill="#faf9fb" filter="url(#e)" opacity=".34053"/><path transform="matrix(.91298 0 0 .55196 -124.86 3.8505)" d="m253.14 491.09s-5.3033-7.4246-5.3033-12.021c0-4.5962 5.6568-7.7782 1.7678-13.789-3.8891-6.0104-13.435-15.556-8.4853-24.042 4.9498-8.4853 9.5459-19.092 5.3033-24.749-4.2426-5.6568-2.1213-3.182 0.35356-13.435 2.4749-10.253 8.1317-23.335 3.8891-33.941s-11.314-45.608-14.142-47.023 33.588 1.0607 33.588 1.0607-6.7175 21.92-6.0104 30.406c0.70711 8.4853 3.182 19.799-1.0607 28.638-0.97963 2.0409-1.7678 8.1317 0.35356 10.607 2.1213 2.4749 8.8388 13.435 4.9497 19.445-3.8891 6.0104-3.182 10.253-2.8284 14.496 0.35355 4.2426 5.3033 8.1317 3.5355 12.374s-8.4853 8.4853-6.364 15.556 8.4853 14.849 4.9498 19.092c-3.5355 4.2426-4.5962 10.253-4.5962 14.142s-9.8995 3.182-9.8995 3.182z" fill="url(#a)" filter="url(#d)"/><ellipse cx="109.32" cy="274.87" rx="13.923" ry="5.9119" fill="#a16b96" stroke="#e564eb" stroke-linejoin="round" stroke-miterlimit="20" stroke-width="2.3011"/><g transform="matrix(.92339 0 0 .39875 -127.54 80.122)" fill="#fff"><rect x="254.91" y="85.143" width="2.8284" height="403.18" filter="url(#k)" style="mix-blend-mode:normal"/><ellipse transform="matrix(.96441 0 0 1 9.2465 -14.506)" cx="256.33" cy="306.8" rx="4.4194" ry="23.776" filter="url(#j)" opacity=".73256" style="mix-blend-mode:normal"/><ellipse transform="matrix(.82784 0 0 1 44.635 -22.317)" cx="255.64" cy="252.95" rx="6.364" ry="26.87" filter="url(#i)" opacity=".74917" style="mix-blend-mode:normal"/><ellipse transform="matrix(.82784 0 0 1 44.098 -153.97)" cx="255.64" cy="252.95" rx="6.364" ry="26.87" filter="url(#h)" opacity=".74917" style="mix-blend-mode:normal"/><ellipse transform="matrix(.82784 0 0 1 44.617 -88.223)" cx="255.64" cy="252.95" rx="6.364" ry="26.87" filter="url(#g)" opacity=".74917" style="mix-blend-mode:normal"/></g><g transform="matrix(.66856 0 0 1.0507 -66.765 23.778)"><path d="m109.96 41.012c131.86 21.042 260.18 16.679 298.4 1.0607l25.102-12.374-12.374-10.96s-64.225-7.8817-91.803-9.6495c-27.577-1.7678-99.47-0.95711-121.39-0.60355s-102.18 5.3033-111.37 8.8388c-9.1924 3.5355-23.688 9.1924-23.688 9.1924l8.8388 14.142z" fill="#9e7da1"/><ellipse cx="251.97" cy="42.28" rx="141.83" ry="15.458" fill="#779953"/><path d="m60.268 44.416 13.689 19.268s22.25 20.5 149.75 21.5c127.5 1 161.08-8.3092 178.4-10.784 17.324-2.4749 28.284-7.6014 28.284-7.6014s6.9827-4.6846 10.872-9.6343c3.8891-4.9497 9.0156-11.49 9.0156-11.49l-148.58 13.347-172.53-3.5355z" fill="url(#c)"/><path d="m60.104 32.173s-0.17678-4.2426 1.2374-5.1265c1.4142-0.88388 3.2991-1.7615 14.672-6.0104 11.667-4.3588 20.663-6.0239 26.663-6.7739 6-0.75 9.6768-0.11612 9.6768-0.11612s-20.783 5.6525-24.319 8.1274-6.364 3.5355-1.0607 7.0711 31.969 11.255 67.175 13.435c35.355 2.1893 98.288 3.182 131.88 2.4749 33.588-0.70711 96.874-3.8891 110.66-6.7175s24.395-6.0104 26.87-8.8388 1.3244-5.6861-2.1213-7.7782c-4.9498-3.0052-34.471-7.7782-34.471-7.7782s13.45-1.4541 28.284 0.17678c18.686 2.0543 28.365 8.0198 32.704 10.43s2.8284 6.364 2.8284 6.364l-4.2426 9.8995-123.74 15.203-211.42-4.9497-47.023-12.728z" fill="#dfbceb"/><path d="m60.427 32.342-0.35355 11.857s20.966 14.844 67.689 17.6c46.625 2.75 78.177 6.7197 133.43 5.9697s141.5-7.25 161-12.25 27.912-9.9393 27.912-9.9393l0.33839-14.061s-6 6.25-27.5 10-105.18 10.174-160.5 10.75-144.5-0.98598-174.11-9.6771c-21.897-6.426-27.901-10.25-27.901-10.25z" fill="url(#b)"/><path d="m101.16 17.78s46.083-9.4178 169.09-9.2803c90.54 0.10116 148.25 11.375 148.25 11.375l9.4528-2.2108s-24.54-10.831-157.58-11.539c-165.31-0.8803-177.77 10.643-177.77 10.643z" fill="#dfbceb"/></g></g></svg>`
     };
+    const COURTS_OF_THE_WORLD_BASKETBALL_ICON_SVG = '<?xml version="1.0" encoding="UTF-8"?><svg enable-background="new 0 0 324.5 75" version="1.1" viewBox="0 0 44.8 44.8" xml:space="preserve" xmlns="http://www.w3.org/2000/svg"><g transform="translate(-8.4,-8.3)"><path d="m53.2 30.1c-0.3-12-10.2-21.8-22.3-21.8-6.4 0-12 2.7-16.1 6.9 4.8 3.1 10.5 4.7 16.4 4.7v1.4c-6.3 0-12.3-1.7-17.4-5.1-3.1 3.8-5.1 8.6-5.3 13.8h22.7v-8.8c2.8 0 5.6-0.4 8.2-1.1 1.3 3 2.1 6.4 2.1 9.9h-10.3v1.4h10.3c-0.1 3.4-0.9 6.8-2.1 9.9-2.6-0.7-5.3-1.1-8.2-1.1v-8.8h-22.8c0.2 5.2 2.1 10.1 5.3 13.8 5.1-3.3 11-5 17.4-5.1v1.4c-5.9 0-11.6 1.6-16.4 4.7 4 4.2 9.8 6.9 16.1 6.9 12.1 0 22-9.7 22.4-21.8zm-22.1-10.1v-10c3.3 2.3 5.8 5.4 7.6 8.9-2.4 0.7-4.9 1.1-7.6 1.1zm2.2-10.1c4.9 0.6 9.2 2.8 12.5 6.1-1.8 1-3.7 1.9-5.7 2.5-1.7-3.3-3.9-6.2-6.8-8.6zm-2.2 31.7c2.6 0 5.2 0.3 7.6 1-1.8 3.5-4.4 6.5-7.6 8.9zm2.1 10.1c2.9-2.3 5.2-5.3 6.9-8.7 2 0.6 4 1.5 5.8 2.5-3.4 3.3-7.8 5.6-12.7 6.2zm13.6-7.2c-1.9-1.1-4-2.1-6.1-2.8 1.4-3.2 2.1-6.6 2.2-10.3h8.9c-0.1 5.1-2 9.5-5 13.1zm-3.9-14.4c-0.1-3.6-0.9-7.1-2.2-10.3 2.1-0.7 4.2-1.6 6.1-2.8 3 3.5 4.9 8.1 5.1 13z" fill="#f56446"/></g></svg>';
     const MULTIPLE_PHOTOS_ICON_SVG = '<?xml version="1.0" encoding="UTF-8"?><svg width="213.89mm" height="174.57mm" version="1.1" viewBox="0 0 213.89 174.57" xml:space="preserve" xmlns="http://www.w3.org/2000/svg"><g transform="translate(.37645 -61.503)" stroke="#000"><path d="m20.58 234.35c-2.1979-0.45333-4.3682-1.2169-6.4149-2.257-6.4704-3.288-11.346-9.7044-12.757-16.789-0.37803-1.8976-0.41406-6.9772-0.34816-49.08l0.073514-46.964 0.75131-2.249c2.5535-7.6435 7.6747-13.136 14.714-15.78 4.7657-1.7901 0.19699-1.6827 71.583-1.6827 69.486 0 66.655-0.05266 70.619 1.3134 6.4979 2.2392 11.883 7.2028 14.613 13.469 1.949 4.4731 1.8159 0.59305 1.8159 52.951v46.964l-0.59839 2.249c-2.2583 8.4875-8.4728 14.786-17.279 17.514l-1.9666 0.60907-66.543 0.0436c-54.732 0.0359-66.848-0.0193-68.262-0.31106zm134.11-9.7731c4.5541-1.2121 8.2075-4.5122 10.029-9.059l0.72159-1.8014 0.0705-45.773c0.0485-31.486-0.0171-46.196-0.21004-47.128-0.81061-3.9142-4.0123-8.0299-7.6712-9.8612-1.2326-0.61691-2.7869-1.1514-3.8712-1.3313-1.3261-0.21992-19.188-0.28069-66.635-0.2267l-64.823 0.0738-1.6898 0.6103c-4.5638 1.6483-8.0747 5.3194-9.399 9.8276-0.38123 1.2978-0.4236 6.0252-0.42363 47.261-2.4e-5 44.835 0.01117 45.856 0.52105 47.506 1.4434 4.6715 5.2815 8.4549 9.933 9.7915 1.4829 0.42612 5.8844 0.45721 66.807 0.47188 55.73 0.0134 65.426-0.0393 66.64-0.36238zm-131.33-16.195c-2.4136-1.2724-3.593-3.8706-2.7651-6.0916 0.41636-1.1169 48.277-48.964 49.596-49.582 1.344-0.6299 2.6253-0.62976 3.9688 4.3e-4 0.71554 0.33565 6.1562 5.6033 16.797 16.263l15.739 15.767 6.7506-6.7126c7.2339-7.1932 7.7045-7.537 9.8482-7.1942 0.58243 0.0931 1.3739 0.33603 1.7588 0.53976 0.3849 0.20374 7.385 7.0762 15.556 15.272 14.313 14.357 14.866 14.948 15.117 16.168 0.78588 3.8084-2.5512 6.9035-6.1957 5.7465-0.81949-0.26016-3.5955-2.8903-13.923-13.192l-12.9-12.867-12.765 12.755c-8.7899 8.7828-13.071 12.881-13.749 13.161-3.3223 1.3718-6.5569-0.93883-6.5569-4.6838 0-0.86013 0.16833-1.6611 0.43314-2.0611 0.23823-0.3598 2.5295-2.7681 5.0917-5.3518l4.6585-4.6976-27.646-27.646-22.027 22.001c-12.115 12.1-22.408 22.191-22.873 22.423-1.0705 0.53375-2.8855 0.52567-3.9157-0.0174zm162.19-10.906c-1.2588-0.57806-1.823-1.1681-2.3712-2.4801-0.53831-1.2884-0.50581-2.7348 0.0907-4.0337 0.85215-1.8557 2.4559-2.7753 4.8517-2.782 5.1604-0.0144 10.423-3.3231 12.843-8.0751 1.4757-2.8971 1.3939 0.0276 1.3918-49.76-2e-3 -44.827-0.0132-45.848-0.52316-47.499-1.4742-4.7713-5.4911-8.6432-10.236-9.8665-1.462-0.37694-8.1808-0.41915-66.713-0.41915h-65.088l-1.8138 0.5524c-3.3718 1.0269-6.0344 2.982-7.8808 5.7867-1.5706 2.3859-2.2584 4.4138-2.5206 7.4317-0.24736 2.8478-0.66251 3.8888-1.9294 4.8379-1.0775 0.80724-1.8377 1.0418-3.2823 1.0128-1.8302-0.03674-3.6626-1.3282-4.308-3.0362-0.42906-1.1356-0.33031-4.2762 0.21799-6.9328 1.8685-9.053 8.4663-16.044 17.652-18.705l2.0889-0.60503h66.94c62.924 0 67.04 0.02776 68.614 0.46277 0.92073 0.25452 2.4685 0.78001 3.4396 1.1678 5.9166 2.3625 10.999 7.4329 13.411 13.38 1.8391 4.5338 1.7387 1.2995 1.6572 53.384l-0.0735 46.964-0.7513 2.249c-2.0244 6.06-5.8269 10.951-10.885 14.001-4.499 2.7128-12.071 4.227-14.822 2.964z" stroke-width="2.8"/><circle cx="106.85" cy="140.48" r="11.938" fill="#fff" stroke-linejoin="round" stroke-miterlimit="20" stroke-width="9.404"/></g></svg>'
 
     const NIANTIC_PLACEHOLDER_IMAGE_URL = 'https://lh3.googleusercontent.com/fs2mYM4r9Qq93ejdOP_2lwefRNLVa9tqmJW7XXwqNhMCMXNKwoJoFuMboBpXwnKUf7fJGImbajM9mHAOMlndt5A-Ts9Qh9f_t6YoaQ6u';
@@ -347,7 +367,10 @@
             hideZoomText: false,
             showAddress: false,
             showWayspotApprovalDate: true,
+            estimatePre2019WayspotAgesFromPhotos: false,
             showWayspotSubmitterCodename: true,
+            rememberLastGallerySort: false,
+            lastGallerySortMode: "photo_votes",
             showPowerSpotRadiusAroundPokestopsAndGyms: false,
             displayInactivePowerSpotsAsActive: false,
             defaultDraftSaveLocation: "remote",
@@ -1463,6 +1486,148 @@
         return span;
     }
 
+    function renderPoiGameEntityIcon(pgoEntityLogoEl, poi) {
+        if (!pgoEntityLogoEl) return;
+
+        if (isCourtsOfTheWorldPoi(poi)) {
+            pgoEntityLogoEl.style.display = "flex";
+            pgoEntityLogoEl.style.position = "relative";
+            pgoEntityLogoEl.style.overflow = "visible";
+            pgoEntityLogoEl.innerHTML = COURTS_OF_THE_WORLD_BASKETBALL_ICON_SVG;
+            pgoEntityLogoEl.title = "Courts of the World imports do not natively appear on the Wayfarer Map, and lack data about Gym or PokéStop status.";
+            pgoEntityLogoEl.dataset.inactive = "0";
+            pgoEntityLogoEl.dataset.slashed = "0";
+            pgoEntityLogoEl.dataset.iconKey = "courts-of-the-world";
+
+            const svg = pgoEntityLogoEl.querySelector("svg");
+            if (svg) {
+                Object.assign(svg.style, {
+                    width: "100%",
+                    height: "100%",
+                    display: "block",
+                    opacity: "1",
+                    filter: ""
+                });
+            }
+
+            return;
+        }
+
+        const entityRaw = (poi?.pgoEntity || "").toUpperCase();
+        const statusRaw = (poi?.pgoEntityStatus || "").toUpperCase();
+
+        const iconSvg =
+              entityRaw === "POKESTOP" ? POI_TYPE_ICONS.stop :
+        entityRaw === "GYM" ? POI_TYPE_ICONS.gym :
+        entityRaw === "POWERSPOT" ? POI_TYPE_ICONS.powerspot :
+        "";
+
+        const label =
+              entityRaw === "POKESTOP" ? "PokéStop" :
+        entityRaw === "GYM" ? "Gym" :
+        entityRaw === "POWERSPOT" ? "Power Spot" :
+        "";
+
+        const isInactive = statusRaw === "INACTIVE";
+        const showSlash = isInactive && (entityRaw === "POKESTOP" || entityRaw === "GYM");
+
+        if (!iconSvg) {
+            pgoEntityLogoEl.style.display = "none";
+            pgoEntityLogoEl.innerHTML = "";
+            pgoEntityLogoEl.removeAttribute("title");
+            delete pgoEntityLogoEl.dataset.inactive;
+            delete pgoEntityLogoEl.dataset.slashed;
+            delete pgoEntityLogoEl.dataset.iconKey;
+            return;
+        }
+
+        pgoEntityLogoEl.style.display = "flex";
+        pgoEntityLogoEl.style.position = "relative";
+        pgoEntityLogoEl.style.overflow = "visible";
+
+        const iconKey = `${entityRaw}|${statusRaw}|${showSlash ? "slashed" : "normal"}`;
+        if (pgoEntityLogoEl.dataset.iconKey !== iconKey) {
+            pgoEntityLogoEl.innerHTML = iconSvg + (showSlash
+                                                   ? `<span class="wfmapmods-pgo-inactive-slash" aria-hidden="true"></span>`
+                                                   : "");
+            pgoEntityLogoEl.dataset.iconKey = iconKey;
+        }
+
+        const svg = pgoEntityLogoEl.querySelector("svg");
+        if (svg) {
+            Object.assign(svg.style, {
+                width: "100%",
+                height: "100%",
+                display: "block"
+            });
+            svg.style.opacity = isInactive ? "0.35" : "1";
+            svg.style.filter = isInactive ? "grayscale(1)" : "";
+        }
+
+        if (!isInactive) {
+            pgoEntityLogoEl.title = label;
+        } else if (entityRaw === "POWERSPOT") {
+            pgoEntityLogoEl.title = "This Power Spot may appear during this rotation but is not currently active.";
+        } else {
+            pgoEntityLogoEl.title = `This ${label} has a status of 'Inactive'.\nIt will not appear in Pokémon Go.`;
+        }
+
+        pgoEntityLogoEl.dataset.inactive = isInactive ? "1" : "0";
+        pgoEntityLogoEl.dataset.slashed = showSlash ? "1" : "0";
+    }
+
+    function renderPoiCommunityContributionIcon(communityLogoEl, poi) {
+        if (!communityLogoEl) return;
+
+        const cc = isCourtsOfTheWorldPoi(poi) ? false : poi?.isCommunityContributed;
+
+        const iconSvg =
+              cc === true ? COMMUNITY_CONTRIBUTED_ICON_SVG :
+        cc === false ? IMPORT_ICON_SVG :
+        "";
+
+        if (!iconSvg) {
+            communityLogoEl.style.display = "none";
+            communityLogoEl.innerHTML = "";
+            communityLogoEl.removeAttribute("title");
+            delete communityLogoEl.dataset.iconKey;
+            return;
+        }
+
+        communityLogoEl.style.display = "flex";
+
+        const iconKey = cc === true ? "community" : "import";
+        if (communityLogoEl.dataset.iconKey !== iconKey) {
+            communityLogoEl.innerHTML = iconSvg;
+            communityLogoEl.dataset.iconKey = iconKey;
+
+            const svg = communityLogoEl.querySelector("svg");
+            if (svg) {
+                Object.assign(svg.style, {
+                    width: "100%",
+                    height: "100%",
+                    display: "block"
+                });
+            }
+        }
+
+        communityLogoEl.title = cc === true ? "Community Contributed" : "Imported Wayspot";
+    }
+
+    function refreshSelectedPoiStatusIconsFromPoi(poi) {
+        if (!sidePanelEl || !poi) return;
+
+        renderPoiGameEntityIcon(
+            sidePanelEl.querySelector(".wfmapmods-detail-pgo-entity-logo"),
+            poi
+        );
+
+        renderPoiCommunityContributionIcon(
+            sidePanelEl.querySelector(".wfmapmods-detail-community-logo"),
+            poi
+        );
+    }
+
     function updateLayersControlPosition() {
         if (!topRightControlsBarEl) return;
 
@@ -1580,88 +1745,10 @@
         }
 
         // ----- PGO Game Entity Icon -----
-        if (pgoEntityLogoEl) {
-            const entityRaw = (poi?.pgoEntity || "").toUpperCase();       // "POKESTOP" | "GYM" | "POWERSPOT" | ""
-            const statusRaw = (poi?.pgoEntityStatus || "").toUpperCase(); // "ACTIVE" | "INACTIVE" | ""
-
-            const iconSvg =
-                  entityRaw === "POKESTOP" ? POI_TYPE_ICONS.stop :
-            entityRaw === "GYM"      ? POI_TYPE_ICONS.gym :
-            entityRaw === "POWERSPOT"? POI_TYPE_ICONS.powerspot :
-            "";
-
-            const label =
-                  entityRaw === "POKESTOP" ? "PokéStop" :
-            entityRaw === "GYM"      ? "Gym" :
-            entityRaw === "POWERSPOT"? "Power Spot" :
-            "";
-
-            const isInactive = (statusRaw === "INACTIVE");
-            const showSlash = isInactive && (entityRaw === "POKESTOP" || entityRaw === "GYM");
-
-            if (!iconSvg) {
-                pgoEntityLogoEl.style.display = "none";
-                pgoEntityLogoEl.innerHTML = "";
-                pgoEntityLogoEl.removeAttribute("title");
-                delete pgoEntityLogoEl.dataset.inactive;
-                delete pgoEntityLogoEl.dataset.slashed;
-            } else {
-                pgoEntityLogoEl.style.display = "flex";
-                pgoEntityLogoEl.style.position = "relative";
-                pgoEntityLogoEl.style.overflow = "visible";
-
-                pgoEntityLogoEl.innerHTML = iconSvg + (showSlash
-                                                       ? `<span class="wfmapmods-pgo-inactive-slash" aria-hidden="true"></span>`
-                                                       : "");
-
-                const svg = pgoEntityLogoEl.querySelector("svg");
-                if (svg) {
-                    Object.assign(svg.style, { width: "100%", height: "100%", display: "block" });
-                    svg.style.opacity = isInactive ? "0.35" : "1";
-                    svg.style.filter = isInactive ? "grayscale(1)" : "";
-                }
-
-                if (!isInactive) {
-                    pgoEntityLogoEl.title = label;
-                } else if (entityRaw === "POWERSPOT") {
-                    pgoEntityLogoEl.title = "This Power Spot may appear during this rotation but is not currently active.";
-                } else {
-                    pgoEntityLogoEl.title = `This ${label} has a status of 'Inactive'.\nIt will not appear in Pokémon Go.`;
-                }
-
-                pgoEntityLogoEl.dataset.inactive = isInactive ? "1" : "0";
-                pgoEntityLogoEl.dataset.slashed = showSlash ? "1" : "0";
-            }
-        }
+        renderPoiGameEntityIcon(pgoEntityLogoEl, poi);
 
         // ----- Community / Import logo -----
-        if (communityLogoEl) {
-            const cc = poi?.isCommunityContributed;
-            const iconSvg =
-                  cc === true  ? COMMUNITY_CONTRIBUTED_ICON_SVG :
-            cc === false ? IMPORT_ICON_SVG :
-            "";
-
-            if (!iconSvg) {
-                communityLogoEl.style.display = "none";
-                communityLogoEl.innerHTML = "";
-                communityLogoEl.removeAttribute("title");
-                delete communityLogoEl.dataset.iconKey;
-            } else {
-                communityLogoEl.style.display = "flex";
-
-                const iconKey = (cc === true) ? "community" : "import";
-                if (communityLogoEl.dataset.iconKey !== iconKey) {
-                    communityLogoEl.innerHTML = iconSvg;
-                    communityLogoEl.dataset.iconKey = iconKey;
-
-                    const svg = communityLogoEl.querySelector("svg");
-                    if (svg) Object.assign(svg.style, { width: "100%", height: "100%", display: "block" });
-                }
-
-                communityLogoEl.title = (cc === true) ? "Community Contributed" : "Imported Wayspot";
-            }
-        }
+        renderPoiCommunityContributionIcon(communityLogoEl, poi);
 
         // ----- Multiple photos icon/link -----
         if (multiplePhotosEl && multiplePhotosLinkEl) {
@@ -1872,6 +1959,10 @@
         return normaliseNullableString(poi?.submitterTrainerName)?.trim() || "";
     }
 
+    function getPoiDetailsDateVerb(poi) {
+        return isImportedPoi(poi) ? "Imported" : "Approved";
+    }
+
     function clearSelectedPoiDetailsMetadataInPanel() {
         if (!sidePanelEl) return;
 
@@ -1895,14 +1986,17 @@
         const approvalEl = sidePanelEl.querySelector(".wfmapmods-detail-poi-approval-date");
         const submitterEl = sidePanelEl.querySelector(".wfmapmods-detail-poi-submitter");
 
-        const approvalDate = getPoiApprovalDateText(poi);
+        const dateLine = getPoiDetailsDateLine(poi);
+        const dateTitle = getPoiDetailsDateTitle(poi);
         const submitterName = getPoiSubmitterCodenameText(poi);
 
         if (approvalEl) {
-            const shouldShowApprovalDate = !!userSettings?.map?.showWayspotApprovalDate && !!approvalDate;
+            const shouldShowDate = !!userSettings?.map?.showWayspotApprovalDate && !!dateLine;
 
-            approvalEl.textContent = shouldShowApprovalDate ? `Approved ${approvalDate}` : "";
-            approvalEl.classList.toggle("wfmapmods-is-hidden", !shouldShowApprovalDate);
+            approvalEl.textContent = shouldShowDate ? dateLine : "";
+            approvalEl.title = shouldShowDate ? dateTitle : "";
+            approvalEl.classList.toggle("wfmapmods-is-hidden", !shouldShowDate);
+            approvalEl.classList.toggle("wfmapmods-detail-poi-date-estimated", shouldShowDate && !!dateTitle);
         }
 
         if (submitterEl) {
@@ -1911,6 +2005,86 @@
             submitterEl.textContent = shouldShowSubmitter ? `Submitted by ${submitterName}` : "";
             submitterEl.classList.toggle("wfmapmods-is-hidden", !shouldShowSubmitter);
         }
+    }
+
+    function getOldestPoiImageTimestampMs(poi) {
+        const records = buildPoiImageRecordList(poi);
+
+        let oldest = null;
+
+        for (const record of records) {
+            const timestamp = normaliseNullableTimestampMs(record?.creationTimestampMs);
+            if (timestamp === null) continue;
+
+            if (oldest === null || timestamp < oldest) {
+                oldest = timestamp;
+            }
+        }
+
+        return oldest;
+    }
+
+    function canEstimatePoiCreationDateFromPhotos(poi) {
+        if (!userSettings?.map?.estimatePre2019WayspotAgesFromPhotos) return false;
+        if (normaliseNullableTimestampMs(poi?.creationTimestampMs) !== null) return false;
+
+        const oldestPhotoTimestamp = getOldestPoiImageTimestampMs(poi);
+        if (oldestPhotoTimestamp === null) return false;
+
+        return oldestPhotoTimestamp < WAYSPOST_PHOTO_ESTIMATE_CUTOFF_TIMESTAMP_MS;
+    }
+
+    function getEstimatedPoiCreationTimestampMsFromPhotos(poi) {
+        if (!canEstimatePoiCreationDateFromPhotos(poi)) return null;
+        return getOldestPoiImageTimestampMs(poi);
+    }
+
+    function getPoiDetailsDateInfo(poi) {
+        const actualTimestamp = normaliseNullableTimestampMs(poi?.creationTimestampMs);
+
+        if (actualTimestamp !== null) {
+            return {
+                timestampMs: actualTimestamp,
+                estimated: false,
+                verb: getPoiDetailsDateVerb(poi)
+            };
+        }
+
+        const estimatedTimestamp = getEstimatedPoiCreationTimestampMsFromPhotos(poi);
+
+        if (estimatedTimestamp !== null) {
+            return {
+                timestampMs: estimatedTimestamp,
+                estimated: true,
+                verb: "Approved"
+            };
+        }
+
+        return {
+            timestampMs: null,
+            estimated: false,
+            verb: ""
+        };
+    }
+
+    function getPoiDetailsDateLine(poi) {
+        const info = getPoiDetailsDateInfo(poi);
+        if (info.timestampMs === null) return "";
+
+        const dateText = formatPoiDetailsDateFromTimestampMs(info.timestampMs);
+        if (!dateText) return "";
+
+        return `${info.verb} ${dateText}${info.estimated ? "*" : ""}`;
+    }
+
+    function getPoiDetailsDateTitle(poi) {
+        const info = getPoiDetailsDateInfo(poi);
+
+        if (info.estimated) {
+            return "Estimated creation date based on oldest photo";
+        }
+
+        return "";
     }
 
     async function ensureSelectedPoiDetailsMetadataLoaded(poi) {
@@ -1923,15 +2097,6 @@
             clearSelectedPoiDetailsMetadataInPanel();
             return;
         }
-
-        const guidAtRequestTime = poi.guid;
-
-        updateSelectedPoiDetailsMetadataFromPoi(poi);
-
-        const details = await ensurePoiDetailsLoaded(poi, { onlyIfStillSelected: false });
-        if (!details) return;
-
-        if (selectedPoiGuid !== guidAtRequestTime) return;
 
         updateSelectedPoiDetailsMetadataFromPoi(poi);
     }
@@ -5973,12 +6138,45 @@
                     })
                 );
 
+                const estimatePre2019AgeChk = document.createElement("input");
+                estimatePre2019AgeChk.type = "checkbox";
+                estimatePre2019AgeChk.className = "wfmapmods-modal-checkbox";
+                estimatePre2019AgeChk.checked = !!mapCfg.estimatePre2019WayspotAgesFromPhotos;
+                estimatePre2019AgeChk.disabled = !showApprovalDateChk.checked;
+
+                const estimatePre2019AgeRow = createSettingsRow("Estimate pre-2019 Wayspot ages from photo approval dates", estimatePre2019AgeChk, {
+                    checkboxLeft: true
+                });
+                estimatePre2019AgeRow.classList.toggle("wfmapmods-setting-row-disabled", estimatePre2019AgeChk.disabled);
+                generalSection.appendChild(estimatePre2019AgeRow);
+
+                function syncEstimatePre2019AgeSettingEnabled() {
+                    estimatePre2019AgeChk.disabled = !showApprovalDateChk.checked;
+                    estimatePre2019AgeRow.classList.toggle("wfmapmods-setting-row-disabled", estimatePre2019AgeChk.disabled);
+
+                    if (estimatePre2019AgeChk.disabled) {
+                        estimatePre2019AgeChk.checked = false;
+                    }
+                }
+
+                showApprovalDateChk.addEventListener("change", syncEstimatePre2019AgeSettingEnabled);
+
                 const showSubmitterCodenameChk = document.createElement("input");
                 showSubmitterCodenameChk.type = "checkbox";
                 showSubmitterCodenameChk.className = "wfmapmods-modal-checkbox";
                 showSubmitterCodenameChk.checked = mapCfg.showWayspotSubmitterCodename !== false;
                 generalSection.appendChild(
                     createSettingsRow("Show Wayspot submitter codename", showSubmitterCodenameChk, {
+                        checkboxLeft: true
+                    })
+                );
+
+                const rememberGallerySortChk = document.createElement("input");
+                rememberGallerySortChk.type = "checkbox";
+                rememberGallerySortChk.className = "wfmapmods-modal-checkbox";
+                rememberGallerySortChk.checked = !!mapCfg.rememberLastGallerySort;
+                generalSection.appendChild(
+                    createSettingsRow("Remember last used gallery sort", rememberGallerySortChk, {
                         checkboxLeft: true
                     })
                 );
@@ -6377,7 +6575,9 @@
                     hideZoomTextChk,
                     showAddressChk,
                     showApprovalDateChk,
+                    estimatePre2019AgeChk,
                     showSubmitterCodenameChk,
+                    rememberGallerySortChk,
                     showPsrAllChk,
                     inactivePsAsActiveChk,
                     nr,
@@ -6416,7 +6616,9 @@
                     hideZoomTextChk,
                     showAddressChk,
                     showApprovalDateChk,
+                    estimatePre2019AgeChk,
                     showSubmitterCodenameChk,
+                    rememberGallerySortChk,
                     showPsrAllChk,
                     inactivePsAsActiveChk,
                     nr,
@@ -6453,7 +6655,11 @@
                 mapCfg.hideZoomText = !!hideZoomTextChk.checked;
                 mapCfg.showAddress = !!showAddressChk.checked;
                 mapCfg.showWayspotApprovalDate = !!showApprovalDateChk.checked;
+                mapCfg.estimatePre2019WayspotAgesFromPhotos =
+                    !!showApprovalDateChk.checked && !!estimatePre2019AgeChk.checked;
                 mapCfg.showWayspotSubmitterCodename = !!showSubmitterCodenameChk.checked;
+                mapCfg.rememberLastGallerySort = !!rememberGallerySortChk.checked;
+                mapCfg.lastGallerySortMode = normaliseGallerySortMode(mapCfg.lastGallerySortMode);
                 mapCfg.showPowerSpotRadiusAroundPokestopsAndGyms = !!showPsrAllChk.checked;
 
                 // if this changes, marker classification/styling changes (inactive powerspots become "powerspot")
@@ -7256,7 +7462,7 @@
         return window[k];
     }
 
-    function openModal({ id, title, buildContent, onOk, width, showFooterButtons, showHeaderClose }) {
+    function openModal({ id, title, buildContent, onOk, width, showFooterButtons, showHeaderClose, buildHeaderControls }) {
         if (document.getElementById(id)) return; // Modal already open
 
         const backdrop = document.createElement("div");
@@ -7291,6 +7497,14 @@
 
         // Move the header text node into headerRow
         headerRow.appendChild(header);
+
+        if (typeof buildHeaderControls === "function") {
+            const headerControls = buildHeaderControls();
+            if (headerControls) {
+                headerControls.classList.add("wfmapmods-modal-header-controls");
+                headerRow.appendChild(headerControls);
+            }
+        }
 
         let headerCloseBtn = null;
         if (showHeaderClose) {
@@ -8590,10 +8804,12 @@
 
     function normalisePoiDetailsResponse(json) {
         const result = json?.result || {};
+        const creationTimestampMs = normaliseNullableTimestampMs(result.creationTimestampMs);
 
         return {
-            creationTimestampMs: normaliseNullableTimestampMs(result.creationTimestampMs),
-            submitterTrainerName: normaliseNullableString(result.submitterTrainerName)
+            creationTimestampMs,
+            submitterTrainerName: normaliseNullableString(result.submitterTrainerName),
+            isCourtsOfTheWorldImport: isCourtsOfTheWorldImportTimestamp(creationTimestampMs)
         };
     }
 
@@ -8636,6 +8852,13 @@
         poi.creationTimestampMs = details.creationTimestampMs;
         poi.submitterTrainerName = details.submitterTrainerName;
         poi.poiDetailsFetched = true;
+
+        if (details.isCourtsOfTheWorldImport === true) {
+            poi.isCourtsOfTheWorldImport = true;
+            poi.isCommunityContributed = false;
+        }
+
+        enhancePoiForCourtsOfTheWorldImport(poi);
     }
 
     function attachPoiImagesToPoi(poi, images) {
@@ -8815,18 +9038,23 @@
         ensurePoiDetailsLoaded(poi)
             .then(() => {
             if (selectedPoiGuid !== guidAtRequestTime) return;
+
             updateSelectedPoiDetailsMetadataFromPoi(poi);
+            refreshSelectedPoiStatusIconsFromPoi(poi);
         })
             .catch(err => {
-            console.warn("[WFMM] POI details enrichment failed:", err);
+            console.warn("[WFMM - Base] POI details enrichment failed:", err);
         });
 
         ensurePoiImagesLoaded(poi)
             .then(() => {
+            if (selectedPoiGuid !== guidAtRequestTime) return;
+
             refreshSelectedPoiGalleryButtonFromLoadedImages(poi, guidAtRequestTime);
+            updateSelectedPoiDetailsMetadataFromPoi(poi);
         })
             .catch(err => {
-            console.warn("[WFMM] POI image enrichment failed:", err);
+            console.warn("[WFMM - Base] POI image enrichment failed:", err);
         });
     }
 
@@ -8910,6 +9138,34 @@
     }
 
     // ==============================
+    // Courts of the World (COTW) POI Handling
+    // ==============================
+
+    function isCourtsOfTheWorldImportTimestamp(timestampMs) {
+        return normaliseNullableTimestampMs(timestampMs) === COURTS_OF_THE_WORLD_IMPORT_TIMESTAMP_MS;
+    }
+
+    function isCourtsOfTheWorldPoi(poi) {
+        return poi?.isCourtsOfTheWorldImport === true
+        || isCourtsOfTheWorldImportTimestamp(poi?.creationTimestampMs);
+    }
+
+    function isImportedPoi(poi) {
+        return isCourtsOfTheWorldPoi(poi) || poi?.isCommunityContributed === false;
+    }
+
+    function enhancePoiForCourtsOfTheWorldImport(poi) {
+        if (!poi || !isCourtsOfTheWorldImportTimestamp(poi.creationTimestampMs)) return;
+
+        poi.isCourtsOfTheWorldImport = true;
+        poi.isCommunityContributed = false;
+    }
+
+    function isCourtsOfTheWorldImportedPhoto(imageRecord) {
+        return isCourtsOfTheWorldImportTimestamp(imageRecord?.creationTimestampMs);
+    }
+
+    // ==============================
     // Multiple images gallery
     // ==============================
 
@@ -8987,6 +9243,107 @@
             .filter(Boolean);
     }
 
+    function normaliseGallerySortMode(value) {
+        return Object.values(GALLERY_SORT_MODES).includes(value)
+            ? value
+        : GALLERY_SORT_MODES.PHOTO_VOTES;
+    }
+
+    function getInitialGallerySortMode() {
+        if (userSettings?.map?.rememberLastGallerySort) {
+            return normaliseGallerySortMode(userSettings?.map?.lastGallerySortMode);
+        }
+
+        return GALLERY_SORT_MODES.PHOTO_VOTES;
+    }
+
+    function setLastUsedGallerySortMode(sortMode) {
+        const safeMode = normaliseGallerySortMode(sortMode);
+
+        if (!userSettings.map) return safeMode;
+
+        userSettings.map.lastGallerySortMode = safeMode;
+
+        // Always remember the last used mode internally. The setting controls
+        // whether this mode is restored when opening the next gallery.
+        saveSettings();
+
+        return safeMode;
+    }
+
+    function getGalleryRecordTimestamp(record) {
+        return normaliseNullableTimestampMs(record?.creationTimestampMs);
+    }
+
+    function getGalleryRecordCodename(record) {
+        return normaliseNullableString(record?.photographerTrainerName)?.trim() || "";
+    }
+
+    function sortGalleryImageRecords(imageRecords, sortMode) {
+        const safeMode = normaliseGallerySortMode(sortMode);
+        const indexed = (Array.isArray(imageRecords) ? imageRecords : [])
+        .map((record, index) => ({ record, index }));
+
+        if (safeMode === GALLERY_SORT_MODES.PHOTO_VOTES) {
+            // Photo Vote order is the original poi-images response order.
+            return indexed
+                .sort((a, b) => a.index - b.index)
+                .map(x => x.record);
+        }
+
+        if (safeMode === GALLERY_SORT_MODES.PHOTO_AGE_DESC) {
+            return indexed
+                .sort((a, b) => {
+                const at = getGalleryRecordTimestamp(a.record);
+                const bt = getGalleryRecordTimestamp(b.record);
+
+                if (at === null && bt === null) return a.index - b.index;
+                if (at === null) return 1;
+                if (bt === null) return -1;
+
+                return bt - at || a.index - b.index;
+            })
+                .map(x => x.record);
+        }
+
+        if (safeMode === GALLERY_SORT_MODES.PHOTO_AGE_ASC) {
+            return indexed
+                .sort((a, b) => {
+                const at = getGalleryRecordTimestamp(a.record);
+                const bt = getGalleryRecordTimestamp(b.record);
+
+                if (at === null && bt === null) return a.index - b.index;
+                if (at === null) return 1;
+                if (bt === null) return -1;
+
+                return at - bt || a.index - b.index;
+            })
+                .map(x => x.record);
+        }
+
+        if (safeMode === GALLERY_SORT_MODES.CODENAME_ASC) {
+            return indexed
+                .sort((a, b) => {
+                const an = getGalleryRecordCodename(a.record);
+                const bn = getGalleryRecordCodename(b.record);
+
+                if (!an && !bn) return a.index - b.index;
+                if (!an) return 1;
+                if (!bn) return -1;
+
+                return an.localeCompare(bn, undefined, {
+                    sensitivity: "base",
+                    numeric: true
+                }) || a.index - b.index;
+            })
+                .map(x => x.record);
+        }
+
+        return indexed
+            .sort((a, b) => a.index - b.index)
+            .map(x => x.record);
+    }
+
     function poiHasMultipleGalleryImages(poi) {
         if (!poi) return false;
 
@@ -9044,12 +9401,48 @@
     function openPoiGalleryModal(poi) {
         if (!poi) return;
 
+        let rawRecords = [];
+        let currentSortMode = getInitialGallerySortMode();
+        let renderSortedGallery = null;
+
+        const sortControls = document.createElement("div");
+        sortControls.className = "wfmapmods-gallery-header-sort-controls";
+
+        const sortLabel = document.createElement("label");
+        sortLabel.className = "wfmapmods-gallery-sort-label";
+        sortLabel.textContent = "Sort";
+
+        const sortSelect = document.createElement("select");
+        sortSelect.className = "wfmapmods-gallery-sort-select";
+
+        for (const mode of Object.values(GALLERY_SORT_MODES)) {
+            const opt = document.createElement("option");
+            opt.value = mode;
+            opt.textContent = GALLERY_SORT_LABELS[mode] || mode;
+            sortSelect.appendChild(opt);
+        }
+
+        sortSelect.value = currentSortMode;
+
+        sortLabel.appendChild(sortSelect);
+        sortControls.appendChild(sortLabel);
+
+        sortSelect.addEventListener("change", () => {
+            currentSortMode = setLastUsedGallerySortMode(sortSelect.value);
+            sortSelect.value = currentSortMode;
+
+            if (typeof renderSortedGallery === "function") {
+                renderSortedGallery();
+            }
+        });
+
         openModal({
             id: "wfmapmods-gallery-backdrop",
             title: poi.title ? `Gallery — ${poi.title}` : "Gallery",
             width: 600,
             showFooterButtons: false,
             showHeaderClose: true,
+            buildHeaderControls: () => sortControls,
             buildContent: (dialog, _okBtn, closeModal) => {
                 const wrap = document.createElement("div");
                 wrap.className = "wfmapmods-gallery-wrap";
@@ -9134,16 +9527,26 @@
                     });
                 }
 
+                renderSortedGallery = function () {
+                    const sortedRecords = sortGalleryImageRecords(rawRecords, currentSortMode);
+                    renderTiles(sortedRecords);
+                };
+
+                function setRawRecordsAndRender(records) {
+                    rawRecords = Array.isArray(records) ? records : [];
+                    renderSortedGallery();
+                }
+
                 if (poi.poiImagesFetched) {
-                    renderTiles(buildPoiImageRecordList(poi));
+                    setRawRecordsAndRender(buildPoiImageRecordList(poi));
                 } else {
                     ensurePoiImagesLoaded(poi, { onlyIfStillSelected: false })
                         .then(() => {
-                        renderTiles(buildPoiImageRecordList(poi));
+                        setRawRecordsAndRender(buildPoiImageRecordList(poi));
                     })
                         .catch(err => {
                         console.warn("[WFMM - Base] Gallery image load failed:", err);
-                        renderTiles(buildPoiImageRecordList(poi));
+                        setRawRecordsAndRender(buildPoiImageRecordList(poi));
                     });
                 }
 
@@ -9192,6 +9595,18 @@
         const approvedDate = getPhotoApprovedDateText(imageRecord);
         const submitterName = getPhotoSubmitterNameText(imageRecord);
 
+        if (isCourtsOfTheWorldImportedPhoto(imageRecord)) {
+            const lines = [];
+
+            if (approvedDate) {
+                lines.push(`Imported ${approvedDate}`);
+            }
+
+            lines.push("Courts of the World");
+
+            return lines.join("\n");
+        }
+
         const lines = [];
 
         if (approvedDate) {
@@ -9210,6 +9625,14 @@
 
         const approvedDate = getPhotoApprovedDateText(imageRecord);
         const submitterName = getPhotoSubmitterNameText(imageRecord);
+
+        if (isCourtsOfTheWorldImportedPhoto(imageRecord)) {
+            if (approvedDate) {
+                return `${approvedDate}, Courts of the World`;
+            }
+
+            return "Courts of the World";
+        }
 
         if (approvedDate && submitterName) {
             return `${approvedDate}, ${submitterName}`;
@@ -14585,15 +15008,18 @@
 }
 
 .wfmapmods-gallery-grid {
+  --wfmapmods-gallery-tile-width: clamp(186px, calc((100vw - 54px) / 2), 266px);
+  --wfmapmods-gallery-tile-height: calc(var(--wfmapmods-gallery-tile-width) * 200 / 266);
+
   display: grid;
-  grid-template-columns: repeat(2, 266px);
+  grid-template-columns: repeat(2, var(--wfmapmods-gallery-tile-width));
   gap: 10px;
   justify-content: center;
 }
 
 .wfmapmods-gallery-tile {
-  width: 266px;
-  height: 200px;
+  width: var(--wfmapmods-gallery-tile-width);
+  height: var(--wfmapmods-gallery-tile-height);
   border-radius: 12px;
   overflow: hidden;
   display: block;
@@ -14608,8 +15034,46 @@
   display: block;
 }
 
-/* Mobile: when grid is 1-col, keep dialog narrow too */
-@media (max-width: 620px) {
+/* Header sort control */
+.wfmapmods-modal-header-controls {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.wfmapmods-gallery-header-sort-controls {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.wfmapmods-gallery-sort-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  white-space: nowrap;
+}
+
+.wfmapmods-gallery-sort-select {
+  min-width: 130px;
+  height: 28px;
+  padding: 2px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Mobile: keep two columns where possible, shrinking tiles down to 70%.
+   Below that, switch to one column and keep the dialog narrow. */
+@media (max-width: 410px) {
   .wfmapmods-modal-dialog {
     width: 300px !important;
     max-width: calc(100% - 24px) !important;
@@ -14617,7 +15081,28 @@
   }
 
   .wfmapmods-gallery-grid {
-    grid-template-columns: 266px;
+    --wfmapmods-gallery-tile-width: min(266px, calc(100vw - 48px));
+    --wfmapmods-gallery-tile-height: calc(var(--wfmapmods-gallery-tile-width) * 200 / 266);
+
+    grid-template-columns: var(--wfmapmods-gallery-tile-width);
+  }
+}
+
+/* Very narrow headers: let the sort control wrap neatly below the title. */
+@media (max-width: 520px) {
+  .wfmapmods-modal-header-controls {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .wfmapmods-gallery-sort-label {
+    width: 100%;
+  }
+
+  .wfmapmods-gallery-sort-select {
+    flex: 1;
+    min-width: 0;
   }
 }
 
