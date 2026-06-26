@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.13.2
+// @version      3.13.3
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -13593,7 +13593,10 @@
   align-items: center;
   justify-content: center;
   overflow-y: auto;
-  padding: 12px 0;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 12px;
+  box-sizing: border-box;
 }
 
 .wfmapmods-modal-dialog {
@@ -13601,9 +13604,10 @@
   border-radius: 8px;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
   width: 280px;
-  max-width: calc(100% - 32px);
-  max-height: 90vh;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: 12px 14px 10px;
   box-sizing: border-box;
   font-family: Roboto, Arial, sans-serif;
@@ -13612,9 +13616,14 @@
 }
 
 .wfmapmods-modal-title {
+  min-width: 0;
   font-size: 15px;
   font-weight: 600;
   margin-bottom: 10px;
+}
+
+.wfmapmods-modal-dialog > div:first-child {
+  flex-wrap: nowrap;
 }
 
 .wfmapmods-modal-intro {
@@ -13716,6 +13725,45 @@
   border-color: #2563eb;
   background: #2563eb;
   color: #ffffff;
+}
+
+/* Mobile modal layout: top-align tall modals so iOS Safari does not clip them. */
+@media (max-width: 520px) {
+  .wfmapmods-modal-backdrop {
+    align-items: flex-start;
+    justify-content: center;
+    padding: 12px;
+    padding-top: max(12px, env(safe-area-inset-top));
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  .wfmapmods-modal-dialog {
+    max-width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+
+  .wfmapmods-modal-dialog > div:first-child {
+    flex-wrap: wrap;
+    align-items: flex-start !important;
+  }
+
+  .wfmapmods-modal-title {
+    order: 1;
+    flex: 1 1 auto;
+  }
+
+  .wfmapmods-close-btn {
+    order: 2;
+    flex: 0 0 28px;
+  }
+
+  .wfmapmods-modal-header-controls {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    margin-top: 8px;
+    justify-content: flex-start;
+  }
 }
 
 /* Clickable “row with checkbox” helper */
@@ -14967,7 +15015,7 @@
 }
 
 /* =============================================================================
-   Gallery modal (2-up grid)
+   18) Gallery modal: grid + header sort
    ============================================================================= */
 
 .wfmapmods-detail-multiple-photos {
@@ -15018,13 +15066,18 @@
 }
 
 .wfmapmods-gallery-tile {
+  position: relative;
   width: var(--wfmapmods-gallery-tile-width);
   height: var(--wfmapmods-gallery-tile-height);
+  border: 0;
   border-radius: 12px;
   overflow: hidden;
   display: block;
+  padding: 0;
   background: rgba(0,0,0,0.06);
   cursor: pointer;
+  text-align: inherit;
+  font: inherit;
 }
 
 .wfmapmods-gallery-tile img {
@@ -15034,15 +15087,7 @@
   display: block;
 }
 
-/* Header sort control */
-.wfmapmods-modal-dialog .wfmapmods-modal-title {
-  min-width: 0;
-}
-
-.wfmapmods-modal-dialog > div:first-child {
-  flex-wrap: nowrap;
-}
-
+/* Gallery header sort control */
 .wfmapmods-modal-header-controls {
   margin-left: auto;
   display: inline-flex;
@@ -15079,31 +15124,8 @@
   font-weight: 600;
 }
 
-/* Mobile: keep two columns where possible and wrap the sort below the title. */
+/* Mobile: sort wraps below title; grid remains two columns where practical. */
 @media (max-width: 520px) {
-  .wfmapmods-modal-dialog > div:first-child {
-    flex-wrap: wrap;
-    align-items: flex-start !important;
-  }
-
-  .wfmapmods-modal-title {
-    order: 1;
-    flex: 1 1 auto;
-  }
-
-  .wfmapmods-close-btn {
-    order: 2;
-    flex: 0 0 auto;
-  }
-
-  .wfmapmods-modal-header-controls {
-    order: 3;
-    width: 100%;
-    margin-left: 0;
-    margin-top: 8px;
-    justify-content: flex-start;
-  }
-
   .wfmapmods-gallery-header-sort-controls {
     width: 100%;
   }
@@ -15119,12 +15141,12 @@
   }
 }
 
-/* Narrow phones: use more of the available width and shrink tiles further. */
+/* Narrow phones: use more available width and shrink tiles further. */
 @media (max-width: 410px) {
-  .wfmapmods-modal-dialog {
-    width: calc(100% - 24px) !important;
-    max-width: calc(100% - 24px) !important;
-    max-height: 80vh !important;
+  #wfmapmods-gallery-backdrop .wfmapmods-modal-dialog {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: calc(100dvh - 24px) !important;
   }
 
   .wfmapmods-gallery-grid {
@@ -15247,18 +15269,6 @@
    Photo voting buttons
    ============================================================================= */
 
-.wfmapmods-gallery-tile {
-  position: relative;
-  display: block;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  overflow: hidden;
-  text-align: inherit;
-  font: inherit;
-}
-
 .wfmapmods-photo-vote-host {
   position: absolute;
   z-index: 3;
@@ -15334,13 +15344,6 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-
-.wfmapmods-photo-vote-icon svg {
-  width: 15px;
-  height: 15px;
-  display: block;
-  fill: rgba(255, 255, 255, 0.62);
 }
 
 .wfmapmods-photo-vote-icon svg {
