@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.13.0
+// @version      3.13.1
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -15008,7 +15008,7 @@
 }
 
 .wfmapmods-gallery-grid {
-  --wfmapmods-gallery-tile-width: clamp(186px, calc((100vw - 54px) / 2), 266px);
+  --wfmapmods-gallery-tile-width: clamp(150px, calc((100vw - 88px) / 2), 266px);
   --wfmapmods-gallery-tile-height: calc(var(--wfmapmods-gallery-tile-width) * 200 / 266);
 
   display: grid;
@@ -15075,11 +15075,20 @@
    Below that, switch to one column and keep the dialog narrow. */
 @media (max-width: 410px) {
   .wfmapmods-modal-dialog {
-    width: 300px !important;
+    width: calc(100% - 24px) !important;
     max-width: calc(100% - 24px) !important;
     max-height: 80vh !important;
   }
 
+  .wfmapmods-gallery-grid {
+    --wfmapmods-gallery-tile-width: clamp(132px, calc((100vw - 88px) / 2), 266px);
+    --wfmapmods-gallery-tile-height: calc(var(--wfmapmods-gallery-tile-width) * 200 / 266);
+
+    grid-template-columns: repeat(2, var(--wfmapmods-gallery-tile-width));
+  }
+}
+
+@media (max-width: 330px) {
   .wfmapmods-gallery-grid {
     --wfmapmods-gallery-tile-width: min(266px, calc(100vw - 48px));
     --wfmapmods-gallery-tile-height: calc(var(--wfmapmods-gallery-tile-width) * 200 / 266);
