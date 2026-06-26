@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - s2 Cells
-// @version      3.2.1
+// @version      3.3.0
 // @description  Adds s2 cell grids and shading to the Wayfarer Map, and allows manual addition of PokéStops and Gyms
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-s2-cells.user.js
@@ -53,6 +53,7 @@
     const DB_NAME = "wayfarer-tools-db";
     const POI_STORE_NAME = "gamePois";
     const MANUAL_ID_PREFIX = "s2-pogo-";
+    const PGORELEASE_ID_PREFIX = "pgorelease.";
 
     // POI Bridge
     const POI_BRIDGE_ID = "wfmapmods-poi-bridge";
@@ -403,7 +404,7 @@
 
             req.onsuccess = () => {
                 const all = req.result || [];
-                manualPois = new Map(all.filter(isManualRecord).map(r => [r.id, r]));
+                manualPois = new Map(all.filter(isStoredPokemonPoiRecord).map(r => [r.id, r]));
             };
 
             req.onerror = () => {
@@ -565,9 +566,19 @@
     // ======================================
 
     // Identify manual imports reliably.
-    function isManualRecord(rec) {
+    function isUserManualRecord(rec) {
         const id = rec?.id;
         return typeof id === "string" && id.startsWith(MANUAL_ID_PREFIX);
+    }
+
+    // Seperate identified for imports from pokemongo.com/map
+    function isPgoReleaseRecord(rec) {
+        const id = rec?.id;
+        return typeof id === "string" && id.startsWith(PGORELEASE_ID_PREFIX);
+    }
+
+    function isStoredPokemonPoiRecord(rec) {
+        return isUserManualRecord(rec) || isPgoReleaseRecord(rec);
     }
 
     // Read the current POI payload from the bridge element.
@@ -589,24 +600,23 @@
 
     // Build the payload sent via the POI bridge (manual-only).
     function buildBridgePayloadFromPoi(poi) {
-        if (!poi || !isManualRecord(poi)) return null;
+        if (!poi || !isStoredPokemonPoiRecord(poi)) return null;
 
         const type = poi.poiType || "unknown";
+        const fromPgoRelease = isPgoReleaseRecord(poi);
 
-        // Note: Keep this payload shape stable because another script depends on it.
         return {
             title: poi.title || "",
             description: poi.description || "",
             lat: typeof poi.lat === "number" ? poi.lat : null,
             lng: typeof poi.lng === "number" ? poi.lng : null,
             imageUrl: poi.imageUrl || "",
-
             status: poi.status || "",
 
             source: POI_BRIDGE_SOURCE,
 
             dataSourceLogo: "",
-            dataSourceText: "Manual import",
+            dataSourceText: fromPgoRelease ? "PGO Map import" : "Manual import",
 
             pgoEntity: POI_TYPE_TO_PGO_ENTITY[type] || "UNKNOWN"
         };
@@ -1016,7 +1026,7 @@
         const counts = { stop: 0, gym: 0, powerspot: 0 };
 
         for (const poi of manualPois.values()) {
-            if (!isManualRecord(poi)) continue;
+            if (!isStoredPokemonPoiRecord(poi)) continue;
 
             const t = (poi.poiType || "").toLowerCase();
             if (t === "stop" || t === "gym" || t === "powerspot") {
@@ -3206,6 +3216,54 @@
             return wrap;
         }
 
+        // Parses paired coordinates and split into lat and lng
+        function parsePastedCoordinatePair(text) {
+            if (!text) return null;
+
+            const cleaned = String(text)
+            .trim()
+            .replace(/[()]/g, "")
+            .replace(/\u2212/g, "-"); // Convert unicode minus to normal minus
+
+            const match = cleaned.match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+            if (!match) return null;
+
+            const parsedLat = Number(match[1]);
+            const parsedLng = Number(match[2]);
+
+            if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLng)) return null;
+            if (parsedLat < -90 || parsedLat > 90) return null;
+            if (parsedLng < -180 || parsedLng > 180) return null;
+
+            return {
+                lat: parsedLat,
+                lng: parsedLng
+            };
+        }
+
+        function setCoordinateInputs(parsed) {
+            latIn.value = String(parsed.lat);
+            lngIn.value = String(parsed.lng);
+            statusLine.textContent = "Coordinate pair split into latitude and longitude.";
+        }
+
+        function handleCoordinatePairPaste(ev) {
+            const pastedText = ev.clipboardData?.getData("text/plain") || "";
+            const parsed = parsePastedCoordinatePair(pastedText);
+
+            if (!parsed) return;
+
+            ev.preventDefault();
+            setCoordinateInputs(parsed);
+
+            // Put focus on the next useful field after successful paste.
+            if (!titleIn.value.trim()) {
+                titleIn.focus();
+            } else {
+                imgIn.focus();
+            }
+        }
+
         // Type
         const typeSel = document.createElement("select");
         ["stop", "gym", "powerspot"].forEach(t => {
@@ -3232,6 +3290,10 @@
         lngIn.step = "0.000001";
         lngIn.placeholder = "Longitude";
         if (Number.isFinite(lng)) lngIn.value = String(lng);
+
+        // Split paired coordinates pasted into either coordinate box
+        latIn.addEventListener("paste", handleCoordinatePairPaste);
+        lngIn.addEventListener("paste", handleCoordinatePairPaste);
 
         // Image URL
         const imgIn = document.createElement("input");
@@ -3728,9 +3790,16 @@
             const seenCells = {};
             const cellsToDraw = [];
 
-            if (map.getZoom() < GCS_MIN_ZOOM) return;
+            const zoom = map.getZoom();
 
-            if (gridLevel >= 2 && gridLevel < (map.getZoom())) {
+            // Rules for deciding whether to draw grids
+            // Different rule for L17 cells vs. L14 cells
+            const shouldDrawGrid =
+                  gridLevel >= 17
+            ? gridLevel <= zoom
+            : gridLevel < zoom;
+
+            if (gridLevel >= 2 && shouldDrawGrid) {
                 const latLng = map.getCenter();
                 const cell = S2.S2Cell.FromLatLng(this.getLatLngPoint(latLng), gridLevel);
                 cellsToDraw.push(cell);
@@ -4632,7 +4701,7 @@
 
     function injectManualPoiEditLink(poi) {
         // Only manual records get edit UI
-        if (!poi || !isManualRecord?.(poi)) return;
+        if (!poi || !isStoredPokemonPoiRecord?.(poi)) return;
 
         const host = document.querySelector(".wfmapmods-poi-function-links");
         if (!host) return;
