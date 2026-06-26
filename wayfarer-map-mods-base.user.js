@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.13.1
+// @version      3.13.2
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -15035,6 +15035,14 @@
 }
 
 /* Header sort control */
+.wfmapmods-modal-dialog .wfmapmods-modal-title {
+  min-width: 0;
+}
+
+.wfmapmods-modal-dialog > div:first-child {
+  flex-wrap: nowrap;
+}
+
 .wfmapmods-modal-header-controls {
   margin-left: auto;
   display: inline-flex;
@@ -15071,8 +15079,47 @@
   font-weight: 600;
 }
 
-/* Mobile: keep two columns where possible, shrinking tiles down to 70%.
-   Below that, switch to one column and keep the dialog narrow. */
+/* Mobile: keep two columns where possible and wrap the sort below the title. */
+@media (max-width: 520px) {
+  .wfmapmods-modal-dialog > div:first-child {
+    flex-wrap: wrap;
+    align-items: flex-start !important;
+  }
+
+  .wfmapmods-modal-title {
+    order: 1;
+    flex: 1 1 auto;
+  }
+
+  .wfmapmods-close-btn {
+    order: 2;
+    flex: 0 0 auto;
+  }
+
+  .wfmapmods-modal-header-controls {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    margin-top: 8px;
+    justify-content: flex-start;
+  }
+
+  .wfmapmods-gallery-header-sort-controls {
+    width: 100%;
+  }
+
+  .wfmapmods-gallery-sort-label {
+    width: 100%;
+  }
+
+  .wfmapmods-gallery-sort-select {
+    flex: 1;
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+/* Narrow phones: use more of the available width and shrink tiles further. */
 @media (max-width: 410px) {
   .wfmapmods-modal-dialog {
     width: calc(100% - 24px) !important;
@@ -15088,30 +15135,13 @@
   }
 }
 
+/* Very narrow phones: only then switch to one column. */
 @media (max-width: 330px) {
   .wfmapmods-gallery-grid {
     --wfmapmods-gallery-tile-width: min(266px, calc(100vw - 48px));
     --wfmapmods-gallery-tile-height: calc(var(--wfmapmods-gallery-tile-width) * 200 / 266);
 
     grid-template-columns: var(--wfmapmods-gallery-tile-width);
-  }
-}
-
-/* Very narrow headers: let the sort control wrap neatly below the title. */
-@media (max-width: 520px) {
-  .wfmapmods-modal-header-controls {
-    margin-left: 0;
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .wfmapmods-gallery-sort-label {
-    width: 100%;
-  }
-
-  .wfmapmods-gallery-sort-select {
-    flex: 1;
-    min-width: 0;
   }
 }
 
