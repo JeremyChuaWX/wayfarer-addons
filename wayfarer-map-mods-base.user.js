@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.13.4
+// @version      3.13.5
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -13973,11 +13973,17 @@
 }
 
 .wfmapmods-wayspot-overlay-image-link {
-  display: inline-block;
-  margin-bottom: 8px;
+  display: flex;
+  margin-bottom: 0;
   text-align: center;
   justify-content: center;
-  display: flex;
+}
+
+.wfmapmods-wayspot-overlay-image-frame {
+  position: relative;
+  display: table;
+  margin: 0 auto 8px;
+  max-width: 100%;
 }
 
 .wfmapmods-wayspot-overlay-image {
