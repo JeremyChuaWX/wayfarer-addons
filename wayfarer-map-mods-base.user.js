@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.13.5
+// @version      3.13.6
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -11514,19 +11514,45 @@
     function tryParseLatLng(str) {
         if (typeof str !== "string") return null;
 
-        // ---- Decimal degrees (comma OR space separated) ----
-        const decMatch = str.match(
+        const isValidLatLng = (lat, lng) => {
+            return (
+                Number.isFinite(lat) &&
+                Number.isFinite(lng) &&
+                lat >= -90 &&
+                lat <= 90 &&
+                lng >= -180 &&
+                lng <= 180
+            );
+        };
+
+        // ---- Decimal degrees: exact input only ----
+        const exactDecMatch = str.match(
             /^\s*\(?\s*(-?\d+(?:\.\d+)?)\s*(?:,\s*|\s+)(-?\d+(?:\.\d+)?)\s*\)?\s*$/
         );
 
-        if (decMatch) {
-            const lat = parseFloat(decMatch[1]);
-            const lng = parseFloat(decMatch[2]);
+        if (exactDecMatch) {
+            const lat = parseFloat(exactDecMatch[1]);
+            const lng = parseFloat(exactDecMatch[2]);
 
-            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-            if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+            if (isValidLatLng(lat, lng)) {
+                return new google.maps.LatLng(lat, lng);
+            }
+        }
 
-            return new google.maps.LatLng(lat, lng);
+        // ---- Decimal degrees embedded inside a larger message ----
+        // Requires a comma separator to avoid accidentally treating ordinary
+        // space-separated numbers as coordinates.
+        const embeddedDecMatch = str.match(
+            /(^|[^\d.-])(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)(?=$|[^\d.])/
+        );
+
+        if (embeddedDecMatch) {
+            const lat = parseFloat(embeddedDecMatch[2]);
+            const lng = parseFloat(embeddedDecMatch[3]);
+
+            if (isValidLatLng(lat, lng)) {
+                return new google.maps.LatLng(lat, lng);
+            }
         }
 
         // ---- Decimal degrees with hemisphere letters ----
@@ -11546,9 +11572,9 @@
             if (latHem === "S") lat *= -1;
             if (lngHem === "W") lng *= -1;
 
-            if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
-
-            return new google.maps.LatLng(lat, lng);
+            if (isValidLatLng(lat, lng)) {
+                return new google.maps.LatLng(lat, lng);
+            }
         }
 
         // ---- Degrees / Minutes / Seconds with hemisphere letters ----
@@ -11584,7 +11610,7 @@
         const lat = dmsToDecimal(latDeg, latMin, latSec, latHem);
         const lng = dmsToDecimal(lngDeg, lngMin, lngSec, lngHem);
 
-        if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+        if (!isValidLatLng(lat, lng)) return null;
 
         return new google.maps.LatLng(lat, lng);
     }
