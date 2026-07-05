@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.14.0
+// @version      3.14.1
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -375,6 +375,7 @@
             displayInactivePowerSpotsAsActive: false,
             defaultDraftSaveLocation: "remote",
             showDraftMarkerTitles: false,
+            recommendSquareSubmitPhotos: true,
             nearbyRadius: { enabled: true, strokeColor: "#4285F4", strokeOpacity: 0.8, strokeWidth: 2, fillColor: "#4285F4", fillOpacity: 0 },
             submitRadius: { enabled: true, strokeColor: "#e13cff", strokeOpacity: 0.8, strokeWidth: 4, fillColor: "#e13cff", fillOpacity: 0 },
             interactRadius: { enabled: true, strokeColor: "#ffcc33", strokeOpacity: 0.9, strokeWidth: 2, fillColor: "#ffed24", fillOpacity: 0.05 },
@@ -4966,6 +4967,11 @@
                 }
 
                 function refreshMainPhotoAspectWarning() {
+                    if (userSettings.map.recommendSquareSubmitPhotos === false) {
+                        setMainPhotoAspectWarning("");
+                        return;
+                    }
+
                     const main = imageState.main;
 
                     if (!main || main._pending) {
@@ -4982,7 +4988,7 @@
                         if (imageState.main !== main) return;
 
                         if (isSquare === false) {
-                            setMainPhotoAspectWarning("⚠️ Main photo is not 1:1 aspect ratio. Image editing is recommended.");
+                            setMainPhotoAspectWarning("⚠️ Main photo is not 1:1 aspect ratio. Editing is recommended.");
                         } else {
                             setMainPhotoAspectWarning("");
                         }
@@ -7877,6 +7883,16 @@
                     })
                 );
 
+                const recommendSquareSubmitPhotosChk = document.createElement("input");
+                recommendSquareSubmitPhotosChk.type = "checkbox";
+                recommendSquareSubmitPhotosChk.className = "wfmapmods-modal-checkbox";
+                recommendSquareSubmitPhotosChk.checked = mapCfg.recommendSquareSubmitPhotos !== false;
+                generalSection.appendChild(
+                    createSettingsRow("Recommend 1:1 aspect ratio images", recommendSquareSubmitPhotosChk, {
+                        checkboxLeft: true
+                    })
+                );
+
                 dialog.appendChild(generalSection);
 
                 // ---- Circle configs (init from mapCfg) ----
@@ -8256,6 +8272,7 @@
                     rememberGallerySortChk,
                     showPsrAllChk,
                     inactivePsAsActiveChk,
+                    recommendSquareSubmitPhotosChk,
                     nr,
                     sr,
                     spr,
@@ -8297,6 +8314,7 @@
                     rememberGallerySortChk,
                     showPsrAllChk,
                     inactivePsAsActiveChk,
+                    recommendSquareSubmitPhotosChk,
                     nr,
                     sr,
                     spr,
@@ -8337,6 +8355,7 @@
                 mapCfg.rememberLastGallerySort = !!rememberGallerySortChk.checked;
                 mapCfg.lastGallerySortMode = normaliseGallerySortMode(mapCfg.lastGallerySortMode);
                 mapCfg.showPowerSpotRadiusAroundPokestopsAndGyms = !!showPsrAllChk.checked;
+                mapCfg.recommendSquareSubmitPhotos = !!recommendSquareSubmitPhotosChk.checked;
 
                 // if this changes, marker classification/styling changes (inactive powerspots become "powerspot")
                 const prevInactiveAsActive = !!mapCfg.displayInactivePowerSpotsAsActive;
