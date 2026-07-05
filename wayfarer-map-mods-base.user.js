@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.13.6
+// @version      3.14.0
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -379,6 +379,15 @@
             submitRadius: { enabled: true, strokeColor: "#e13cff", strokeOpacity: 0.8, strokeWidth: 4, fillColor: "#e13cff", fillOpacity: 0 },
             interactRadius: { enabled: true, strokeColor: "#ffcc33", strokeOpacity: 0.9, strokeWidth: 2, fillColor: "#ffed24", fillOpacity: 0.05 },
             powerSpotRadius: { enabled: true, strokeColor: "#ff47c5", strokeOpacity: 1, strokeWidth: 1.5, fillColor: "#ffffff", fillOpacity: 0 }
+        },
+
+        photoEditor: {
+            guides: {
+                circleGuide: false,
+                ruleOfThirds: true,
+                safeZone25: false,
+                centreGuide: false
+            }
         },
 
         layers: {
@@ -1652,6 +1661,15 @@
         updateTopRightControlsVisibility();
     }
 
+    function collapseSidePanelIfOpen() {
+        if (currentMapMode !== MAP_MODE.MOBILE) return;
+        if (!sidePanelEl) return;
+        if (sidePanelCollapsed) return;
+
+        sidePanelCollapsed = true;
+        applySidePanelCollapseState();
+    }
+
     function adjustMapControlsForSidePanel() {
         if (!wfMap || typeof google === "undefined" || !google.maps) return;
 
@@ -2516,6 +2534,1509 @@
         openSubmissionEditModal(submitData);
     }
 
+    // ==========================================
+    // Main Photo Editor - 1:1 Square Crop Tool
+    // ==========================================
+
+    function getPhotoEditorGuideSettings() {
+        return userSettings.photoEditor.guides;
+    }
+
+    function savePhotoEditorGuideSettingsFromState(state) {
+        const guides = getPhotoEditorGuideSettings();
+
+        guides.circleGuide = !!state.showCircleGuide;
+        guides.ruleOfThirds = !!state.showThirds;
+        guides.safeZone25 = !!state.showSafeZone;
+        guides.centreGuide = !!state.showCenter;
+
+        saveSettings();
+    }
+
+    function canvasToBlob(canvas, type, quality) {
+        return new Promise((resolve, reject) => {
+            canvas.toBlob((blob) => {
+                if (!blob) reject(new Error("Could not create edited image blob."));
+                else resolve(blob);
+            }, type, quality);
+        });
+    }
+
+    function loadImageFromUrl(url) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+
+            img.onload = () => resolve(img);
+            img.onerror = () => reject(new Error("Could not load image."));
+
+            // Safe for blob/data URLs. For remote URLs, fetch-to-blob below is preferred.
+            img.src = url;
+        });
+    }
+
+    function getOriginalGoogleusercontentUrl(url) {
+        if (!url || typeof url !== "string") return url;
+
+        // Only alter Googleusercontent image serving URLs.
+        if (!/\/\/[^/]*googleusercontent\.com\//i.test(url)) return url;
+
+        // Remove existing size transform at the end, then request original size.
+        if (/[?&=](s|w|h)\d+/i.test(url) || /=s\d+/i.test(url) || /=w\d+-h\d+/i.test(url)) {
+            return url.replace(/=s\d+(?:-[a-z])?$/i, "=s0")
+                .replace(/=w\d+-h\d+(?:-[a-z])?$/i, "=s0");
+        }
+
+        // If it has no trailing transform, append original-size request.
+        if (!/[?&]$/.test(url) && !/=s0$/i.test(url)) {
+            return url + "=s0";
+        }
+
+        return url;
+    }
+
+    function getImageDisplayUrl(state) {
+        if (!state) return null;
+
+        return state._wfmmEditPreviewDataUrl ||
+            state.url ||
+            null;
+    }
+
+    function getImageEditUrl(state) {
+        if (!state) return null;
+
+        const url =
+              state.servingUrl ||
+              state.url ||
+              null;
+
+        return getOriginalGoogleusercontentUrl(url);
+    }
+
+    function canEditImageState(state) {
+        if (!state || state._pending) return false;
+
+        return state.file instanceof Blob ||
+            !!getImageEditUrl(state);
+    }
+
+
+    async function blobFromImageState(state) {
+        if (!state) return null;
+
+        if (state.file instanceof Blob) {
+            return state.file;
+        }
+
+        const url = getImageEditUrl(state);
+
+        if (!url) {
+            throw new Error("This image cannot be edited because it does not include a usable image URL.");
+        }
+
+        return await fetchImageBlobForSubmit(url);
+    }
+
+    function roundEditNumber(value) {
+        return Math.round(Number(value) * 1000) / 1000;
+    }
+
+    function getOrientedSizeForEdit(sourceW, sourceH, quarterTurns) {
+        const r = ((quarterTurns % 4) + 4) % 4;
+
+        if (r === 1 || r === 3) {
+            return { w: sourceH, h: sourceW };
+        }
+
+        return { w: sourceW, h: sourceH };
+    }
+
+    function createDefaultMainPhotoEdit(sourceW, sourceH, quarterTurns = 0, freeRotationDeg = 0) {
+        const s = getOrientedSizeForEdit(sourceW, sourceH, quarterTurns);
+
+        const a =
+              Math.abs(Math.cos(freeRotationDeg * Math.PI / 180)) +
+              Math.abs(Math.sin(freeRotationDeg * Math.PI / 180));
+
+        const cropSize = Math.floor(Math.min(s.w, s.h) / Math.max(1, a));
+
+        return {
+            version: 1,
+            sourceW,
+            sourceH,
+            rotationQuarterTurns: quarterTurns,
+            freeRotationDeg,
+            cropX: (s.w - cropSize) / 2,
+            cropY: (s.h - cropSize) / 2,
+            cropSize
+        };
+    }
+
+    function normaliseMainPhotoEdit(edit) {
+        if (!edit) return null;
+
+        return {
+            version: 1,
+            sourceW: edit.sourceW,
+            sourceH: edit.sourceH,
+            rotationQuarterTurns: edit.rotationQuarterTurns,
+            freeRotationDeg: edit.freeRotationDeg,
+            cropX: edit.cropX,
+            cropY: edit.cropY,
+            cropSize: edit.cropSize
+        };
+    }
+
+    function mainPhotoEditSignature(edit) {
+        if (!edit) return "";
+
+        return JSON.stringify({
+            sourceW: Math.round(edit.sourceW),
+            sourceH: Math.round(edit.sourceH),
+            rotationQuarterTurns: ((edit.rotationQuarterTurns % 4) + 4) % 4,
+            freeRotationDeg: roundEditNumber(edit.freeRotationDeg),
+            cropX: Math.round(edit.cropX),
+            cropY: Math.round(edit.cropY),
+            cropSize: Math.round(edit.cropSize)
+        });
+    }
+
+    function isDefaultMainPhotoEdit(edit) {
+        if (!edit) return true;
+
+        // If the source is not already square, even the default centred square crop
+        // is a real edit and must be preserved.
+        if (Math.round(edit.sourceW) !== Math.round(edit.sourceH)) {
+            return false;
+        }
+
+        const def = createDefaultMainPhotoEdit(edit.sourceW, edit.sourceH, 0, 0);
+
+        return mainPhotoEditSignature(edit) === mainPhotoEditSignature(def);
+    }
+
+    function cloneImageStateWithEdit(originalState, edit, previewDataUrl) {
+        const next = Object.assign({}, originalState);
+
+        if (isDefaultMainPhotoEdit(edit)) {
+            delete next._wfmmEdit;
+            delete next._wfmmEditPreviewDataUrl;
+            return next;
+        }
+
+        next._wfmmEdit = normaliseMainPhotoEdit(edit);
+        next._wfmmEditPreviewDataUrl = previewDataUrl;
+
+        return next;
+    }
+
+    function makeOrientedCanvasForEdit(img, quarterTurns) {
+        const sourceW = img.naturalWidth || img.width;
+        const sourceH = img.naturalHeight || img.height;
+        const s = getOrientedSizeForEdit(sourceW, sourceH, quarterTurns);
+        const r = ((quarterTurns % 4) + 4) % 4;
+
+        const canvas = document.createElement("canvas");
+        canvas.width = s.w;
+        canvas.height = s.h;
+
+        const ctx = canvas.getContext("2d", { alpha: false });
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.save();
+
+        if (r === 0) {
+            ctx.drawImage(img, 0, 0);
+        } else if (r === 1) {
+            ctx.translate(s.w, 0);
+            ctx.rotate(Math.PI / 2);
+            ctx.drawImage(img, 0, 0);
+        } else if (r === 2) {
+            ctx.translate(s.w, s.h);
+            ctx.rotate(Math.PI);
+            ctx.drawImage(img, 0, 0);
+        } else if (r === 3) {
+            ctx.translate(0, s.h);
+            ctx.rotate(-Math.PI / 2);
+            ctx.drawImage(img, 0, 0);
+        }
+
+        ctx.restore();
+
+        return canvas;
+    }
+
+    function renderMainPhotoEditToCanvas(img, edit, outputSize = null) {
+        const e = normaliseMainPhotoEdit(edit);
+        if (!e) throw new Error("Missing photo edit data.");
+
+        const outSize = Math.max(64, Math.floor(outputSize || e.cropSize));
+        const scale = outSize / e.cropSize;
+
+        const oriented = makeOrientedCanvasForEdit(img, e.rotationQuarterTurns);
+
+        const out = document.createElement("canvas");
+        out.width = outSize;
+        out.height = outSize;
+
+        const ctx = out.getContext("2d", { alpha: false });
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, outSize, outSize);
+
+        ctx.save();
+
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+
+        ctx.translate(outSize / 2, outSize / 2);
+        ctx.rotate(e.freeRotationDeg * Math.PI / 180);
+        ctx.scale(scale, scale);
+        ctx.translate(
+            -(e.cropX + e.cropSize / 2),
+            -(e.cropY + e.cropSize / 2)
+        );
+
+        ctx.drawImage(oriented, 0, 0);
+
+        ctx.restore();
+
+        return out;
+    }
+
+    async function renderMainPhotoEditToBlob(imageState, edit, options = {}) {
+        const blob = await blobFromImageState(imageState);
+        const objectUrl = URL.createObjectURL(blob);
+
+        try {
+            const img = await loadImageFromUrl(objectUrl);
+            const canvas = renderMainPhotoEditToCanvas(img, edit, options.outputSize);
+            return await canvasToBlob(canvas, "image/jpeg", options.quality || 0.94);
+        } finally {
+            URL.revokeObjectURL(objectUrl);
+        }
+    }
+
+    async function renderMainPhotoEditPreviewDataUrl(imageState, edit) {
+        const blob = await renderMainPhotoEditToBlob(imageState, edit, {
+            outputSize: 512,
+            quality: 0.86
+        });
+
+        return await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(reader.error || new Error("Could not create edited preview."));
+            reader.readAsDataURL(blob);
+        });
+    }
+
+    async function resolveImageBlobForSubmit(state) {
+        if (!state) return null;
+
+        if (state.file instanceof Blob) {
+            return state.file;
+        }
+
+        const url = getImageEditUrl(state);
+
+        if (url) {
+            return await fetchImageBlobForSubmit(url);
+        }
+
+        return null;
+    }
+
+    function openMainPhotoEditor(options) {
+        const { imageState, onSave } = options || {};
+
+        if (!imageState) {
+            alert("No main photo has been loaded yet.");
+            return;
+        }
+
+        const originalState = imageState;
+
+        let objectUrlToRevoke = null;
+        let resizeCanvasHandler = null;
+        let editorClosed = false;
+
+        const backdrop = document.createElement("div");
+        backdrop.className = "wfmm-photo-editor-backdrop";
+
+        const editor = document.createElement("div");
+        editor.className = "wfmm-photo-editor";
+
+        editor.innerHTML = `
+        <div class="wfmm-photo-editor-header">
+            <div>
+                <div class="wfmm-photo-editor-title">Edit main photo</div>
+                <div class="wfmm-photo-editor-subtitle">
+                    Loading the full-resolution image…
+                </div>
+            </div>
+        </div>
+
+        <div class="wfmm-photo-editor-body">
+            <div class="wfmm-photo-editor-loading">
+                <div class="wfmm-photo-editor-loading-inner">
+                    <div class="wfmm-photo-editor-loading-title">Loading photo…</div>
+                    <div class="wfmm-photo-editor-loading-detail">Fetching the original image for editing.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="wfmm-photo-editor-footer">
+            <div></div>
+            <div>
+                <button type="button" data-action="cancel">Cancel</button>
+            </div>
+        </div>
+    `;
+
+        backdrop.appendChild(editor);
+        document.body.appendChild(backdrop);
+
+        function closeEditor() {
+            editorClosed = true;
+
+            if (objectUrlToRevoke) {
+                URL.revokeObjectURL(objectUrlToRevoke);
+                objectUrlToRevoke = null;
+            }
+
+            backdrop.remove();
+
+            window.removeEventListener("keydown", onEditorKeyDown, true);
+
+            if (resizeCanvasHandler) {
+                window.removeEventListener("resize", resizeCanvasHandler);
+                resizeCanvasHandler = null;
+            }
+        }
+
+        function onEditorKeyDown(event) {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                event.stopImmediatePropagation();
+                closeEditor();
+            }
+        }
+
+        function onLoadingClick(event) {
+            const btn = event.target.closest("button[data-action]");
+            if (!btn) return;
+
+            if (btn.dataset.action === "cancel") {
+                closeEditor();
+            }
+        }
+
+        window.addEventListener("keydown", onEditorKeyDown, true);
+        editor.addEventListener("click", onLoadingClick);
+
+        blobFromImageState(imageState)
+            .then((blob) => {
+            const objectUrl = URL.createObjectURL(blob);
+            objectUrlToRevoke = objectUrl;
+
+            return loadImageFromUrl(objectUrl).then((img) => ({ img }));
+        })
+            .then(({ img }) => {
+            if (editorClosed) return;
+
+            editor.removeEventListener("click", onLoadingClick);
+            buildEditor(img);
+        })
+            .catch((err) => {
+            console.error("[WFMM Photo Editor] Failed to load image:", err);
+
+            if (editorClosed) return;
+
+            editor.innerHTML = `
+                <div class="wfmm-photo-editor-header">
+                    <div>
+                        <div class="wfmm-photo-editor-title">Edit main photo</div>
+                        <div class="wfmm-photo-editor-subtitle">
+                            The image could not be loaded.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="wfmm-photo-editor-body">
+                    <div class="wfmm-photo-editor-loading">
+                        <div class="wfmm-photo-editor-loading-inner">
+                            <div class="wfmm-photo-editor-loading-title">Could not load photo</div>
+                            <div class="wfmm-photo-editor-loading-detail">
+                                ${err?.message || "The full-resolution image could not be fetched."}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="wfmm-photo-editor-footer">
+                    <div></div>
+                    <div>
+                        <button type="button" data-action="cancel">Close</button>
+                    </div>
+                </div>
+            `;
+
+            editor.addEventListener("click", onLoadingClick);
+        });
+
+        function buildEditor(img) {
+            const sourceW = img.naturalWidth || img.width;
+            const sourceH = img.naturalHeight || img.height;
+
+            if (!sourceW || !sourceH) {
+                closeEditor();
+                alert("Could not determine image size.");
+                return;
+            }
+
+            const savedEdit = normaliseMainPhotoEdit(originalState._wfmmEdit);
+
+            const state = {
+                tool: "crop",
+                rotationQuarterTurns: 0,
+                freeRotationDeg: 0,
+
+                cropX: 0,
+                cropY: 0,
+                cropSize: 0,
+
+                showCircleGuide: getPhotoEditorGuideSettings().circleGuide,
+                showThirds: getPhotoEditorGuideSettings().ruleOfThirds,
+                showSafeZone: getPhotoEditorGuideSettings().safeZone25,
+                showCenter: getPhotoEditorGuideSettings().centreGuide,
+                showPhotoDiscPreview: false,
+
+                activeDrag: null,
+                activeHandle: null,
+                dragStartX: 0,
+                dragStartY: 0,
+                startCropX: 0,
+                startCropY: 0,
+                startCropSize: 0,
+                startFreeRotationDeg: 0,
+                startPointerAngle: 0,
+
+                layout: null,
+                dpr: 1
+            };
+
+            const orientedCache = {
+                quarterTurns: null,
+                canvas: null
+            };
+
+            let initialSignature = null;
+
+            function degToRad(deg) {
+                return deg * Math.PI / 180;
+            }
+
+            function normaliseAngleDeg(deg) {
+                while (deg > 180) deg -= 360;
+                while (deg < -180) deg += 360;
+                return deg;
+            }
+
+            function rotatePoint(px, py, cx, cy, angleRad) {
+                const dx = px - cx;
+                const dy = py - cy;
+                const c = Math.cos(angleRad);
+                const s = Math.sin(angleRad);
+
+                return {
+                    x: cx + dx * c - dy * s,
+                    y: cy + dx * s + dy * c
+                };
+            }
+
+            function orientedSize() {
+                return getOrientedSizeForEdit(sourceW, sourceH, state.rotationQuarterTurns);
+            }
+
+            function getCurrentEdit() {
+                return {
+                    version: 1,
+                    sourceW,
+                    sourceH,
+                    rotationQuarterTurns: ((state.rotationQuarterTurns % 4) + 4) % 4,
+                    freeRotationDeg: roundEditNumber(state.freeRotationDeg),
+                    cropX: roundEditNumber(state.cropX),
+                    cropY: roundEditNumber(state.cropY),
+                    cropSize: roundEditNumber(state.cropSize)
+                };
+            }
+
+            function getOrientedCanvas() {
+                const r = ((state.rotationQuarterTurns % 4) + 4) % 4;
+
+                if (orientedCache.canvas && orientedCache.quarterTurns === r) {
+                    return orientedCache.canvas;
+                }
+
+                const canvas = makeOrientedCanvasForEdit(img, r);
+
+                orientedCache.quarterTurns = r;
+                orientedCache.canvas = canvas;
+
+                return canvas;
+            }
+
+            function maxCropSizeForCurrentRotation() {
+                const s = orientedSize();
+
+                const a =
+                      Math.abs(Math.cos(degToRad(state.freeRotationDeg))) +
+                      Math.abs(Math.sin(degToRad(state.freeRotationDeg)));
+
+                return Math.floor(Math.min(s.w, s.h) / Math.max(1, a));
+            }
+
+            function resetCropToMaxCentered() {
+                const s = orientedSize();
+
+                state.cropSize = maxCropSizeForCurrentRotation();
+                state.cropX = (s.w - state.cropSize) / 2;
+                state.cropY = (s.h - state.cropSize) / 2;
+
+                clampCrop();
+            }
+
+            function applyEditToState(edit) {
+                const e = normaliseMainPhotoEdit(edit);
+
+                if (
+                    e &&
+                    Math.round(e.sourceW) === Math.round(sourceW) &&
+                    Math.round(e.sourceH) === Math.round(sourceH) &&
+                    e.cropSize > 0
+                ) {
+                    state.rotationQuarterTurns = ((e.rotationQuarterTurns % 4) + 4) % 4;
+                    state.freeRotationDeg = e.freeRotationDeg;
+                    state.cropX = e.cropX;
+                    state.cropY = e.cropY;
+                    state.cropSize = e.cropSize;
+                    clampCrop();
+                    return;
+                }
+
+                state.rotationQuarterTurns = 0;
+                state.freeRotationDeg = 0;
+                resetCropToMaxCentered();
+            }
+
+            function cropSourceCorners(
+            cropX = state.cropX,
+             cropY = state.cropY,
+             cropSize = state.cropSize
+            ) {
+                const cx = cropX + cropSize / 2;
+                const cy = cropY + cropSize / 2;
+                const angle = -degToRad(state.freeRotationDeg);
+
+                return [
+                    rotatePoint(cropX, cropY, cx, cy, angle),
+                    rotatePoint(cropX + cropSize, cropY, cx, cy, angle),
+                    rotatePoint(cropX + cropSize, cropY + cropSize, cx, cy, angle),
+                    rotatePoint(cropX, cropY + cropSize, cx, cy, angle)
+                ];
+            }
+
+            function cropSourceBounds(
+            cropX = state.cropX,
+             cropY = state.cropY,
+             cropSize = state.cropSize
+            ) {
+                const pts = cropSourceCorners(cropX, cropY, cropSize);
+
+                return {
+                    minX: Math.min(...pts.map(p => p.x)),
+                    maxX: Math.max(...pts.map(p => p.x)),
+                    minY: Math.min(...pts.map(p => p.y)),
+                    maxY: Math.max(...pts.map(p => p.y))
+                };
+            }
+
+            function clampCrop() {
+                const s = orientedSize();
+
+                const minCropSize = Math.max(64, Math.floor(Math.min(s.w, s.h) * 0.05));
+                const maxCropSize = Math.max(minCropSize, maxCropSizeForCurrentRotation());
+
+                state.cropSize = Math.max(minCropSize, Math.min(maxCropSize, state.cropSize));
+
+                for (let i = 0; i < 4; i++) {
+                    const b = cropSourceBounds();
+
+                    if (b.minX < 0) state.cropX += -b.minX;
+                    if (b.maxX > s.w) state.cropX -= b.maxX - s.w;
+
+                    if (b.minY < 0) state.cropY += -b.minY;
+                    if (b.maxY > s.h) state.cropY -= b.maxY - s.h;
+                }
+
+                const finalBounds = cropSourceBounds();
+
+                if (
+                    finalBounds.minX < -0.1 ||
+                    finalBounds.maxX > s.w + 0.1 ||
+                    finalBounds.minY < -0.1 ||
+                    finalBounds.maxY > s.h + 0.1
+                ) {
+                    state.cropSize = maxCropSizeForCurrentRotation();
+                    state.cropX = (s.w - state.cropSize) / 2;
+                    state.cropY = (s.h - state.cropSize) / 2;
+                }
+            }
+
+            applyEditToState(savedEdit);
+            initialSignature = mainPhotoEditSignature(getCurrentEdit());
+
+            editor.innerHTML = `
+            <div class="wfmm-photo-editor-header">
+                <div>
+                    <div class="wfmm-photo-editor-title">Edit main photo</div>
+                </div>
+            </div>
+
+            <div class="wfmm-photo-editor-body">
+                <div class="wfmm-photo-editor-toolbar">
+                    <button type="button" data-tool="crop" class="is-active">Crop / resize</button>
+                    <button type="button" data-tool="rotate">Free rotate</button>
+                    <button type="button" data-action="rotate90">Rotate 90°</button>
+                    <button type="button" data-action="reset">Reset</button>
+
+                    <div class="wfmm-photo-editor-guide-row">
+                        <label><input type="checkbox" data-guide="circleGuide"> Circle guide</label>
+                        <label><input type="checkbox" data-guide="thirds"> Rule of thirds</label>
+                        <label><input type="checkbox" data-guide="safe"> 25% safe zone</label>
+                        <label><input type="checkbox" data-guide="center"> Centre</label>
+                        <label><input type="checkbox" data-guide="photoDiscPreview"> Photo Disc Preview</label>
+                    </div>
+                </div>
+
+                <div class="wfmm-photo-editor-canvas-wrap">
+                    <canvas id="wfmm-photo-editor-canvas"></canvas>
+                </div>
+            </div>
+
+            <div class="wfmm-photo-editor-footer">
+                <div>
+                    <div class="wfmm-photo-editor-output" id="wfmm-photo-editor-output"></div>
+                </div>
+                <div>
+                    <button type="button" data-action="cancel">Cancel</button>
+                    <button type="button" class="primary" data-action="save">Save photo</button>
+                </div>
+            </div>
+        `;
+
+            backdrop.appendChild(editor);
+            document.body.appendChild(backdrop);
+
+            const canvas = editor.querySelector("#wfmm-photo-editor-canvas");
+            const ctx = canvas.getContext("2d", { alpha: false });
+            const canvasWrap = editor.querySelector(".wfmm-photo-editor-canvas-wrap");
+            const outputInfo = editor.querySelector("#wfmm-photo-editor-output");
+
+            function syncGuideCheckboxes() {
+                const guideStates = {
+                    circleGuide: state.showCircleGuide,
+                    thirds: state.showThirds,
+                    safe: state.showSafeZone,
+                    center: state.showCenter,
+                    photoDiscPreview: state.showPhotoDiscPreview
+                };
+
+                for (const [name, checked] of Object.entries(guideStates)) {
+                    const input = editor.querySelector(`[data-guide="${name}"]`);
+                    if (!input) continue;
+
+                    input.checked = checked;
+
+                    if (name !== "photoDiscPreview") {
+                        input.disabled = state.showPhotoDiscPreview;
+                    }
+                }
+            }
+
+            function resizeCanvas() {
+                const rect = canvasWrap.getBoundingClientRect();
+                const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+
+                const cssW = Math.max(1, rect.width);
+                const cssH = Math.max(1, rect.height);
+
+                state.dpr = dpr;
+
+                canvas.width = Math.round(cssW * dpr);
+                canvas.height = Math.round(cssH * dpr);
+
+                canvas.style.width = cssW + "px";
+                canvas.style.height = cssH + "px";
+
+                draw();
+            }
+
+            function getDisplayLayout() {
+                const cssW = parseFloat(canvas.style.width) || canvasWrap.clientWidth || 600;
+                const cssH = parseFloat(canvas.style.height) || canvasWrap.clientHeight || 420;
+
+                const s = orientedSize();
+                const pad = Math.max(34, Math.min(86, Math.min(cssW, cssH) * 0.09));
+
+                const scale = Math.min(
+                    (cssW - pad * 2) / s.w,
+                    (cssH - pad * 2) / s.h
+                );
+
+                const imageW = s.w * scale;
+                const imageH = s.h * scale;
+
+                return {
+                    canvasW: cssW,
+                    canvasH: cssH,
+                    imageX: (cssW - imageW) / 2,
+                    imageY: (cssH - imageH) / 2,
+                    imageW,
+                    imageH,
+                    scale
+                };
+            }
+
+            function orientedToCanvasX(x) {
+                return state.layout.imageX + x * state.layout.scale;
+            }
+
+            function orientedToCanvasY(y) {
+                return state.layout.imageY + y * state.layout.scale;
+            }
+
+            function canvasToOrientedX(x) {
+                return (x - state.layout.imageX) / state.layout.scale;
+            }
+
+            function canvasToOrientedY(y) {
+                return (y - state.layout.imageY) / state.layout.scale;
+            }
+
+            function cropRectCanvas() {
+                return {
+                    x: orientedToCanvasX(state.cropX),
+                    y: orientedToCanvasY(state.cropY),
+                    size: state.cropSize * state.layout.scale
+                };
+            }
+
+            function cropCenterCanvas() {
+                const r = cropRectCanvas();
+
+                return {
+                    x: r.x + r.size / 2,
+                    y: r.y + r.size / 2
+                };
+            }
+
+            function drawImageBehindFixedCrop() {
+                const l = state.layout;
+                const oriented = getOrientedCanvas();
+                const c = cropCenterCanvas();
+
+                ctx.save();
+                ctx.translate(c.x, c.y);
+                ctx.rotate(degToRad(state.freeRotationDeg));
+                ctx.translate(-c.x, -c.y);
+
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = "high";
+
+                ctx.drawImage(
+                    oriented,
+                    l.imageX,
+                    l.imageY,
+                    l.imageW,
+                    l.imageH
+                );
+
+                ctx.restore();
+            }
+
+            function drawOutsideFade() {
+                const r = cropRectCanvas();
+
+                ctx.save();
+                ctx.fillStyle = "rgba(255,255,255,0.58)";
+                ctx.beginPath();
+                ctx.rect(0, 0, state.layout.canvasW, state.layout.canvasH);
+                ctx.rect(r.x, r.y, r.size, r.size);
+                ctx.fill("evenodd");
+                ctx.restore();
+            }
+
+            function drawCropBorder() {
+                const r = cropRectCanvas();
+
+                ctx.save();
+
+                ctx.strokeStyle = "#2563eb";
+                ctx.lineWidth = 2.5;
+                ctx.strokeRect(r.x, r.y, r.size, r.size);
+
+                ctx.strokeStyle = "rgba(255,255,255,0.96)";
+                ctx.lineWidth = 1;
+                ctx.strokeRect(r.x + 2, r.y + 2, r.size - 4, r.size - 4);
+
+                ctx.restore();
+            }
+
+            function drawGuidesInsideCrop() {
+                if (state.showPhotoDiscPreview) return;
+
+                const r = cropRectCanvas();
+
+                ctx.save();
+
+                ctx.beginPath();
+                ctx.rect(r.x, r.y, r.size, r.size);
+                ctx.clip();
+
+                if (state.showThirds) {
+                    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+                    ctx.lineWidth = 1;
+
+                    ctx.beginPath();
+                    ctx.moveTo(r.x + r.size / 3, r.y);
+                    ctx.lineTo(r.x + r.size / 3, r.y + r.size);
+                    ctx.moveTo(r.x + r.size * 2 / 3, r.y);
+                    ctx.lineTo(r.x + r.size * 2 / 3, r.y + r.size);
+                    ctx.moveTo(r.x, r.y + r.size / 3);
+                    ctx.lineTo(r.x + r.size, r.y + r.size / 3);
+                    ctx.moveTo(r.x, r.y + r.size * 2 / 3);
+                    ctx.lineTo(r.x + r.size, r.y + r.size * 2 / 3);
+                    ctx.stroke();
+                }
+
+                if (state.showSafeZone) {
+                    const p = r.size * 0.25;
+
+                    ctx.strokeStyle = "rgba(245,158,11,0.95)";
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(r.x + p, r.y + p, r.size - p * 2, r.size - p * 2);
+                }
+
+                if (state.showCenter) {
+                    ctx.strokeStyle = "rgba(217,70,239,0.98)";
+                    ctx.lineWidth = 2;
+
+                    ctx.beginPath();
+                    ctx.moveTo(r.x, r.y);
+                    ctx.lineTo(r.x + r.size, r.y + r.size);
+                    ctx.moveTo(r.x + r.size, r.y);
+                    ctx.lineTo(r.x, r.y + r.size);
+
+                    ctx.moveTo(r.x + r.size / 2, r.y);
+                    ctx.lineTo(r.x + r.size / 2, r.y + r.size);
+                    ctx.moveTo(r.x, r.y + r.size / 2);
+                    ctx.lineTo(r.x + r.size, r.y + r.size / 2);
+                    ctx.stroke();
+                }
+
+                if (state.showCircleGuide) {
+                    ctx.save();
+
+                    ctx.fillStyle = "rgba(0,0,0,0.40)";
+                    ctx.beginPath();
+                    ctx.rect(r.x, r.y, r.size, r.size);
+                    ctx.arc(
+                        r.x + r.size / 2,
+                        r.y + r.size / 2,
+                        r.size / 2,
+                        0,
+                        Math.PI * 2,
+                        true
+                    );
+                    ctx.fill("evenodd");
+
+                    ctx.strokeStyle = "rgba(255,255,255,0.95)";
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.arc(
+                        r.x + r.size / 2,
+                        r.y + r.size / 2,
+                        r.size / 2 - 1,
+                        0,
+                        Math.PI * 2
+                    );
+                    ctx.stroke();
+
+                    ctx.restore();
+                }
+
+                ctx.restore();
+            }
+
+            function drawPhotoDiscPreview() {
+                const r = cropRectCanvas();
+
+                const blueWidth = Math.max(6, r.size * 0.026);
+                const cropRadius = r.size / 2;
+                const blueRadius = cropRadius + blueWidth / 2;
+
+                ctx.save();
+
+                ctx.fillStyle = "#ffffff";
+                ctx.beginPath();
+                ctx.rect(0, 0, state.layout.canvasW, state.layout.canvasH);
+                ctx.arc(
+                    r.x + r.size / 2,
+                    r.y + r.size / 2,
+                    cropRadius,
+                    0,
+                    Math.PI * 2,
+                    true
+                );
+                ctx.fill("evenodd");
+
+                ctx.strokeStyle = "#1d4ed8";
+                ctx.lineWidth = blueWidth;
+                ctx.beginPath();
+                ctx.arc(
+                    r.x + r.size / 2,
+                    r.y + r.size / 2,
+                    blueRadius,
+                    0,
+                    Math.PI * 2
+                );
+                ctx.stroke();
+
+                ctx.restore();
+            }
+
+            function drawHandles() {
+                const r = cropRectCanvas();
+                const handleRadius = state.showPhotoDiscPreview ? 9 : 7;
+
+                const corners = [
+                    { name: "tl", x: r.x, y: r.y },
+                    { name: "tr", x: r.x + r.size, y: r.y },
+                    { name: "br", x: r.x + r.size, y: r.y + r.size },
+                    { name: "bl", x: r.x, y: r.y + r.size }
+                ];
+
+                ctx.save();
+
+                ctx.fillStyle = "#2563eb";
+                ctx.strokeStyle = "#fff";
+                ctx.lineWidth = 2;
+
+                for (const p of corners) {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, handleRadius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                }
+
+                if (state.tool === "rotate" || state.showPhotoDiscPreview) {
+                    const handle = getRotateHandlePoint();
+                    const topMid = {
+                        x: r.x + r.size / 2,
+                        y: r.y
+                    };
+
+                    ctx.strokeStyle = "#2563eb";
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(topMid.x, topMid.y);
+                    ctx.lineTo(handle.x, handle.y);
+                    ctx.stroke();
+
+                    ctx.fillStyle = "#fff";
+                    ctx.strokeStyle = "#2563eb";
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(handle.x, handle.y, 12, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+
+                    ctx.fillStyle = "#2563eb";
+                    ctx.font = "bold 14px sans-serif";
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    ctx.fillText("↻", handle.x, handle.y + 0.5);
+                }
+
+                if (state.showPhotoDiscPreview) {
+                    ctx.strokeStyle = "rgba(37,99,235,0.85)";
+                    ctx.lineWidth = 1.5;
+                    ctx.setLineDash([6, 4]);
+                    ctx.strokeRect(r.x, r.y, r.size, r.size);
+                    ctx.setLineDash([]);
+                }
+
+                ctx.restore();
+            }
+
+            function draw() {
+                state.layout = getDisplayLayout();
+
+                const l = state.layout;
+
+                ctx.save();
+                ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+
+                ctx.clearRect(0, 0, l.canvasW, l.canvasH);
+
+                ctx.fillStyle = "#eef2f7";
+                ctx.fillRect(0, 0, l.canvasW, l.canvasH);
+
+                drawImageBehindFixedCrop();
+
+                if (state.showPhotoDiscPreview) {
+                    drawPhotoDiscPreview();
+                    drawHandles();
+                } else {
+                    drawOutsideFade();
+                    drawCropBorder();
+                    drawGuidesInsideCrop();
+                    drawHandles();
+                }
+
+                ctx.restore();
+
+                const outSize = Math.floor(state.cropSize);
+
+                outputInfo.textContent =
+                    `Original: ${sourceW} × ${sourceH}px. ` +
+                    `Output: ${outSize} × ${outSize}px. ` +
+                    `Free rotate: ${state.freeRotationDeg.toFixed(1).replace(".0", "")}°.`;
+            }
+
+            function getPointerPos(event) {
+                const rect = canvas.getBoundingClientRect();
+
+                return {
+                    x: event.clientX - rect.left,
+                    y: event.clientY - rect.top
+                };
+            }
+
+            function pointDistance(a, b) {
+                return Math.hypot(a.x - b.x, a.y - b.y);
+            }
+
+            function hitTestCropCorner(x, y) {
+                const r = cropRectCanvas();
+                const threshold = state.showPhotoDiscPreview ? 26 : 20;
+
+                const corners = [
+                    { name: "tl", x: r.x, y: r.y },
+                    { name: "tr", x: r.x + r.size, y: r.y },
+                    { name: "br", x: r.x + r.size, y: r.y + r.size },
+                    { name: "bl", x: r.x, y: r.y + r.size }
+                ];
+
+                return corners.find(p => pointDistance({ x, y }, p) <= threshold)?.name || null;
+            }
+
+            function getRotateHandlePoint() {
+                const r = cropRectCanvas();
+
+                return {
+                    x: r.x + r.size / 2,
+                    y: r.y - 36
+                };
+            }
+
+            function hitTestRotateHandle(x, y) {
+                const handle = getRotateHandlePoint();
+                return pointDistance({ x, y }, handle) <= 25;
+            }
+
+            function hitTestCropBody(x, y) {
+                const r = cropRectCanvas();
+
+                return (
+                    x >= r.x &&
+                    x <= r.x + r.size &&
+                    y >= r.y &&
+                    y <= r.y + r.size
+                );
+            }
+
+            function resizeCropFromCorner(cornerName, pointerX, pointerY) {
+                const ox = canvasToOrientedX(pointerX);
+                const oy = canvasToOrientedY(pointerY);
+
+                const startRight = state.startCropX + state.startCropSize;
+                const startBottom = state.startCropY + state.startCropSize;
+
+                let newX = state.startCropX;
+                let newY = state.startCropY;
+                let newSize = state.startCropSize;
+
+                if (cornerName === "br") {
+                    newSize = Math.max(ox - state.startCropX, oy - state.startCropY);
+                    newX = state.startCropX;
+                    newY = state.startCropY;
+                } else if (cornerName === "tl") {
+                    newSize = Math.max(startRight - ox, startBottom - oy);
+                    newX = startRight - newSize;
+                    newY = startBottom - newSize;
+                } else if (cornerName === "tr") {
+                    newSize = Math.max(ox - state.startCropX, startBottom - oy);
+                    newX = state.startCropX;
+                    newY = startBottom - newSize;
+                } else if (cornerName === "bl") {
+                    newSize = Math.max(startRight - ox, oy - state.startCropY);
+                    newX = startRight - newSize;
+                    newY = state.startCropY;
+                }
+
+                state.cropX = newX;
+                state.cropY = newY;
+                state.cropSize = newSize;
+
+                clampCrop();
+            }
+
+            function pointerAngleFromCenter(x, y) {
+                const c = cropCenterCanvas();
+                return Math.atan2(y - c.y, x - c.x) * 180 / Math.PI;
+            }
+
+            canvas.addEventListener("pointerdown", (event) => {
+                event.preventDefault();
+
+                const p = getPointerPos(event);
+
+                state.activeDrag = null;
+                state.activeHandle = null;
+
+                if ((state.tool === "rotate" || state.showPhotoDiscPreview) && hitTestRotateHandle(p.x, p.y)) {
+                    state.activeDrag = "rotate";
+                    state.startFreeRotationDeg = state.freeRotationDeg;
+                    state.startPointerAngle = pointerAngleFromCenter(p.x, p.y);
+                } else {
+                    const cropHandle = hitTestCropCorner(p.x, p.y);
+
+                    if (cropHandle) {
+                        state.activeDrag = "resize";
+                        state.activeHandle = cropHandle;
+                    } else if (hitTestCropBody(p.x, p.y)) {
+                        state.activeDrag = "move";
+                    }
+                }
+
+                if (!state.activeDrag) return;
+
+                state.dragStartX = p.x;
+                state.dragStartY = p.y;
+                state.startCropX = state.cropX;
+                state.startCropY = state.cropY;
+                state.startCropSize = state.cropSize;
+
+                canvas.classList.add("is-dragging");
+                canvas.setPointerCapture(event.pointerId);
+            });
+
+            canvas.addEventListener("pointermove", (event) => {
+                if (!state.activeDrag) return;
+
+                event.preventDefault();
+
+                const p = getPointerPos(event);
+
+                if (state.activeDrag === "move") {
+                    const dx = (p.x - state.dragStartX) / state.layout.scale;
+                    const dy = (p.y - state.dragStartY) / state.layout.scale;
+
+                    state.cropX = state.startCropX + dx;
+                    state.cropY = state.startCropY + dy;
+
+                    clampCrop();
+                } else if (state.activeDrag === "resize") {
+                    resizeCropFromCorner(state.activeHandle, p.x, p.y);
+                } else if (state.activeDrag === "rotate") {
+                    const nowAngle = pointerAngleFromCenter(p.x, p.y);
+
+                    state.freeRotationDeg = normaliseAngleDeg(
+                        state.startFreeRotationDeg + (nowAngle - state.startPointerAngle)
+                    );
+
+                    clampCrop();
+                }
+
+                draw();
+            });
+
+            canvas.addEventListener("pointerup", (event) => {
+                state.activeDrag = null;
+                state.activeHandle = null;
+                canvas.classList.remove("is-dragging");
+
+                try {
+                    canvas.releasePointerCapture(event.pointerId);
+                } catch (e) {}
+            });
+
+            canvas.addEventListener("pointercancel", () => {
+                state.activeDrag = null;
+                state.activeHandle = null;
+                canvas.classList.remove("is-dragging");
+            });
+
+            async function saveEditSettings() {
+                clampCrop();
+
+                const edit = getCurrentEdit();
+                const currentSignature = mainPhotoEditSignature(edit);
+
+                const sourceIsSquare = Math.round(sourceW) === Math.round(sourceH);
+                const existingEditSignature = originalState._wfmmEdit
+                ? mainPhotoEditSignature(originalState._wfmmEdit)
+                : "";
+
+                const unchangedFromOpenedState = currentSignature === initialSignature;
+                const unchangedFromExistingSavedEdit =
+                      existingEditSignature &&
+                      currentSignature === existingEditSignature;
+
+                // Only close without saving when:
+                // - the source is already square, and
+                // - there is no existing saved edit, and
+                // - the user made no changes.
+                //
+                // For non-square images, the default centred square crop is a real edit
+                // and must be saved even if the user did not move the crop box.
+                if (unchangedFromOpenedState && !originalState._wfmmEdit && sourceIsSquare) {
+                    closeEditor();
+                    return;
+                }
+
+                // If an existing saved edit was opened and nothing changed, just close.
+                if (unchangedFromExistingSavedEdit) {
+                    closeEditor();
+                    return;
+                }
+
+                let previewDataUrl = null;
+
+                if (!isDefaultMainPhotoEdit(edit)) {
+                    const previewCanvas = renderMainPhotoEditToCanvas(img, edit, 512);
+                    previewDataUrl = previewCanvas.toDataURL("image/jpeg", 0.86);
+                }
+
+                const updatedState = cloneImageStateWithEdit(originalState, edit, previewDataUrl);
+
+                if (typeof onSave === "function") {
+                    onSave(updatedState);
+                }
+
+                closeEditor();
+            }
+
+            editor.addEventListener("change", (event) => {
+                const guide = event.target && event.target.dataset && event.target.dataset.guide;
+                if (!guide) return;
+
+                if (guide === "photoDiscPreview") {
+                    state.showPhotoDiscPreview = event.target.checked;
+
+                    if (state.showPhotoDiscPreview) {
+                        state.showCircleGuide = false;
+                        state.showThirds = false;
+                        state.showSafeZone = false;
+                        state.showCenter = false;
+                    } else {
+                        const guides = getPhotoEditorGuideSettings();
+
+                        state.showCircleGuide = guides.circleGuide;
+                        state.showThirds = guides.ruleOfThirds;
+                        state.showSafeZone = guides.safeZone25;
+                        state.showCenter = guides.centreGuide;
+                    }
+
+                    syncGuideCheckboxes();
+                    draw();
+                    return;
+                }
+
+                if (guide === "circleGuide") state.showCircleGuide = event.target.checked;
+                if (guide === "thirds") state.showThirds = event.target.checked;
+                if (guide === "safe") state.showSafeZone = event.target.checked;
+                if (guide === "center") state.showCenter = event.target.checked;
+
+                savePhotoEditorGuideSettingsFromState(state);
+                syncGuideCheckboxes();
+                draw();
+            });
+
+            editor.addEventListener("click", (event) => {
+                const toolBtn = event.target.closest("button[data-tool]");
+
+                if (toolBtn) {
+                    state.tool = toolBtn.dataset.tool;
+
+                    editor.querySelectorAll("button[data-tool]").forEach((btn) => {
+                        btn.classList.toggle("is-active", btn === toolBtn);
+                    });
+
+                    draw();
+                    return;
+                }
+
+                const btn = event.target.closest("button[data-action]");
+                if (!btn) return;
+
+                const action = btn.dataset.action;
+
+                if (action === "close" || action === "cancel") {
+                    closeEditor();
+                    return;
+                }
+
+                if (action === "rotate90") {
+                    state.rotationQuarterTurns = (state.rotationQuarterTurns + 1) % 4;
+                    state.freeRotationDeg = 0;
+                    orientedCache.quarterTurns = null;
+                    orientedCache.canvas = null;
+                    resetCropToMaxCentered();
+                    draw();
+                    return;
+                }
+
+                if (action === "reset") {
+                    state.tool = "crop";
+                    state.rotationQuarterTurns = 0;
+                    state.freeRotationDeg = 0;
+                    orientedCache.quarterTurns = null;
+                    orientedCache.canvas = null;
+                    resetCropToMaxCentered();
+
+                    state.showCircleGuide = false;
+                    state.showPhotoDiscPreview = false;
+                    state.showThirds = true;
+                    state.showSafeZone = false;
+                    state.showCenter = false;
+
+                    editor.querySelectorAll("button[data-tool]").forEach((toolButton) => {
+                        toolButton.classList.toggle("is-active", toolButton.dataset.tool === "crop");
+                    });
+
+                    syncGuideCheckboxes();
+                    draw();
+                    return;
+                }
+
+                if (action === "save") {
+                    saveEditSettings().catch((err) => {
+                        console.error("[WFMM Photo Editor] Save failed:", err);
+                        alert("Could not save edit settings.");
+                    });
+                }
+            });
+
+            syncGuideCheckboxes();
+
+            resizeCanvasHandler = resizeCanvas;
+            window.addEventListener("resize", resizeCanvasHandler);
+            requestAnimationFrame(resizeCanvas);
+        }
+    }
+
+    function attachMainPhotoEditButton(options) {
+        const {
+            host,
+            imageState,
+            onEdited
+        } = options || {};
+
+        if (!host) return;
+
+        let existing = host.querySelector(".wfmm-photo-edit-btn");
+
+        if (!imageState || imageState._pending) {
+            if (existing) existing.remove();
+            return;
+        }
+
+        if (!existing) {
+            existing = document.createElement("button");
+            existing.type = "button";
+            existing.className = "wfmm-photo-edit-btn";
+            host.appendChild(existing);
+        }
+
+        existing.textContent = imageState._wfmmEdit ? "Edit photo settings" : "Edit photo";
+
+        existing.onclick = () => {
+            openMainPhotoEditor({
+                imageState,
+                onSave(updatedState) {
+                    if (typeof onEdited === "function") {
+                        onEdited(updatedState);
+                    }
+                }
+            });
+        };
+    }
+
+    async function materialiseImageStateForSaveOrSubmit(state) {
+        if (!state) return null;
+
+        if (!state._wfmmEdit) {
+            return state;
+        }
+
+        const editedBlob = await renderMainPhotoEditToBlob(state, state._wfmmEdit, {
+            quality: 0.94
+        });
+
+        let editedFile;
+
+        try {
+            editedFile = new File([editedBlob], "edited-main-photo.jpg", {
+                type: editedBlob.type || "image/jpeg",
+                lastModified: Date.now()
+            });
+        } catch (e) {
+            editedFile = editedBlob;
+        }
+
+        const oldPreviewUrl = state._wfmmEditPreviewDataUrl;
+        const oldBlobUrl = state.url && state.url.startsWith("blob:") ? state.url : null;
+
+        const next = {
+            sourceType: "file",
+            file: editedFile,
+            url: URL.createObjectURL(editedBlob),
+            gcsPath: null,
+            _edited: true,
+            _editedAt: Date.now()
+        };
+
+        if (oldPreviewUrl) {
+            next._wfmmEditPreviewDataUrl = oldPreviewUrl;
+        }
+
+        // The edit has now been baked into the file.
+        // Do not keep _wfmmEdit, or it will be applied twice later.
+        delete next._wfmmEdit;
+
+        if (oldBlobUrl) {
+            setTimeout(() => URL.revokeObjectURL(oldBlobUrl), 0);
+        }
+
+        return next;
+    }
+
     // ==================================
     // Submission API helpers
     // ==================================
@@ -2681,13 +4202,8 @@
             return;
         }
 
-        const confirmText =
-              "This will submit a new nomination with the provided details.\n\n" +
-              "This will consume one of your available nominations only when the final submit step succeeds.\n\n" +
-              "Do you want to continue?";
-
-        if (!window.confirm(confirmText)) {
-            return;
+        if (!options.skipConfirm && !confirmSubmitWayspot()) {
+            return false;
         }
 
         wfMapmodsIsUploading = true;
@@ -2705,17 +4221,7 @@
             wfmapmodsSetSubmitProgress("Preparing images…", 10);
 
             async function resolveBlobFromState(state) {
-                if (!state) return null;
-
-                if (state.sourceType === "file" && state.file instanceof Blob) {
-                    return state.file;
-                }
-
-                if (state.url) {
-                    return await fetchImageBlobForSubmit(state.url);
-                }
-
-                return null;
+                return await resolveImageBlobForSubmit(state);
             }
 
             const totalSupporting = supportingStates.length;
@@ -2956,7 +4462,7 @@
 
             wfMapmodsIsUploading = false;
             wfmapmodsHideSubmitProgress(1500);
-
+            return true;
         } catch (err) {
             console.error("Wayfarer Map: submitWayspotViaApi failed:", err);
             wfmapmodsHideSubmitProgress();
@@ -2966,9 +4472,18 @@
                 "If this failed before the final /submit/now step, no nomination quota should have been consumed.\n" +
                 "See console for details."
             );
+            return false;
         } finally {
             updateAvailability({ force: true }).catch(() => {});
         }
+    }
+
+    function confirmSubmitWayspot() {
+        return window.confirm(
+            "This will submit a new nomination with the provided details.\n\n" +
+            "This will consume one of your available nominations only when the final submit step succeeds.\n\n" +
+            "Do you want to continue?"
+        );
     }
 
     window.addEventListener("beforeunload", (e) => {
@@ -3057,6 +4572,11 @@
             title: "Submit Wayspot",
             width: 500,
             buildContent(body, okBtn, closeModal) {
+                okBtn.textContent = "Submit";
+
+                const submitBody = document.createElement("div");
+                submitBody.className = "wfmapmods-submit-modal-body";
+
                 const poi = submitData.poi || {};
                 const originalImages = submitData.images || {};
 
@@ -3140,8 +4660,9 @@
                     labelText,
                     state,            // "placeholder" | "pending" | "ready"
                     url = null,       // required for "ready"
-                    onPick = null,    // for placeholder + (optional) ready click
-                    onRemove = null   // for pending/ready remove
+                    onPick = null,    // for placeholder + optional ready click
+                    onRemove = null,  // for pending/ready remove
+                    onEdit = null     // main photo editor button
                 }) {
                     const block = document.createElement("div");
                     block.className = "wfmapmods-submit-imgblock";
@@ -3155,7 +4676,6 @@
                     wrap.className = "wfmapmods-submit-thumbwrap";
                     block.appendChild(wrap);
 
-                    // Tile
                     const tile = document.createElement("div");
                     tile.className = "wfmapmods-submit-tile";
                     wrap.appendChild(tile);
@@ -3172,6 +4692,7 @@
 
                     if (state === "pending") {
                         tile.classList.add("wfmapmods-submit-tile--pending");
+
                         const spinner = document.createElement("div");
                         spinner.className = "wfmapmods-spinner";
                         tile.appendChild(spinner);
@@ -3192,7 +4713,6 @@
                         }
                     }
 
-                    // Remove button (pending + ready)
                     if (onRemove) {
                         const removeBtn = document.createElement("button");
                         removeBtn.type = "button";
@@ -3200,9 +4720,24 @@
                         removeBtn.textContent = "×";
                         removeBtn.addEventListener("click", (ev) => {
                             ev.preventDefault();
+                            ev.stopPropagation();
                             onRemove();
                         });
                         wrap.appendChild(removeBtn);
+                    }
+
+                    if (state === "ready" && onEdit) {
+                        const editBtn = document.createElement("button");
+                        editBtn.type = "button";
+                        editBtn.className = "wfmapmods-submit-edit-photo";
+                        editBtn.textContent = "Edit photo";
+                        editBtn.addEventListener("click", (ev) => {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            onEdit();
+                        });
+
+                        block.appendChild(editBtn);
                     }
 
                     return block;
@@ -3222,15 +4757,62 @@
                         imagesRow.appendChild(createPhotoBlock({
                             labelText: "Main photo",
                             state: "pending",
-                            onRemove: () => { imageState.main = null; renderImages(); validate(); }
+                            onRemove: () => {
+                                imageState.main = null;
+                                renderImages();
+                                validate();
+                            }
                         }));
                     } else {
                         imagesRow.appendChild(createPhotoBlock({
                             labelText: "Main photo",
                             state: "ready",
-                            url: imageState.main.url,
+                            url: getImageDisplayUrl(imageState.main),
                             onPick: () => mainFileInput.click(),
-                            onRemove: () => { imageState.main = null; renderImages(); validate(); }
+                            onRemove: () => {
+                                const oldUrl = imageState.main && imageState.main.url;
+
+                                imageState.main = null;
+
+                                if (oldUrl && oldUrl.startsWith("blob:")) {
+                                    setTimeout(() => URL.revokeObjectURL(oldUrl), 0);
+                                }
+
+                                renderImages();
+                                validate();
+                            },
+                            onEdit: () => {
+                                if (!canEditImageState(imageState.main)) {
+                                    alert("This image cannot be edited because it does not include a usable image URL.");
+                                    return;
+                                }
+
+                                if (typeof openMainPhotoEditor !== "function") {
+                                    alert("Photo editor is not available.");
+                                    return;
+                                }
+
+                                openMainPhotoEditor({
+                                    imageState: imageState.main,
+                                    onSave(editedState) {
+                                        const oldUrl = imageState.main && imageState.main.url;
+
+                                        imageState.main = editedState;
+
+                                        if (
+                                            oldUrl &&
+                                            oldUrl.startsWith("blob:") &&
+                                            editedState &&
+                                            editedState.url !== oldUrl
+                                        ) {
+                                            setTimeout(() => URL.revokeObjectURL(oldUrl), 0);
+                                        }
+
+                                        renderImages();
+                                        validate();
+                                    }
+                                });
+                            }
                         }));
                     }
 
@@ -3240,7 +4822,11 @@
                             labelText: "Supporting " + (idx + 1),
                             state: imgObj._pending ? "pending" : "ready",
                             url: imgObj.url,
-                            onRemove: () => { imageState.supporting.splice(idx, 1); renderImages(); validate(); }
+                            onRemove: () => {
+                                imageState.supporting.splice(idx, 1);
+                                renderImages();
+                                validate();
+                            }
                         }));
                     });
 
@@ -3251,6 +4837,8 @@
                             onPick: () => supportingFileInput.click()
                         }));
                     }
+
+                    refreshMainPhotoAspectWarning();
                 }
 
                 // File input handlers
@@ -3258,7 +4846,6 @@
                     const file = ev.target.files && ev.target.files[0];
                     if (!file) return;
 
-                    // Set pending state immediately → spinner shows
                     imageState.main = {
                         sourceType: "file",
                         url: null,
@@ -3270,10 +4857,10 @@
                     validate();
 
                     convertFileToJpeg(file).then(({ blob, dataUrl }) => {
-                        if (!imageState.main) return; // was cleared while converting
+                        if (!imageState.main) return;
 
-                        imageState.main.url = dataUrl;   // JPEG preview
-                        imageState.main.file = blob;     // JPEG blob for upload
+                        imageState.main.url = dataUrl;
+                        imageState.main.file = blob;
                         imageState.main._pending = false;
 
                         renderImages();
@@ -3297,30 +4884,25 @@
                         if (imageState.supporting.length >= 5) break;
                         const file = files[i];
 
-                        // Create a pending entry: occupies a slot, shows the spinner box
                         const imgObj = {
                             sourceType: "file",
-                            url: null,       // will be set when conversion finishes
-                            file: null,      // final JPEG blob goes here
-                            _pending: true   // flag used by renderImages
+                            url: null,
+                            file: null,
+                            _pending: true
                         };
 
                         const idx = imageState.supporting.length;
                         imageState.supporting.push(imgObj);
 
-                        // Immediately update UI so:
-                        // - the spinner appears
-                        // - and the next "+" placeholder appears if <5
                         renderImages();
                         validate();
 
-                        // Convert in the background
                         convertFileToJpeg(file).then(({ blob, dataUrl }) => {
                             const target = imageState.supporting[idx];
-                            if (!target) return; // entry removed while converting
+                            if (!target) return;
 
-                            target.url = dataUrl;  // JPEG preview
-                            target.file = blob;    // JPEG blob for upload
+                            target.url = dataUrl;
+                            target.file = blob;
                             target._pending = false;
 
                             renderImages();
@@ -3329,7 +4911,6 @@
                             console.error("Supporting image conversion failed:", err);
                             alert("Could not load one of the images: " + err.message);
 
-                            // Remove the pending entry on error
                             const currentIndex = imageState.supporting.indexOf(imgObj);
                             if (currentIndex !== -1) {
                                 imageState.supporting.splice(currentIndex, 1);
@@ -3344,6 +4925,69 @@
 
                 // Initial render of images
                 renderImages();
+
+                function setMainPhotoAspectWarning(message) {
+                    let warning = wrapper.querySelector(".wfmapmods-main-photo-aspect-warning");
+
+                    if (!warning) {
+                        warning = document.createElement("div");
+                        warning.className = "wfmapmods-main-photo-aspect-warning";
+                        imagesRow.insertAdjacentElement("afterend", warning);
+                    }
+
+                    warning.textContent = message || "";
+                    warning.classList.toggle("is-visible", !!message);
+                }
+
+                function checkImageAspectRatio(state, callback) {
+                    const url = getImageDisplayUrl(state);
+
+                    if (!url || state._pending) {
+                        callback(null);
+                        return;
+                    }
+
+                    const img = new Image();
+
+                    img.onload = () => {
+                        const w = img.naturalWidth || img.width;
+                        const h = img.naturalHeight || img.height;
+
+                        if (!w || !h) {
+                            callback(null);
+                            return;
+                        }
+
+                        callback(Math.abs(w - h) <= 1);
+                    };
+
+                    img.onerror = () => callback(null);
+                    img.src = url;
+                }
+
+                function refreshMainPhotoAspectWarning() {
+                    const main = imageState.main;
+
+                    if (!main || main._pending) {
+                        setMainPhotoAspectWarning("");
+                        return;
+                    }
+
+                    if (main._wfmmEdit) {
+                        setMainPhotoAspectWarning("");
+                        return;
+                    }
+
+                    checkImageAspectRatio(main, (isSquare) => {
+                        if (imageState.main !== main) return;
+
+                        if (isSquare === false) {
+                            setMainPhotoAspectWarning("⚠️ Main photo is not 1:1 aspect ratio. Image editing is recommended.");
+                        } else {
+                            setMainPhotoAspectWarning("");
+                        }
+                    });
+                }
 
                 // ==========================
                 // Location row (lat,lng)
@@ -3368,23 +5012,18 @@
                 changeBtn.className = "wfmapmods-submit-changebtn";
                 changeBtn.textContent = "Change";
 
-                // --- Change button behaviour ---
                 changeBtn.addEventListener("click", () => {
                     const backdrop = document.getElementById("wfmapmods-submission-edit");
                     if (!backdrop) return;
 
-                    // Starting reference point: either current submitData coords or current window coords
                     const startLat = (typeof submitData.poi.lat === "number" ? submitData.poi.lat : window.currentLat);
                     const startLng = (typeof submitData.poi.lng === "number" ? submitData.poi.lng : window.currentLng);
 
-                    // Hide modal so user can see the map
                     backdrop.style.display = "none";
 
                     if (currentMapMode === MAP_MODE.MOBILE) {
-                        // Explicit “Confirm location” flow on mobile
                         startMobileLocationChange(backdrop, submitData, locationValue, validate);
                     } else {
-                        // Keep existing automatic behaviour on desktop
                         startDesktopLocationChange(backdrop, submitData, locationValue, validate, startLat, startLng);
                     }
                 });
@@ -3395,10 +5034,8 @@
                 locationRow.appendChild(locationLabel);
                 locationRow.appendChild(locationRight);
 
-                // Insert location row under images, before Title/Description fields
                 wrapper.appendChild(locationRow);
 
-                // Warning about distance (hidden by default)
                 const distanceWarning = document.createElement("div");
                 distanceWarning.className = "wfmapmods-submit-warning";
                 wrapper.appendChild(distanceWarning);
@@ -3433,17 +5070,45 @@
                         onChange && onChange();
                     });
 
+                    el.addEventListener("keydown", (event) => {
+                        if (event.key !== "Enter") return;
+
+                        event.preventDefault();
+                        event.stopPropagation();
+
+                        el.blur();
+                    });
+
                     container.append(label, el, counter);
                     wrapper.appendChild(container);
                     return el;
                 }
 
-                const titleInput = addLabeledField({ labelText:"Title", value: poi.title, maxLen: 128, onChange: validate });
-                const descInput  = addLabeledField({ labelText:"Description", value: poi.description, maxLen: 512, rows: 3, onChange: validate });
-                const suppInput  = addLabeledField({ labelText:"Supporting statement", value: poi.supportingStatement, maxLen: 3000, rows: 3, onChange: validate });
+                const titleInput = addLabeledField({
+                    labelText: "Title",
+                    value: poi.title,
+                    maxLen: 128,
+                    onChange: validate
+                });
 
-                body.appendChild(wrapper);
+                const descInput = addLabeledField({
+                    labelText: "Description",
+                    value: poi.description,
+                    maxLen: 512,
+                    rows: 2,
+                    onChange: validate
+                });
 
+                const suppInput = addLabeledField({
+                    labelText: "Supporting statement",
+                    value: poi.supportingStatement,
+                    maxLen: 3000,
+                    rows: 2,
+                    onChange: validate
+                });
+
+                submitBody.appendChild(wrapper);
+                body.appendChild(submitBody);
 
                 // ==========================
                 // Nomination quota info
@@ -3459,9 +5124,8 @@
                 }
 
                 renderQuotaText();
-                body.appendChild(quotaInfo);
+                submitBody.appendChild(quotaInfo);
 
-                // Refresh in background; only update if changed
                 updateAvailability({ force: true }).then(() => {
                     const newText = `You have ${getNominationsAvailableToday()} ${
                     getNominationsAvailableToday() === 1 ? "nomination" : "nominations"
@@ -3475,6 +5139,7 @@
                 // ==========================
                 // Submit Validation
                 // ==========================
+
                 function setOkButtonState(enabled) {
                     const backdrop = document.getElementById("wfmapmods-submission-edit");
                     if (!backdrop) return;
@@ -3497,7 +5162,6 @@
 
                     const textValid = !!t && !!d;
 
-                    // --- Image validity ---
                     const mainReady = !!imageState.main && !imageState.main._pending;
                     const supportingCount = imageState.supporting.length;
                     const hasPendingSupporting = imageState.supporting.some(img => img && img._pending);
@@ -3508,11 +5172,9 @@
                           supportingCount <= 5 &&
                           !hasPendingSupporting;
 
-                    // --- Quota validity ---
                     const nominationsRemaining = getNominationsAvailableToday();
                     const quotaValid = nominationsRemaining > 0;
 
-                    // --- Figure out the marker location ---
                     let markerLat = null;
                     let markerLng = null;
 
@@ -3531,7 +5193,6 @@
                         markerLng = currentLng;
                     }
 
-                    // --- Distance validity (submitterLocation vs marker) ---
                     let distanceValid = true;
                     let distanceKm = null;
 
@@ -3549,7 +5210,7 @@
 
                         if (dMeters > submitRadius) {
                             distanceValid = false;
-                            showWarning(`Submission disabled: The submission pin is ${distanceKm.toFixed(1)} km from your current location (max ${(submitRadius/1000).toFixed(1)} km).`);
+                            showWarning(`Submission disabled: The submission pin is ${distanceKm.toFixed(1)} km from your current location (max ${(submitRadius / 1000).toFixed(1)} km).`);
                         } else if (!quotaValid) {
                             showWarning("Submission disabled: You have 0 nominations available today. You can still save a draft.");
                         } else {
@@ -3616,6 +5277,13 @@
                                 const mode = getDraftSaveLocationMode(submitData);
                                 const now = Date.now();
 
+                                if (imageState.main && imageState.main._wfmmEdit) {
+                                    imageState.main = await materialiseImageStateForSaveOrSubmit(imageState.main);
+                                    renderImages();
+                                    validate();
+                                }
+
+                                collapseSidePanelIfOpen();
                                 closeModal();
 
                                 if (mode === "remote") {
@@ -3639,7 +5307,6 @@
                                     return;
                                 }
 
-                                // Local / IDB path unchanged
                                 const draftId = submitData.draftId ||
                                       ("draft-" + now + "-" + Math.random().toString(36).slice(2));
 
@@ -3669,7 +5336,6 @@
                                 alert(err?.message || "Could not save draft. See console for details.");
                             }
                         });
-
                     }
 
                     // Delete draft button (only if opened from a draft)
@@ -3705,7 +5371,6 @@
                     }
                 }, 0);
 
-                // At the end of buildContent you still return ctx as before:
                 return {
                     submitData,
                     titleInput,
@@ -3714,7 +5379,7 @@
                     imageState
                 };
             },
-            onOk(ctx, closeModal) {
+            async onOk(ctx, closeModal) {
                 const title = ctx.titleInput.value.trim();
                 const description = ctx.descInput.value.trim();
                 const supportingStatement = ctx.suppInput.value.trim();
@@ -3736,6 +5401,14 @@
                     return;
                 }
 
+                if (!confirmSubmitWayspot()) {
+                    return;
+                }
+
+                if (ctx.imageState.main && ctx.imageState.main._wfmmEdit) {
+                    ctx.imageState.main = await materialiseImageStateForSaveOrSubmit(ctx.imageState.main);
+                }
+
                 const merged = Object.assign({}, ctx.submitData);
 
                 merged.poi = Object.assign({}, merged.poi, {
@@ -3749,9 +5422,12 @@
                     supporting: ctx.imageState.supporting
                 };
 
+                collapseSidePanelIfOpen();
+
                 submitWayspotViaApi(merged, {
                     draftIdToDelete: merged.draftId || null,
-                    remoteDraftIdToDelete: merged.remoteDraftId || null
+                    remoteDraftIdToDelete: merged.remoteDraftId || null,
+                    skipConfirm: true
                 });
 
                 closeModal();
@@ -7559,6 +9235,19 @@
                 ev.stopPropagation();
                 closeModal();
             } else if (ev.key === "Enter" && okBtn) {
+                const target = ev.target;
+                const tag = target && target.tagName ? target.tagName.toLowerCase() : "";
+
+                const isTextEntry =
+                      tag === "input" ||
+                      tag === "textarea" ||
+                      tag === "select" ||
+                      (target && target.isContentEditable);
+
+                if (isTextEntry || ev.isComposing) {
+                    return;
+                }
+
                 ev.preventDefault();
                 ev.stopPropagation();
                 okBtn.click();
@@ -13773,7 +15462,7 @@
   color: #ffffff;
 }
 
-/* Mobile modal layout: top-align tall modals so iOS Safari does not clip them. */
+/* Mobile modal layout */
 @media (max-width: 520px) {
   .wfmapmods-modal-backdrop {
     align-items: flex-start;
@@ -13809,6 +15498,126 @@
     margin-left: 0;
     margin-top: 8px;
     justify-content: flex-start;
+  }
+
+  /* Submission modal becomes a full-screen mobile task panel */
+  #wfmapmods-submission-edit.wfmapmods-modal-backdrop {
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+    background: rgba(0, 0, 0, 0.35);
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-modal-dialog {
+    width: 100vw !important;
+    max-width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: #fff;
+  }
+
+  @supports (height: 100dvh) {
+    #wfmapmods-submission-edit .wfmapmods-modal-dialog {
+      height: 100dvh;
+      max-height: 100dvh;
+    }
+  }
+
+  @supports (height: 100svh) {
+    #wfmapmods-submission-edit .wfmapmods-modal-dialog {
+      height: 100svh;
+      max-height: 100svh;
+    }
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-modal-dialog > div:first-child {
+    flex: 0 0 auto;
+    padding: 10px 12px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #fff;
+    box-sizing: border-box;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-modal-title {
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.25;
+    margin: 0;
+    color: #111827;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-modal-subtitle {
+    margin-top: 4px;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.25;
+    color: #6b7280;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-close-btn {
+    min-width: 32px;
+    min-height: 32px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 10px 12px;
+    box-sizing: border-box;
+    background: #f9fafb;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-wrap {
+    gap: 10px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-modal-intro {
+    margin: 8px 0 0;
+    padding: 0;
+    background: transparent;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-modal-footer {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 7px;
+    margin-top: 0;
+    padding: 8px 10px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+    border-top: 1px solid #e5e7eb;
+    background: #fff;
+    box-sizing: border-box;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-modal-footer .wfmapmods-modal-btn {
+    width: auto;
+    min-width: 82px;
+    min-height: 34px;
+    padding: 6px 10px;
+    font-size: 13px;
+    line-height: 1.2;
+    flex: 0 0 auto;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-modal-footer .wfmapmods-btn-delete-draft {
+    color: #b91c1c;
+    border-color: #fecaca;
+    background: #fff;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-modal-footer .wfmapmods-modal-btn-primary {
+    min-width: 82px;
   }
 }
 
@@ -14833,6 +16642,142 @@
   display: block;
 }
 
+#wfmapmods-submission-edit .wfmapmods-submit-textarea {
+  min-height: 82px;
+}
+
+/* Mobile submission form refinements */
+@media (max-width: 520px) {
+  #wfmapmods-submission-edit .wfmapmods-submit-images {
+    gap: 8px;
+    margin-bottom: 2px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-imgblock {
+    font-size: 10px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-imglabel {
+    margin-bottom: 3px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-tile {
+    width: 80px;
+    height: 80px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-thumb {
+    max-width: 80px;
+    max-height: 80px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-edit-photo,
+  #wfmapmods-submission-edit .wfmapmods-submit-changebtn {
+    min-height: 28px;
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-main-photo-aspect-warning {
+    margin: 2px 0 0;
+    font-size: 12px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-location {
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-location-label {
+    padding-top: 4px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-location-right {
+    flex: 1;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-location-value {
+    font-size: 11px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-warning {
+    font-size: 12px;
+    line-height: 1.35;
+    padding: 8px;
+    border-radius: 8px;
+    background: #fef2f2;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-field {
+    gap: 3px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-field label {
+    font-size: 12px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-input,
+  #wfmapmods-submission-edit .wfmapmods-submit-textarea {
+    font-size: 16px; /* prevents iOS zoom-on-focus */
+    padding: 8px 9px;
+    border-radius: 7px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-textarea {
+    min-height: 68px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-counter {
+    font-size: 10px;
+  }
+}
+
+/* Very short mobile screens */
+@media (max-width: 520px) and (max-height: 680px) {
+  #wfmapmods-submission-edit .wfmapmods-modal-dialog > div:first-child {
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-modal-body {
+    padding: 8px 10px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-wrap {
+    gap: 8px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-tile {
+    width: 72px;
+    height: 72px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-thumb {
+    max-width: 72px;
+    max-height: 72px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-submit-textarea {
+    min-height: 56px;
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-modal-footer {
+    padding-top: 8px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+
+  #wfmapmods-submission-edit .wfmapmods-modal-footer .wfmapmods-modal-btn {
+    min-height: 36px;
+  }
+}
+
 /* =============================================================================
    12) Mobile confirm location bar
    ============================================================================= */
@@ -15220,7 +17165,7 @@
 }
 
 /* =============================================================================
-   Fullscreen viewer inside gallery modal
+   19) Fullscreen viewer inside gallery modal
    ============================================================================= */
 
 .wfmapmods-gallery-fs {
@@ -15318,7 +17263,7 @@
 }
 
 /* =============================================================================
-   Photo voting buttons
+   20) Photo voting buttons
    ============================================================================= */
 
 .wfmapmods-photo-vote-host {
@@ -15441,7 +17386,7 @@
 }
 
 /* =============================================================================
-   Canvas system
+   21) Canvas system
    ============================================================================= */
 
 /* Canvas-rendered generic POI markers */
@@ -15458,6 +17403,412 @@
 .wfmapmods-canvas-marker-hover,
 .wfmapmods-canvas-marker-hover * {
   cursor: pointer !important;
+}
+
+/* =============================================================================
+   22) Photo editing system
+   ============================================================================= */
+
+/* Main submit modal: Edit photo button */
+.wfmapmods-submit-edit-photo,
+.wfmm-photo-edit-btn {
+    margin-top: 6px;
+    width: auto;
+    min-width: 0;
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid #d1d5db;
+    background: #f9fafb;
+    color: #111827;
+    cursor: pointer;
+    font: inherit;
+    line-height: normal;
+    box-shadow: none;
+}
+
+.wfmapmods-submit-edit-photo:hover,
+.wfmm-photo-edit-btn:hover {
+    background: #e5e7eb;
+}
+
+/* Main submit modal: non-square warning */
+.wfmapmods-main-photo-aspect-warning {
+    display: none;
+    margin: 8px 0 2px 0;
+    color: #b45309;
+    font-size: 13px;
+    line-height: 1.35;
+}
+
+.wfmapmods-main-photo-aspect-warning.is-visible {
+    display: block;
+}
+
+/* Editor modal */
+.wfmm-photo-editor-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 999999;
+    background: rgba(0, 0, 0, 0.42);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    box-sizing: border-box;
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+
+.wfmm-photo-editor {
+    width: min(980px, 96vw);
+    height: min(850px, calc(100vh - 24px));
+    max-height: calc(100vh - 24px);
+    background: #fff;
+    color: #111827;
+    border-radius: 10px;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    font-family: inherit;
+}
+
+@supports (height: 100dvh) {
+    .wfmm-photo-editor {
+        height: min(850px, calc(100dvh - 24px));
+        max-height: calc(100dvh - 24px);
+    }
+}
+
+@supports (height: 100svh) {
+    .wfmm-photo-editor {
+        height: min(850px, calc(100svh - 24px));
+        max-height: calc(100svh - 24px);
+    }
+}
+
+.wfmm-photo-editor-header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #fff;
+}
+
+.wfmm-photo-editor-title {
+    font-weight: 700;
+    font-size: 16px;
+}
+
+.wfmm-photo-editor-subtitle {
+    color: #6b7280;
+    font-size: 12px;
+    margin-top: 2px;
+}
+
+.wfmm-photo-editor-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    background: #f9fafb;
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+
+.wfmm-photo-editor-toolbar {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+}
+
+.wfmm-photo-editor-guide-row {
+    margin-left: auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    color: #374151;
+}
+
+.wfmm-photo-editor-guide-row label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.wfmm-photo-editor-guide-row input:disabled + span,
+.wfmm-photo-editor-guide-row label:has(input:disabled) {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.wfmm-photo-editor-canvas-wrap {
+    flex: 1 1 auto;
+    min-height: 220px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #eef2f7;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    overflow: hidden;
+    touch-action: none;
+}
+
+#wfmm-photo-editor-canvas {
+    width: 100%;
+    height: 100%;
+    cursor: default;
+    touch-action: none;
+}
+
+#wfmm-photo-editor-canvas.is-dragging {
+    cursor: grabbing;
+}
+
+.wfmm-photo-editor-loading {
+    flex: 1 1 auto;
+    min-height: 220px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #eef2f7;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    color: #4b5563;
+    font-size: 14px;
+}
+
+.wfmm-photo-editor-loading-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.wfmm-photo-editor-loading-title {
+    font-weight: 600;
+    color: #111827;
+}
+
+.wfmm-photo-editor-loading-detail {
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.wfmm-photo-editor-footer {
+    flex: 0 0 auto;
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 14px;
+    border-top: 1px solid #e5e7eb;
+    background: #fff;
+}
+
+.wfmm-photo-editor-footer > div:first-child {
+    min-width: 0;
+    flex: 1;
+}
+
+.wfmm-photo-editor-footer > div:last-child {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.wfmm-photo-editor-output {
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 1.35;
+}
+
+.wfmm-photo-editor-warning {
+    color: #b45309;
+    font-size: 12px;
+    line-height: 1.35;
+    margin-top: 2px;
+}
+
+.wfmm-photo-editor button {
+    appearance: none;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    padding: 7px 10px;
+    margin: 0;
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.2;
+    cursor: pointer;
+    background: #fff;
+    color: #111827;
+    box-shadow: none;
+}
+
+.wfmm-photo-editor button:hover {
+    background: #f3f4f6;
+}
+
+.wfmm-photo-editor button.primary {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+}
+
+.wfmm-photo-editor button.primary:hover {
+    background: #1d4ed8;
+}
+
+.wfmm-photo-editor button.is-active {
+    background: #dbeafe;
+    border-color: #2563eb;
+    color: #1d4ed8;
+}
+
+.wfmm-photo-editor button.danger {
+    color: #b91c1c;
+    border-color: #fecaca;
+}
+
+.wfmm-photo-editor button.danger:hover {
+    background: #fef2f2;
+}
+
+/* Mobile layout */
+@media (max-width: 760px) {
+    .wfmm-photo-editor-backdrop {
+        align-items: stretch;
+        justify-content: stretch;
+        padding: 0;
+    }
+
+    .wfmm-photo-editor {
+        width: 100vw;
+        height: 100vh;
+        max-height: 100vh;
+        border-radius: 0;
+    }
+
+    @supports (height: 100dvh) {
+        .wfmm-photo-editor {
+            height: 100dvh;
+            max-height: 100dvh;
+        }
+    }
+
+    @supports (height: 100svh) {
+        .wfmm-photo-editor {
+            height: 100svh;
+            max-height: 100svh;
+        }
+    }
+
+    .wfmm-photo-editor-header {
+        padding: 9px 10px;
+    }
+
+    .wfmm-photo-editor-title {
+        font-size: 15px;
+    }
+
+    .wfmm-photo-editor-subtitle {
+        font-size: 11px;
+        line-height: 1.25;
+    }
+
+    .wfmm-photo-editor-body {
+        gap: 8px;
+        padding: 8px;
+    }
+
+    .wfmm-photo-editor-toolbar {
+        gap: 6px;
+        padding: 6px;
+    }
+
+    .wfmm-photo-editor-guide-row {
+        margin-left: 0;
+        width: 100%;
+        gap: 6px 10px;
+    }
+
+    .wfmm-photo-editor-canvas-wrap,
+    .wfmm-photo-editor-loading {
+        min-height: 180px;
+    }
+
+    .wfmm-photo-editor-footer {
+        padding: 9px 10px;
+        gap: 8px;
+    }
+
+    .wfmm-photo-editor-footer > div:first-child {
+        display: none;
+    }
+
+    .wfmm-photo-editor-footer > div:last-child {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .wfmm-photo-editor-footer button {
+        flex: 1;
+        min-height: 38px;
+    }
+}
+
+/* Very short screens, including some mobile browsers with visible browser chrome */
+@media (max-height: 620px) {
+    .wfmm-photo-editor-header {
+        padding-top: 7px;
+        padding-bottom: 7px;
+    }
+
+    .wfmm-photo-editor-subtitle {
+        display: none;
+    }
+
+    .wfmm-photo-editor-body {
+        padding: 6px;
+        gap: 6px;
+    }
+
+    .wfmm-photo-editor-toolbar {
+        padding: 6px;
+        gap: 5px;
+    }
+
+    .wfmm-photo-editor-canvas-wrap,
+    .wfmm-photo-editor-loading {
+        min-height: 150px;
+    }
+
+    .wfmm-photo-editor-footer {
+        padding-top: 7px;
+        padding-bottom: 7px;
+    }
 }
 `;
 
