@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Request Photo Votes
-// @version      0.1.0
+// @version      0.2.0
 // @description  Copies vote request text to clipboard for use in WDD #waypoint-thumbs
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-photo-vote-request.user.js
@@ -45,6 +45,8 @@
     const HOST_SELECTOR = ".wfmapmods-gallery-tile, .wfmapmods-wayspot-overlay-image-frame";
 
     const BADGE_SELECTOR = ".wfmapmods-photo-vote-badge[data-poi-id][data-image-guid]";
+
+    const WATCH_SELECTOR = `${HOST_SELECTOR}, .wfmapmods-photo-vote-badge`;
 
     // poiId -> {
     //   records: [{ imageGuid, votes }],
@@ -330,23 +332,39 @@
             if (!isRelevantRoute()) return;
 
             for (const mutation of mutations) {
-                for (const node of mutation.addedNodes) {
-                    if (!(node instanceof Element)) continue;
+                if (mutation.type === "childList") {
+                    for (const node of mutation.addedNodes) {
+                        if (!(node instanceof Element)) continue;
 
-                    if (
-                        node.matches?.(HOST_SELECTOR) ||
-                        node.querySelector?.(HOST_SELECTOR)
-                    ) {
-                        scheduleScan();
-                        return;
+                        if (
+                            node.matches?.(WATCH_SELECTOR) ||
+                            node.querySelector?.(WATCH_SELECTOR)
+                        ) {
+                            scheduleScan();
+                            return;
+                        }
                     }
+                }
+
+                if (
+                    mutation.type === "attributes" &&
+                    mutation.target instanceof Element &&
+                    mutation.target.matches(".wfmapmods-photo-vote-badge")
+                ) {
+                    scheduleScan();
+                    return;
                 }
             }
         });
 
         domObserver.observe(document.body, {
             childList: true,
-            subtree: true
+            subtree: true,
+            attributes: true,
+            attributeFilter: [
+                "data-poi-id",
+                "data-image-guid"
+            ]
         });
     }
 
