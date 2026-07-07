@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.14.1
+// @version      3.14.2
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -1710,7 +1710,7 @@
         const multiplePhotosEl     = sidePanelEl.querySelector(".wfmapmods-detail-multiple-photos");
         const multiplePhotosLinkEl = sidePanelEl.querySelector(".wfmapmods-detail-multiple-photos-link");
 
-        // Reveal the details + POI functions + divider (your CSS uses !important on hidden)
+        // Reveal the details + POI functions + divider
         if (detailsSection) detailsSection.classList.remove("wfmapmods-is-hidden");
         if (poiFunctionsSection) poiFunctionsSection.classList.remove("wfmapmods-is-hidden");
         if (divider) divider.classList.remove("wfmapmods-is-hidden");
@@ -1718,8 +1718,15 @@
         // ----- Title -----
         if (titleEl) {
             const title = poi.title || "";
+
             titleEl.textContent = title;
-            titleEl.title = title;
+            titleEl.dataset.title = title;
+            titleEl.title = title ? "Copy Wayspot title" : "";
+            titleEl.style.cursor = title ? "pointer" : "";
+
+            titleEl.onclick = () => {
+                copyTextToClipboard(titleEl.dataset.title).catch(() => {});
+            };
         }
 
         // ----- Status tag -----
