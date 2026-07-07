@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Bookmarks
-// @version      0.1.0
+// @version      0.1.1
 // @description  Bookmark locations and Wayspots on the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-bookmarks.user.js
@@ -1550,7 +1550,7 @@
 
         #wf-bookmarks-topbar * {
             height: 14px !important;
-            line-height: 13px !important;
+            line-height: 10px !important;
         }
 
         #wf-bookmarks-min,
@@ -1856,6 +1856,13 @@
 
         .wf-bookmarks-sort-ghost .wf-bookmarks-label {
             color: #03fe03;
+        }
+
+        .wf-bookmarks-sort-ghost,
+        .wf-bookmarks-sort-ghost * {
+            font-family: var(--wf-bookmarks-font);
+            font-size: 12px !important;
+            line-height: 22px !important;
         }
 
         .wf-bookmarks-sorting,
