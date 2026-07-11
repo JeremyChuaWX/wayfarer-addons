@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Draw Tools
-// @version      3.0.0
+// @version      3.1.0
 // @description  Adds simple drawing tools (markers, polylines, circles) to the Wayfarer submission map, with persistence.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-draw-tools.user.js
@@ -188,6 +188,318 @@
         } catch (e) {
             console.error(`${SETTINGS_KEY} - Failed to save settings:`, e);
         }
+    }
+
+    function exportDrawingToolsData() {
+        try {
+            ensureDrawingDefaults();
+
+            const exportData = {
+                drawing:
+                typeof structuredClone === "function"
+                ? structuredClone(userSettings.drawing)
+                : JSON.parse(
+                    JSON.stringify(userSettings.drawing)
+                )
+            };
+
+            const json = JSON.stringify(exportData, null, 2);
+            const blob = new Blob([json], {
+                type: "application/json"
+            });
+
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            const date = new Date().toISOString().slice(0, 10);
+
+            link.href = url;
+            link.download = `wayfarer-draw-tools-${date}.json`;
+            link.style.display = "none";
+
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+
+            setTimeout(() => {
+                URL.revokeObjectURL(url);
+            }, 0);
+        } catch (e) {
+            console.error("[DrawingTools] Failed to export drawing data:", e);
+            alert("Drawing Tools data could not be exported.");
+        }
+    }
+
+    async function importDrawingToolsFile(file) {
+        if (!file) return false;
+
+        try {
+            const raw = await file.text();
+            const imported = JSON.parse(raw);
+
+            if (!isValidDrawingToolsImport(imported)) {
+                throw new Error(
+                    "The selected file is not a valid Wayfarer Draw Tools export."
+                );
+            }
+
+            const shapeCount = imported.drawing.shapes.length;
+
+            const shouldReplace = confirm(
+                `Import ${shapeCount} saved shape` +
+                `${shapeCount === 1 ? "" : "s"}?\n\n` +
+                "This will replace all current drawings and Drawing Tools settings."
+            );
+
+            if (!shouldReplace) return false;
+
+            // End any active drawing before replacing the saved data.
+            if (typeof cancelCurrentDrawing === "function") {
+                try {
+                    cancelCurrentDrawing();
+                } catch {
+                    // Ignore drawing cleanup errors.
+                }
+            }
+
+            setMode(null);
+
+            userSettings.drawing = normaliseImportedDrawingData(
+                imported.drawing
+            );
+
+            saveSettings();
+
+            currentShapeColor =
+                userSettings.drawing.color || "#ff0000";
+
+            syncLayersCheckboxFromSettings();
+
+            if (wfMap) {
+                applyDrawingEnabledState();
+            }
+
+            alert(
+                `${shapeCount} saved shape` +
+                `${shapeCount === 1 ? "" : "s"} imported successfully.`
+            );
+
+            return true;
+        } catch (e) {
+            console.error("[DrawingTools] Failed to import drawing data:", e);
+
+            alert(
+                e instanceof Error
+                ? e.message
+                : "Drawing Tools data could not be imported."
+            );
+
+            return false;
+        }
+    }
+
+    function isValidDrawingToolsImport(imported) {
+        if (
+            !imported ||
+            typeof imported !== "object" ||
+            Array.isArray(imported)
+        ) {
+            return false;
+        }
+
+        const drawing = imported.drawing;
+
+        if (
+            !drawing ||
+            typeof drawing !== "object" ||
+            Array.isArray(drawing) ||
+            !Array.isArray(drawing.shapes)
+        ) {
+            return false;
+        }
+
+        if (
+            drawing.color !== undefined &&
+            !isValidDrawingColor(drawing.color)
+        ) {
+            return false;
+        }
+
+        if (
+            drawing.enabled !== undefined &&
+            typeof drawing.enabled !== "boolean"
+        ) {
+            return false;
+        }
+
+        if (
+            drawing.position !== undefined &&
+            !["left", "top", "bottom"].includes(drawing.position)
+        ) {
+            return false;
+        }
+
+        return drawing.shapes.every(isValidImportedShape);
+    }
+
+    function isValidDrawingColor(value) {
+        return (
+            typeof value === "string" &&
+            /^#[0-9a-f]{6}$/i.test(value)
+        );
+    }
+
+    function isValidCoordinate(point) {
+        if (
+            !point ||
+            typeof point !== "object" ||
+            Array.isArray(point)
+        ) {
+            return false;
+        }
+
+        const lat = Number(point.lat);
+        const lng = Number(point.lng);
+
+        return (
+            Number.isFinite(lat) &&
+            Number.isFinite(lng) &&
+            lat >= -90 &&
+            lat <= 90 &&
+            lng >= -180 &&
+            lng <= 180
+        );
+    }
+
+    function isValidImportedShape(shape) {
+        if (
+            !shape ||
+            typeof shape !== "object" ||
+            Array.isArray(shape) ||
+            typeof shape.type !== "string"
+        ) {
+            return false;
+        }
+
+        if (
+            shape.color !== undefined &&
+            !isValidDrawingColor(shape.color)
+        ) {
+            return false;
+        }
+
+        switch (shape.type) {
+            case "marker":
+                return isValidCoordinate(shape.position);
+
+            case "polyline":
+                return (
+                    Array.isArray(shape.path) &&
+                    shape.path.length >= 2 &&
+                    shape.path.every(isValidCoordinate)
+                );
+
+            case "circle":
+                return (
+                    isValidCoordinate(shape.center) &&
+                    Number.isFinite(Number(shape.radius)) &&
+                    Number(shape.radius) > 0
+                );
+
+            case "arrow":
+                return (
+                    isValidCoordinate(shape.start) &&
+                    isValidCoordinate(shape.end)
+                );
+
+            default:
+                return false;
+        }
+    }
+
+    function normaliseImportedDrawingData(importedDrawing) {
+        const drawing = {
+            color: isValidDrawingColor(importedDrawing.color)
+            ? importedDrawing.color
+            : "#ff0000",
+
+            enabled:
+            typeof importedDrawing.enabled === "boolean"
+            ? importedDrawing.enabled
+            : true,
+
+            position:
+            ["left", "top", "bottom"].includes(
+                importedDrawing.position
+            )
+            ? importedDrawing.position
+            : "left",
+
+            shapes: importedDrawing.shapes.map(
+                normaliseImportedShape
+            )
+        };
+
+        return drawing;
+    }
+
+    function normaliseImportedShape(shape) {
+        const color = isValidDrawingColor(shape.color)
+        ? shape.color
+        : "#ff0000";
+
+        switch (shape.type) {
+            case "marker":
+                return {
+                    type: "marker",
+                    position: normaliseImportedCoordinate(
+                        shape.position
+                    ),
+                    color
+                };
+
+            case "polyline":
+                return {
+                    type: "polyline",
+                    path: shape.path.map(
+                        normaliseImportedCoordinate
+                    ),
+                    color
+                };
+
+            case "circle":
+                return {
+                    type: "circle",
+                    center: normaliseImportedCoordinate(
+                        shape.center
+                    ),
+                    radius: Number(shape.radius),
+                    color
+                };
+
+            case "arrow":
+                return {
+                    type: "arrow",
+                    start: normaliseImportedCoordinate(
+                        shape.start
+                    ),
+                    end: normaliseImportedCoordinate(
+                        shape.end
+                    ),
+                    color
+                };
+
+            default:
+                throw new Error(
+                    `Unsupported drawing type: ${shape.type}`
+                );
+        }
+    }
+
+    function normaliseImportedCoordinate(point) {
+        return {
+            lat: Number(point.lat),
+            lng: Number(point.lng)
+        };
     }
 
     // -----------------------------
@@ -512,8 +824,80 @@
 
         const hint = document.createElement("div");
         hint.className = "wfmapmods-modal__hint";
-        hint.textContent = "New shapes will use this colour. Existing shapes keep their original colour.";
+        hint.textContent =
+            "New shapes will use this colour. Existing shapes keep " +
+            "their original colour.";
         dialog.appendChild(hint);
+
+        // Export/import section
+        const transferSection = document.createElement("div");
+        transferSection.className =
+            "wfmapmods-drawing-transfer-section";
+
+        const transferTitle = document.createElement("div");
+        transferTitle.className =
+            "wfmapmods-drawing-transfer-title";
+        transferTitle.textContent = "Backup and restore";
+
+        const transferHint = document.createElement("div");
+        transferHint.className = "wfmapmods-modal__hint";
+        transferHint.textContent =
+            "Export saved drawings to a JSON file, or import a " +
+            "previously exported file.";
+
+        const transferButtons = document.createElement("div");
+        transferButtons.className =
+            "wfmapmods-drawing-transfer-buttons";
+
+        const exportBtn = document.createElement("button");
+        exportBtn.type = "button";
+        exportBtn.textContent = "Export";
+        exportBtn.className = "wfmapmods-btn";
+        exportBtn.title =
+            "Export drawings and Drawing Tools settings";
+
+        const importBtn = document.createElement("button");
+        importBtn.type = "button";
+        importBtn.textContent = "Import";
+        importBtn.className = "wfmapmods-btn";
+        importBtn.title =
+            "Import drawings and Drawing Tools settings";
+
+        const importFileInput = document.createElement("input");
+        importFileInput.type = "file";
+        importFileInput.accept = ".json,application/json";
+        importFileInput.hidden = true;
+
+        exportBtn.addEventListener("click", () => {
+            exportDrawingToolsData();
+        });
+
+        importBtn.addEventListener("click", () => {
+            importFileInput.click();
+        });
+
+        importFileInput.addEventListener("change", async () => {
+            const file = importFileInput.files?.[0];
+
+            const imported = await importDrawingToolsFile(file);
+
+            // Allow the same file to be selected again.
+            importFileInput.value = "";
+
+            if (imported) {
+                closeModal();
+            }
+        });
+
+        transferButtons.appendChild(exportBtn);
+        transferButtons.appendChild(importBtn);
+
+        transferSection.appendChild(transferTitle);
+        transferSection.appendChild(transferHint);
+        transferSection.appendChild(transferButtons);
+        transferSection.appendChild(importFileInput);
+
+        dialog.appendChild(transferSection);
 
         const buttonsRow = document.createElement("div");
         buttonsRow.className = "wfmapmods-modal__buttons";
@@ -2020,6 +2404,28 @@
   font-size: 11px;
   color: #6b7280;
   margin: 2px 0 8px;
+}
+
+.wfmapmods-drawing-transfer-section {
+  margin: 10px 0 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.wfmapmods-drawing-transfer-title {
+  margin-bottom: 3px;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wfmapmods-drawing-transfer-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.wfmapmods-drawing-transfer-buttons .wfmapmods-btn {
+  flex: 1;
 }
 
 .wfmapmods-modal__buttons {
