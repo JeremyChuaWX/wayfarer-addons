@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Base
-// @version      3.14.2
+// @version      3.15.0
 // @description  Base plug-in for the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-base.user.js
@@ -187,6 +187,8 @@
     let remoteDraftMarkerLabelOverlays = [];
 
     let DraftMarkerLabelOverlay = null;
+
+    let localDraftMigrationPromptShown = false;
 
     // ----- Select Wayspot after deep link or search -----
     const DEEP_LINK_REASSERT_DELAYS_MS = [0, 250, 750, 1500, 3000, 5000];
@@ -5287,11 +5289,16 @@
                                     return;
                                 }
 
-                                const mode = getDraftSaveLocationMode(submitData);
-                                const now = Date.now();
+                                // Remember whether this submission originated from a local draft.
+                                // The local copy is deleted only after the remote save succeeds.
+                                const localDraftId = submitData.fromDraft && submitData.draftId
+                                ? submitData.draftId
+                                : null;
 
                                 if (imageState.main && imageState.main._wfmmEdit) {
-                                    imageState.main = await materialiseImageStateForSaveOrSubmit(imageState.main);
+                                    imageState.main = await materialiseImageStateForSaveOrSubmit(
+                                        imageState.main
+                                    );
                                     renderImages();
                                     validate();
                                 }
@@ -5299,36 +5306,9 @@
                                 collapseSidePanelIfOpen();
                                 closeModal();
 
-                                if (mode === "remote") {
-                                    const remoteDraft = await saveDraftSubmissionToWayfarer({
-                                        id: submitData.remoteDraftId || null,
-                                        remoteDraftId: submitData.remoteDraftId || null,
-                                        poi: {
-                                            lat,
-                                            lng,
-                                            title,
-                                            description,
-                                            supportingStatement
-                                        },
-                                        images: {
-                                            main: imageState.main || null,
-                                            supporting: imageState.supporting.slice()
-                                        }
-                                    });
-
-                                    submitData.remoteDraftId = remoteDraft.id;
-                                    return;
-                                }
-
-                                const draftId = submitData.draftId ||
-                                      ("draft-" + now + "-" + Math.random().toString(36).slice(2));
-
-                                submitData.draftId = draftId;
-
-                                const draft = {
-                                    id: draftId,
-                                    createdAt: submitData.createdAt || now,
-                                    updatedAt: now,
+                                const remoteDraft = await saveDraftSubmissionToWayfarer({
+                                    id: submitData.remoteDraftId || null,
+                                    remoteDraftId: submitData.remoteDraftId || null,
                                     poi: {
                                         lat,
                                         lng,
@@ -5340,9 +5320,19 @@
                                         main: imageState.main || null,
                                         supporting: imageState.supporting.slice()
                                     }
-                                };
+                                });
 
-                                await saveDraftSubmissionToIDB(draft);
+                                submitData.remoteDraftId = remoteDraft.id;
+                                submitData.fromRemoteDraft = true;
+
+                                // A successfully saved local draft has now been converted.
+                                // Do this after the remote save so a failed upload does not destroy data.
+                                if (localDraftId) {
+                                    await deleteDraftSubmissionFromIDB(localDraftId);
+
+                                    submitData.draftId = null;
+                                    submitData.fromDraft = false;
+                                }
 
                             } catch (err) {
                                 console.error("[WFMM - Draft Save] Failed:", err);
@@ -5718,14 +5708,8 @@
     // Remote draft helpers (Wayfarer)
     // ==================================
 
-    function getDraftSaveLocationMode(submitData) {
-        // If editing a remote draft, always keep it remote
-        if (submitData && (submitData.fromRemoteDraft || submitData.remoteDraftId)) {
-            return "remote";
-        }
-
-        const mode = userSettings?.map?.defaultDraftSaveLocation;
-        return mode === "local" ? "local" : "remote";
+    function getDraftSaveLocationMode() {
+        return "remote";
     }
 
     function getRemoteDraftUserLatLng() {
@@ -6509,6 +6493,11 @@
                     draftSubmissions = result;
                     db.close();
                     refreshDraftMarkers();
+
+                    if (draftSubmissions.length > 0) {
+                        setTimeout(showLocalDraftMigrationPrompt, 0);
+                    }
+
                     return;
                 }
 
@@ -9003,43 +8992,13 @@
                 storageDivider.className = "wfmapmods-modal-divider";
                 storageSection.appendChild(storageDivider);
 
-                const defaultsHeader = document.createElement("div");
-                defaultsHeader.className = "wfmapmods-modal-section-header";
-                defaultsHeader.textContent = "Preferred storage location";
-                storageSection.appendChild(defaultsHeader);
-
-                const defaultSaveLabel = document.createElement("div");
-                defaultSaveLabel.className = "wfmapmods-modal-hint";
-                defaultSaveLabel.style.whiteSpace = "normal";
-                defaultSaveLabel.style.lineHeight = "1.5";
-                defaultSaveLabel.style.marginBottom = "10px";
-                defaultSaveLabel.textContent = "Where should new drafts be stored?";
-                storageSection.appendChild(defaultSaveLabel);
-
-                const defaultSaveSelect = document.createElement("select");
-                defaultSaveSelect.className = "wfmapmods-modal-select";
-                defaultSaveSelect.style.width = "100%";
-                defaultSaveSelect.style.maxWidth = "320px";
-                defaultSaveSelect.style.background = "#ffffff";
-                defaultSaveSelect.style.border = "1px solid #c8ccd1";
-                defaultSaveSelect.style.borderRadius = "4px";
-                defaultSaveSelect.style.padding = "6px 8px";
-                defaultSaveSelect.style.fontSize = "12px";
-                defaultSaveSelect.style.cursor = "pointer";
-
-                const optRemote = document.createElement("option");
-                optRemote.value = "remote";
-                optRemote.textContent = "Wayfarer website (remote)";
-
-                const optLocal = document.createElement("option");
-                optLocal.value = "local";
-                optLocal.textContent = "This device only (local)";
-
-                defaultSaveSelect.appendChild(optRemote);
-                defaultSaveSelect.appendChild(optLocal);
-                defaultSaveSelect.value = mapCfg.defaultDraftSaveLocation === "local" ? "local" : "remote";
-
-                storageSection.appendChild(defaultSaveSelect);
+                const remoteOnlyNotice = document.createElement("div");
+                remoteOnlyNotice.className = "wfmapmods-modal-hint";
+                remoteOnlyNotice.style.whiteSpace = "normal";
+                remoteOnlyNotice.style.lineHeight = "1.5";
+                remoteOnlyNotice.textContent =
+                    "All newly created drafts are stored remotely on the Wayfarer website.";
+                storageSection.appendChild(remoteOnlyNotice);
                 dialog.appendChild(storageSection);
 
                 // -------------------------
@@ -9131,16 +9090,12 @@
                 }
 
                 return {
-                    defaultSaveSelect,
                     showDraftTitlesChk
                 };
             },
             onOk(ctx, closeModal) {
                 const newShowDraftTitles = !!ctx.showDraftTitlesChk.checked;
                 const draftTitlesChanged = userSettings.map.showDraftMarkerTitles !== newShowDraftTitles;
-
-                userSettings.map.defaultDraftSaveLocation =
-                    ctx.defaultSaveSelect.value === "local" ? "local" : "remote";
 
                 userSettings.map.showDraftMarkerTitles = newShowDraftTitles;
 
@@ -9156,6 +9111,141 @@
                 closeModal();
             }
         });
+    }
+
+    function showLocalDraftMigrationPrompt() {
+        const localCount = Array.isArray(draftSubmissions)
+        ? draftSubmissions.length
+        : 0;
+
+        if (
+            localDraftMigrationPromptShown ||
+            localCount === 0 ||
+            document.getElementById("wfmapmods-local-draft-warning")
+        ) {
+            return;
+        }
+
+        localDraftMigrationPromptShown = true;
+
+        openModal({
+            id: "wfmapmods-local-draft-warning",
+            title: "Local drafts may be lost",
+            width: 500,
+            showFooterButtons: false,
+            showHeaderClose: false,
+
+            buildContent(dialog, _okBtn, closeModal) {
+                const message = document.createElement("div");
+                message.className = "wfmapmods-modal-section";
+                message.style.whiteSpace = "normal";
+                message.style.lineHeight = "1.5";
+                message.textContent =
+                    "Niantic will be renaming to Scopely Explore. " +
+                    "If the URL of the Wayfarer website changes, any drafts " +
+                    "saved on your device may be lost permanently. It is " +
+                    "recommended you convert them all to remote drafts to " +
+                    "ensure no data is lost.";
+
+                dialog.appendChild(message);
+
+                const actions = document.createElement("div");
+                actions.className = "wfmapmods-modal-footer";
+
+                const ignoreBtn = document.createElement("button");
+                ignoreBtn.type = "button";
+                ignoreBtn.className = "wfmapmods-modal-btn";
+                ignoreBtn.textContent = "Ignore";
+
+                const uploadBtn = document.createElement("button");
+                uploadBtn.type = "button";
+                uploadBtn.className =
+                    "wfmapmods-modal-btn wfmapmods-modal-btn-primary";
+                uploadBtn.textContent =
+                    `Upload ${localCount} local draft` +
+                    `${localCount === 1 ? "" : "s"} to server`;
+
+                ignoreBtn.addEventListener("click", () => {
+                    closeModal();
+                });
+
+                uploadBtn.addEventListener("click", async () => {
+                    uploadBtn.disabled = true;
+                    ignoreBtn.disabled = true;
+
+                    closeModal();
+
+                    await uploadAllLocalDraftsFromWarning(localCount);
+                });
+
+                actions.appendChild(ignoreBtn);
+                actions.appendChild(uploadBtn);
+                dialog.appendChild(actions);
+
+                return {};
+            }
+        });
+    }
+
+    async function uploadAllLocalDraftsFromWarning(initialCount) {
+        wfmapmodsSetSubmitProgress(
+            `Uploading local drafts… 0 of ${initialCount}`,
+            0
+        );
+
+        try {
+            const result = await migrateLocalDraftsToRemoteQueue((progress) => {
+                const total = progress.total || initialCount;
+                const index = progress.index || 0;
+
+                const completed = progress.phase === "starting"
+                ? Math.max(0, index - 1)
+                : index;
+
+                const percent = total > 0
+                ? Math.floor((completed / total) * 100)
+                : 100;
+
+                wfmapmodsSetSubmitProgress(
+                    `Uploading local drafts… ${completed} of ${total}`,
+                    percent
+                );
+            });
+
+            if (result.failCount > 0) {
+                wfmapmodsSetSubmitProgress(
+                    `Upload finished. ${result.successCount} uploaded, ` +
+                    `${result.failCount} failed.`,
+                    100
+                );
+
+                wfmapmodsHideSubmitProgress(3000);
+
+                // Permit the warning to appear again after a future map reload
+                // if failed local drafts remain.
+                return;
+            }
+
+            wfmapmodsSetSubmitProgress(
+                `Upload finished. ${result.successCount} draft` +
+                `${result.successCount === 1 ? "" : "s"} uploaded.`,
+                100
+            );
+
+            wfmapmodsHideSubmitProgress(2000);
+        } catch (err) {
+            console.error(
+                "[WFMM - Draft Migration] Startup migration failed:",
+                err
+            );
+
+            wfmapmodsSetSubmitProgress(
+                "Some local drafts could not be uploaded.",
+                100
+            );
+
+            wfmapmodsHideSubmitProgress(3000);
+        }
     }
 
     function wfmmGetModalStack() {
