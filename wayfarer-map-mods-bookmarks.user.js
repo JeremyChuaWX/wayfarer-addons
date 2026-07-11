@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Bookmarks
-// @version      0.1.1
+// @version      0.2.0
 // @description  Bookmark locations and Wayspots on the Wayfarer Map
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-bookmarks.user.js
@@ -108,6 +108,221 @@
         } catch (e) {
             console.warn("[WF Bookmarks] Failed to save storage.", e);
         }
+    }
+
+    function exportBookmarks() {
+        try {
+            const json = JSON.stringify(state.data, null, 2);
+            const blob = new Blob([json], {
+                type: "application/json"
+            });
+
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            const date = new Date().toISOString().slice(0, 10);
+
+            link.href = url;
+            link.download = `wayfarer-bookmarks-${date}.json`;
+            link.style.display = "none";
+
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+
+            setTimeout(() => {
+                URL.revokeObjectURL(url);
+            }, 0);
+        } catch (e) {
+            console.warn("[WF Bookmarks] Failed to export bookmarks.", e);
+            alert("Bookmarks could not be exported.");
+        }
+    }
+
+    async function importBookmarksFile(file) {
+        if (!file) return;
+
+        try {
+            const raw = await file.text();
+            const imported = JSON.parse(raw);
+
+            if (!isValidBookmarkData(imported)) {
+                throw new Error(
+                    "The selected file is not a valid Wayfarer Bookmarks export."
+                );
+            }
+
+            const shouldReplace = confirm(
+                "Importing this file will replace all current bookmarks " +
+                "and bookmark folders. Continue?"
+            );
+
+            if (!shouldReplace) return;
+
+            state.data = imported;
+
+            normaliseImportedData();
+            saveData();
+
+            const box = document.getElementById("wf-bookmarks-box");
+
+            if (box) {
+                box.style.left = `${state.data.ui.left}px`;
+                box.style.top = `${state.data.ui.top}px`;
+                box.style.width = `${state.data.ui.width}px`;
+            }
+
+            renderBookmarks();
+            updateBoxVisibility();
+
+            alert("Bookmarks imported successfully.");
+        } catch (e) {
+            console.warn("[WF Bookmarks] Failed to import bookmarks.", e);
+
+            alert(
+                e instanceof Error
+                ? e.message
+                : "Bookmarks could not be imported."
+            );
+        }
+    }
+
+    function isValidBookmarkData(data) {
+        if (
+            !data ||
+            typeof data !== "object" ||
+            Array.isArray(data)
+        ) {
+            return false;
+        }
+
+        if (
+            !Array.isArray(data.maps) ||
+            !Array.isArray(data.wayspots)
+        ) {
+            return false;
+        }
+
+        if (
+            !data.ui ||
+            typeof data.ui !== "object" ||
+            Array.isArray(data.ui)
+        ) {
+            return false;
+        }
+
+        return (
+            isValidBookmarkRoot(data.maps, "maps") &&
+            isValidBookmarkRoot(data.wayspots, "wayspots")
+        );
+    }
+
+    function isValidBookmarkRoot(nodes, tab) {
+        if (!Array.isArray(nodes)) return false;
+
+        const others = nodes.filter(node => {
+            return (
+                node &&
+                node.id === DEFAULT_OTHER_FOLDER_ID &&
+                node.type === "folder" &&
+                Array.isArray(node.children)
+            );
+        });
+
+        if (others.length !== 1) return false;
+
+        return nodes.every(node => {
+            return isValidBookmarkNode(node, tab, true);
+        });
+    }
+
+    function isValidBookmarkNode(node, tab, isRoot) {
+        if (
+            !node ||
+            typeof node !== "object" ||
+            Array.isArray(node)
+        ) {
+            return false;
+        }
+
+        if (
+            typeof node.id !== "string" ||
+            typeof node.type !== "string"
+        ) {
+            return false;
+        }
+
+        if (node.type === "folder") {
+            if (!Array.isArray(node.children)) return false;
+
+            // Custom folders are supported only at the root level.
+            if (
+                !isRoot &&
+                node.id !== DEFAULT_OTHER_FOLDER_ID
+            ) {
+                return false;
+            }
+
+            return node.children.every(child => {
+                return isValidBookmarkNode(child, tab, false);
+            });
+        }
+
+        // Individual bookmarks must be inside a folder or "Others".
+        if (isRoot) return false;
+
+        if (tab === "maps" && node.type === "map") {
+            return (
+                Number.isFinite(Number(node.lat)) &&
+                Number.isFinite(Number(node.lng)) &&
+                Number.isFinite(Number(node.zoom))
+            );
+        }
+
+        if (
+            tab === "wayspots" &&
+            node.type === "wayspot"
+        ) {
+            return (
+                typeof node.poiId === "string" &&
+                Number.isFinite(Number(node.lat)) &&
+                Number.isFinite(Number(node.lng))
+            );
+        }
+
+        return false;
+    }
+
+    function normaliseImportedData() {
+        const defaults = defaultData();
+        const importedUi = state.data.ui || {};
+
+        state.data.ui = {
+            ...defaults.ui,
+            ...importedUi,
+
+            visible: !!importedUi.visible,
+            deleteMode: !!importedUi.deleteMode,
+
+            activeTab:
+            importedUi.activeTab === "wayspots"
+            ? "wayspots"
+            : "maps",
+
+            left: Number.isFinite(Number(importedUi.left))
+            ? Number(importedUi.left)
+            : defaults.ui.left,
+
+            top: Number.isFinite(Number(importedUi.top))
+            ? Number(importedUi.top)
+            : defaults.ui.top,
+
+            width: Number.isFinite(Number(importedUi.width))
+            ? Math.max(180, Number(importedUi.width))
+            : defaults.ui.width
+        };
+
+        normaliseRootOrder(state.data.maps);
+        normaliseRootOrder(state.data.wayspots);
     }
 
     function generateId(prefix) {
@@ -371,12 +586,37 @@
                 <button id="wf-bookmarks-delete-toggle" type="button" title="Delete mode"></button>
             </div>
 
-            <div class="wf-bookmarks-tabs">
-                <button class="wf-bookmarks-tab" type="button" data-tab="maps">Maps</button>
-                <button class="wf-bookmarks-tab" type="button" data-tab="wayspots">Wayspots</button>
-            </div>
+<div class="wf-bookmarks-tabs">
+    <button class="wf-bookmarks-tab" type="button" data-tab="maps">Maps</button>
+    <button class="wf-bookmarks-tab" type="button" data-tab="wayspots">Wayspots</button>
+</div>
 
-            <div class="wf-bookmarks-add-row" data-for-tab="maps">
+<div class="wf-bookmarks-transfer-row">
+    <button
+        id="wf-bookmarks-export"
+        type="button"
+        title="Export bookmarks to a JSON file"
+    >
+        Export
+    </button>
+
+    <button
+        id="wf-bookmarks-import"
+        type="button"
+        title="Import bookmarks from a JSON file"
+    >
+        Import
+    </button>
+
+    <input
+        id="wf-bookmarks-import-file"
+        type="file"
+        accept=".json,application/json"
+        hidden
+    />
+</div>
+
+<div class="wf-bookmarks-add-row" data-for-tab="maps">
                 <input id="wf-bookmarks-label-input-maps" placeholder="Insert label" />
                 <button id="wf-bookmarks-add-map" type="button">+ Map</button>
                 <button id="wf-bookmarks-add-folder-maps" type="button">+ Folder</button>
@@ -416,6 +656,35 @@
             saveData();
             renderBookmarks();
         });
+
+        document.getElementById("wf-bookmarks-export")?.addEventListener(
+            "click",
+            evt => {
+                evt.preventDefault();
+                exportBookmarks();
+            }
+        );
+
+        document.getElementById("wf-bookmarks-import")?.addEventListener(
+            "click",
+            evt => {
+                evt.preventDefault();
+
+                document
+                    .getElementById("wf-bookmarks-import-file")
+                    ?.click();
+            }
+        );
+
+        document.getElementById("wf-bookmarks-import-file")?.addEventListener(
+            "change",
+            evt => {
+                importBookmarksFile(evt.target.files?.[0]);
+
+                // Clearing the input allows the same file to be selected again.
+                evt.target.value = "";
+            }
+        );
 
         document.querySelectorAll("#wf-bookmarks-box .wf-bookmarks-tab").forEach(btn => {
             btn.addEventListener("click", evt => {
@@ -1618,6 +1887,33 @@
             color: var(--wf-bookmarks-gold);
             background: transparent;
         }
+
+.wf-bookmarks-transfer-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    height: 25px;
+    overflow: hidden;
+    background: var(--wf-bookmarks-bg);
+    border-bottom-width: 1px;
+}
+
+.wf-bookmarks-transfer-row button {
+    display: block;
+    height: 25px !important;
+    padding: 2px 0 21px;
+    cursor: pointer;
+    color: var(--wf-bookmarks-border);
+    background: var(--wf-bookmarks-bg-dark);
+    border-left-width: 1px;
+    font-size: 12px !important;
+    line-height: 20px !important;
+    text-align: center;
+}
+
+.wf-bookmarks-transfer-row button:hover {
+    color: #000;
+    background: var(--wf-bookmarks-gold);
+}
 
         .wf-bookmarks-add-row {
             height: 28px;
