@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Report Wayspots
-// @version      3.2.0
+// @version      3.3.0
 // @description  Displays Reported Wayspots history on the map and adds additional reporting mechanisms.
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-report-wayspot.user.js
@@ -60,6 +60,9 @@
     // Report history store (Wayfarer-side)
     const DB_NAME = "wayfarer-tools-db";
     const REPORTED_STORE_NAME = "reportedWayspots";
+
+    const REPORT_BACKUP_FORMAT = "wfmapmods-reported-wayspots";
+    const REPORT_BACKUP_VERSION = 1;
 
     // Geocoder bridge postMessage types (page-context bridge)
     const WFMM_GEO_REQ = "wfmm-geocode-req";
@@ -729,6 +732,169 @@
         const randPart = Math.random().toString(36).slice(2, 12);
 
         return `rpt_${timePart}_${randPart}`;
+    }
+
+    function importReportedWayspotsToIDB(records) {
+        if (!Array.isArray(records)) {
+            return Promise.reject(new Error("Backup records must be an array."));
+        }
+
+        const validRecords = records.filter((rec) =>
+                                            rec &&
+                                            typeof rec === "object" &&
+                                            typeof rec.id === "string" &&
+                                            rec.id.length > 0 &&
+                                            typeof rec.timestampMs === "number" &&
+                                            Number.isFinite(rec.timestampMs)
+                                           );
+
+        if (validRecords.length !== records.length) {
+            return Promise.reject(new Error(
+                `Backup contains ${records.length - validRecords.length} invalid record(s).`
+            ));
+        }
+
+        return getReportedWayspotsIDBInstance().then((db) => new Promise((resolve, reject) => {
+            let imported = 0;
+
+            try {
+                const tx = db.transaction(REPORTED_STORE_NAME, "readwrite");
+                const store = tx.objectStore(REPORTED_STORE_NAME);
+
+                for (const rec of validRecords) {
+                    // Adds new records and updates records with matching IDs.
+                    store.put(rec);
+                    imported++;
+                }
+
+                tx.oncomplete = () => {
+                    try {
+                        db.close();
+                    } catch {}
+
+                    resolve(imported);
+                };
+
+                tx.onabort = tx.onerror = () => {
+                    const err = tx.error || new Error("Import transaction failed.");
+
+                    try {
+                        db.close();
+                    } catch {}
+
+                    reject(err);
+                };
+            } catch (err) {
+                try {
+                    db.close();
+                } catch {}
+
+                reject(err);
+            }
+        }));
+    }
+
+    async function exportReportHistoryBackup() {
+        const records = await loadAllReportedWayspotsFromIDB();
+
+        const backup = {
+            format: REPORT_BACKUP_FORMAT,
+            version: REPORT_BACKUP_VERSION,
+            exportedAt: new Date().toISOString(),
+            sourceOrigin: window.location.origin,
+            database: DB_NAME,
+            store: REPORTED_STORE_NAME,
+            recordCount: records.length,
+            records,
+        };
+
+        const blob = new Blob(
+            [JSON.stringify(backup, null, 2)],
+            { type: "application/json;charset=utf-8" }
+        );
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const ts = new Date()
+        .toISOString()
+        .slice(0, 19)
+        .replace(/[:T]/g, "-");
+
+        a.href = url;
+        a.download = `wfmapmods-report-history-backup-${ts}.json`;
+
+        document.body.appendChild(a);
+        a.click();
+
+        setTimeout(() => {
+            URL.revokeObjectURL(url);
+            a.remove();
+        }, 0);
+    }
+
+    async function importReportHistoryBackup(file, ctx) {
+        const text = await file.text();
+        let backup;
+
+        try {
+            backup = JSON.parse(text);
+        } catch {
+            throw new Error("The selected file is not valid JSON.");
+        }
+
+        if (!backup || backup.format !== REPORT_BACKUP_FORMAT) {
+            throw new Error(
+                "This is not a Wayfarer Map Mods report-history backup."
+            );
+        }
+
+        if (backup.version !== REPORT_BACKUP_VERSION) {
+            throw new Error(
+                `Unsupported backup version: ${backup.version}`
+            );
+        }
+
+        if (!Array.isArray(backup.records)) {
+            throw new Error(
+                "The backup does not contain a records array."
+            );
+        }
+
+        const proceed = confirm(
+            `Import ${backup.records.length} report-history record(s)?\n\n` +
+            "Records with an existing ID will be updated. " +
+            "Other existing records will be kept."
+        );
+
+        if (!proceed) return;
+
+        const imported = await importReportedWayspotsToIDB(
+            backup.records
+        );
+
+        // Reload the history from IndexedDB.
+        const reports = await loadAllReportedWayspotsFromIDB();
+
+        ctx.allReports = reports.map(normalizeReportRecord);
+        ctx.page = 0;
+
+        ctx.showTicket = ctx.allReports.some(
+            (r) =>
+            typeof r?.ticket === "string" &&
+            r.ticket.trim().length > 0
+        );
+
+        buildReportingHistoryColumns(ctx);
+        buildReportingHistoryHeader(ctx);
+
+        if (ctx.emptyWrap) {
+            ctx.emptyWrap.style.display =
+                ctx.allReports.length ? "none" : "";
+        }
+
+        applyFiltersAndRender(ctx);
+
+        alert(`Imported ${imported} report-history record(s).`);
     }
 
     function patchReportedWayspotInIDB(id, patch) {
@@ -2583,7 +2749,73 @@
                 exportBtn.addEventListener("click", () => exportReportsToCsv(ctx));
 
                 ctx.exportBtn = exportBtn; // keep your existing update logic
-                right.appendChild(exportBtn);
+                // Temporarily hidden to not confuse people with the export to JSON
+                // right.appendChild(exportBtn);
+
+                const backupExportBtn = document.createElement("button");
+                backupExportBtn.type = "button";
+                backupExportBtn.className = "wfmapmods-reporting-btn";
+                backupExportBtn.textContent = "Export Backup JSON";
+                backupExportBtn.title =
+                    "Export all report-history records for migration or backup";
+
+                backupExportBtn.addEventListener("click", async () => {
+                    try {
+                        await exportReportHistoryBackup();
+                    } catch (err) {
+                        console.error(
+                            "[Report Wayspot] Backup export failed:",
+                            err
+                        );
+
+                        alert(
+                            `Backup export failed: ${err?.message || err}`
+                        );
+                    }
+                });
+
+                right.appendChild(backupExportBtn);
+
+                const importInput = document.createElement("input");
+                importInput.type = "file";
+                importInput.accept = "application/json,.json";
+                importInput.style.display = "none";
+
+                importInput.addEventListener("change", async () => {
+                    const file = importInput.files?.[0];
+                    if (!file) return;
+
+                    try {
+                        await importReportHistoryBackup(file, ctx);
+                    } catch (err) {
+                        console.error(
+                            "[Report Wayspot] Backup import failed:",
+                            err
+                        );
+
+                        alert(
+                            `Backup import failed: ${err?.message || err}`
+                        );
+                    } finally {
+                        // Allows the same file to be selected again.
+                        importInput.value = "";
+                    }
+                });
+
+                right.appendChild(importInput);
+
+                const importBtn = document.createElement("button");
+                importBtn.type = "button";
+                importBtn.className = "wfmapmods-reporting-btn";
+                importBtn.textContent = "Import Backup JSON";
+                importBtn.title =
+                    "Import a report-history backup and merge it with current records";
+
+                importBtn.addEventListener("click", () => {
+                    importInput.click();
+                });
+
+                right.appendChild(importBtn);
 
                 pager.appendChild(left);
                 pager.appendChild(center);
