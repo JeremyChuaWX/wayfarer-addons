@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.2.0
+// @version      0.3.0
 // @description  Support for simultaneous tickets
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
@@ -74,7 +74,6 @@ function init() {
             try {
                 const json = JSON.parse(this.responseText);
                 if (!json) return;
-                console.log(json);
                 sendTicketHistory(json);
             } catch (ex) {
                 console.error('Error parsing JSON:', ex);
@@ -188,6 +187,301 @@ function init() {
             const doc = new DOMParser().parseFromString(str, "text/html");
             return doc.documentElement.textContent;
         };
+
+        function exportTicketSessions() {
+            try {
+                const storedSessions =
+                      JSON.parse(localStorage.getItem(OBJECT_STORE_NAME)) || {};
+
+                const sessionCount = Object.keys(storedSessions).length;
+
+                if (sessionCount === 0) {
+                    alert("There are no Ticket Manager sessions to export.");
+                    return;
+                }
+
+                const shouldExport = confirm(
+                    `Export ${sessionCount} Ticket Manager session` +
+                    `${sessionCount === 1 ? "" : "s"}?\n\n` +
+                    "Backing up is recommended in preparation for the upcoming " +
+                    "change to the Wayfarer website URL. Sessions stored only in " +
+                    "this browser may become inaccessible after the URL changes.\n\n" +
+                    "The exported file contains private Helpshift session " +
+                    "identifiers. Store it securely and do not share it."
+                );
+
+                if (!shouldExport) return;
+
+                /*
+         * Export the same object structure stored under helpChatSessions.
+         * This means the file can be written directly back to local storage.
+         */
+                const json = JSON.stringify(storedSessions, null, 2);
+                const blob = new Blob([json], {
+                    type: "application/json"
+                });
+
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                const date = new Date().toISOString().slice(0, 10);
+
+                link.href = url;
+                link.download = `wayfarer-ticket-sessions-${date}.json`;
+                link.style.display = "none";
+
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+
+                setTimeout(() => {
+                    URL.revokeObjectURL(url);
+                }, 0);
+            } catch (ex) {
+                console.error(
+                    "Ticket Manager: Failed to export ticket sessions",
+                    ex
+                );
+
+                alert("Ticket sessions could not be exported.");
+            }
+        }
+
+        async function importTicketSessionsFile(file) {
+            if (!file) return;
+
+            try {
+                const raw = await file.text();
+                const parsed = JSON.parse(raw);
+                const importedSessions =
+                      validateAndNormaliseTicketSessions(parsed);
+
+                const importedCount = Object.keys(importedSessions).length;
+
+                if (importedCount === 0) {
+                    throw new Error(
+                        "The selected file does not contain any ticket sessions."
+                    );
+                }
+
+                const storedSessions =
+                      JSON.parse(localStorage.getItem(OBJECT_STORE_NAME)) || {};
+
+                const existingCount = Object.keys(storedSessions).length;
+                const duplicateCount = Object.keys(importedSessions).filter(
+                    aui => Object.prototype.hasOwnProperty.call(
+                        storedSessions,
+                        aui
+                    )
+                ).length;
+
+                let confirmationMessage =
+                    `Import ${importedCount} Ticket Manager session` +
+                    `${importedCount === 1 ? "" : "s"}?\n\n` +
+                    `The imported sessions will be merged with your ` +
+                    `${existingCount} existing session` +
+                    `${existingCount === 1 ? "" : "s"}.`;
+
+                if (duplicateCount > 0) {
+                    confirmationMessage +=
+                        `\n\n${duplicateCount} existing session` +
+                        `${duplicateCount === 1 ? "" : "s"} with matching ` +
+                        `identifiers will be replaced.`;
+                }
+
+                confirmationMessage +=
+                    "\n\nOnly import files that you created and trust.";
+
+                if (!confirm(confirmationMessage)) return;
+
+                /*
+         * Use an object without a prototype while merging to avoid special
+         * object keys changing the object's prototype.
+         */
+                const mergedSessions = Object.create(null);
+
+                Object.entries(storedSessions).forEach(([aui, session]) => {
+                    if (!isUnsafeObjectKey(aui)) {
+                        mergedSessions[aui] = session;
+                    }
+                });
+
+                Object.entries(importedSessions).forEach(([aui, session]) => {
+                    mergedSessions[aui] = session;
+                });
+
+                helpChatSessions = mergedSessions;
+
+                localStorage.setItem(
+                    OBJECT_STORE_NAME,
+                    JSON.stringify(mergedSessions)
+                );
+
+                refreshTicketManagerInterface();
+
+                alert(
+                    `${importedCount} Ticket Manager session` +
+                    `${importedCount === 1 ? "" : "s"} imported successfully.`
+                );
+            } catch (ex) {
+                console.error(
+                    "Ticket Manager: Failed to import ticket sessions",
+                    ex
+                );
+
+                alert(
+                    ex instanceof Error
+                    ? ex.message
+                    : "Ticket sessions could not be imported."
+                );
+            }
+        }
+
+        function validateAndNormaliseTicketSessions(data) {
+            /*
+     * The normal export is the raw helpChatSessions object. This also
+     * accepts a future wrapper containing a "sessions" property.
+     */
+            const source =
+                  isSafeObject(data) &&
+                  !Array.isArray(data) &&
+                  isSafeObject(data.sessions) &&
+                  !Array.isArray(data.sessions)
+            ? data.sessions
+            : data;
+
+            if (
+                !isSafeObject(source) ||
+                Array.isArray(source)
+            ) {
+                throw new Error(
+                    "The selected file is not a valid Ticket Manager export."
+                );
+            }
+
+            const normalised = Object.create(null);
+
+            for (const [aui, session] of Object.entries(source)) {
+                if (
+                    typeof aui !== "string" ||
+                    !aui.trim() ||
+                    isUnsafeObjectKey(aui)
+                ) {
+                    throw new Error(
+                        "The import contains an invalid session identifier."
+                    );
+                }
+
+                if (!isValidTicketSession(session)) {
+                    throw new Error(
+                        `The session "${aui}" contains invalid or incomplete data.`
+                    );
+                }
+
+                /*
+         * JSON cloning removes unexpected prototypes while preserving the
+         * complete session structure and any future primitive properties.
+         */
+                normalised[aui] = JSON.parse(JSON.stringify(session));
+            }
+
+            return normalised;
+        }
+
+        function isValidTicketSession(session) {
+            if (
+                !isSafeObject(session) ||
+                Array.isArray(session)
+            ) {
+                return false;
+            }
+
+            /*
+     * DI is required when restoring a Ticket Manager session.
+     * ASI may occasionally be null or absent in older stored sessions.
+     */
+            if (
+                typeof session.di !== "string" ||
+                !session.di.trim()
+            ) {
+                return false;
+            }
+
+            if (
+                session.asi !== undefined &&
+                session.asi !== null &&
+                typeof session.asi !== "string"
+            ) {
+                return false;
+            }
+
+            if (
+                session.inProgress !== undefined &&
+                typeof session.inProgress !== "boolean"
+            ) {
+                return false;
+            }
+
+            if (
+                session.type !== undefined &&
+                session.type !== null &&
+                typeof session.type !== "string"
+            ) {
+                return false;
+            }
+
+            if (
+                session.wayspot !== undefined &&
+                session.wayspot !== null &&
+                typeof session.wayspot !== "string"
+            ) {
+                return false;
+            }
+
+            if (
+                !isValidOptionalTimestamp(session.ticketTypeTimestamp) ||
+                !isValidOptionalTimestamp(session.wayspotTimestamp)
+            ) {
+                return false;
+            }
+
+            return true;
+        }
+
+        function isValidOptionalTimestamp(value) {
+            return (
+                value === undefined ||
+                value === null ||
+                typeof value === "string" ||
+                (
+                    typeof value === "number" &&
+                    Number.isFinite(value)
+                )
+            );
+        }
+
+        function isUnsafeObjectKey(key) {
+            return (
+                key === "__proto__" ||
+                key === "prototype" ||
+                key === "constructor"
+            );
+        }
+
+        function refreshTicketManagerInterface() {
+            removeInterfaceContainer();
+
+            /*
+     * Reopen the interface so the imported sessions are shown immediately.
+     */
+            const ticketSwitchButton =
+                  document.getElementById("ticketSwitchButton");
+
+            if (ticketSwitchButton) {
+                setTimeout(() => {
+                    ticketSwitchButton.click();
+                }, 0);
+            }
+        }
 
         // Function to observe changes to iframe width properties
         // Used to detect when the Help Chat is opened
@@ -755,14 +1049,78 @@ function init() {
 
                     // Create a container for the table with a fixed height and overflow auto
                     const tableContainer = document.createElement('div');
-                    tableContainer.style.height = '440px';
+                    tableContainer.style.height = '300px';
                     tableContainer.style.overflow = 'auto';
 
                     tableContainer.appendChild(table);
                     interfaceContainer.appendChild(tableContainer);
 
-                    document.body.appendChild(interfaceContainer);
+                    // Export/import controls
+                    const transferContainer = document.createElement("div");
+                    transferContainer.classList.add("wftm-transfer-container");
 
+                    const transferWarning = document.createElement("div");
+                    transferWarning.classList.add("wftm-transfer-warning");
+                    transferWarning.textContent =
+                        "Backing up your Ticket Manager sessions is recommended in preparation " +
+                        "for the upcoming change to the Wayfarer website URL. Sessions stored " +
+                        "only in this browser may become inaccessible if the URL changes from " +
+                        "Nianticlabs to Scopely Explore. This export contains private session info " +
+                        "so you should not share the export with other people.";
+
+                    const transferButtons = document.createElement("div");
+                    transferButtons.classList.add("wftm-transfer-buttons");
+
+                    const exportSessionsButton = document.createElement("button");
+                    exportSessionsButton.type = "button";
+                    exportSessionsButton.classList.add("wftm-transfer-button");
+                    exportSessionsButton.textContent = "Export sessions";
+                    exportSessionsButton.title =
+                        "Export all Ticket Manager sessions to a JSON file";
+
+                    const importSessionsButton = document.createElement("button");
+                    importSessionsButton.type = "button";
+                    importSessionsButton.classList.add("wftm-transfer-button");
+                    importSessionsButton.textContent = "Import sessions";
+                    importSessionsButton.title =
+                        "Import Ticket Manager sessions from a JSON file";
+
+                    const importSessionsInput = document.createElement("input");
+                    importSessionsInput.type = "file";
+                    importSessionsInput.accept = ".json,application/json";
+                    importSessionsInput.hidden = true;
+
+                    exportSessionsButton.addEventListener("click", event => {
+                        event.preventDefault();
+                        exportTicketSessions();
+                    });
+
+                    importSessionsButton.addEventListener("click", event => {
+                        event.preventDefault();
+                        importSessionsInput.click();
+                    });
+
+                    importSessionsInput.addEventListener("change", async () => {
+                        const file = importSessionsInput.files?.[0];
+
+                        await importTicketSessionsFile(file);
+
+                        /*
+     * Clearing the value allows the same file to be selected again.
+     */
+                        importSessionsInput.value = "";
+                    });
+
+                    transferButtons.appendChild(exportSessionsButton);
+                    transferButtons.appendChild(importSessionsButton);
+
+                    transferContainer.appendChild(transferWarning);
+                    transferContainer.appendChild(transferButtons);
+                    transferContainer.appendChild(importSessionsInput);
+
+                    interfaceContainer.appendChild(transferContainer);
+
+                    document.body.appendChild(interfaceContainer);
                     function deleteTicket(aui) {
                         // Find the index of the aui in the keys of helpChatSessions
                         const keys = Object.keys(helpChatSessions);
@@ -883,6 +1241,48 @@ function init() {
     display: flex;
     color: white;
     font-size: 24px;
+}
+.wftm-transfer-container {
+    padding: 10px 12px 12px;
+    background: #ffffff;
+    border-top: 1px solid #d8dde3;
+    box-sizing: border-box;
+}
+
+.wftm-transfer-warning {
+    margin-bottom: 8px;
+    color: #6b7280;
+    font-family: sans-serif;
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.wftm-transfer-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.wftm-transfer-button {
+    flex: 1;
+    min-height: 32px;
+    padding: 6px 8px;
+    border: 1px solid #d85813;
+    border-radius: 5px;
+    color: #ffffff;
+    background: #d85813;
+    cursor: pointer;
+    font-family: sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.wftm-transfer-button:hover {
+    background: #bd4b0f;
+}
+
+.wftm-transfer-button:focus {
+    outline: 2px solid rgba(0, 103, 244, 0.4);
+    outline-offset: 1px;
 }
 `
 
