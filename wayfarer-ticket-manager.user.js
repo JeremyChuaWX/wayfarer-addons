@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.3.0
+// @version      0.4.0
 // @description  Support for simultaneous tickets
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
 // @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @match        https://wayfarer.nianticlabs.com/*
+// @match        https://wayfarer.scopely.com/*
 // @match        https://webchat.helpshift.com/*
 // ==/UserScript==
 
@@ -24,7 +24,7 @@
 
 function init() {
 
-    const ORIGIN_WAYFARER = 'https://wayfarer.nianticlabs.com';
+    const ORIGIN_WAYFARER = 'https://wayfarer.scopely.com';
     const ORIGIN_HELPSHIFT = 'https://webchat.helpshift.com';
     const OBJECT_STORE_NAME = 'helpChatSessions';
 
@@ -1049,7 +1049,7 @@ function init() {
 
                     // Create a container for the table with a fixed height and overflow auto
                     const tableContainer = document.createElement('div');
-                    tableContainer.style.height = '300px';
+                    tableContainer.style.height = '385px';
                     tableContainer.style.overflow = 'auto';
 
                     tableContainer.appendChild(table);
@@ -1058,15 +1058,6 @@ function init() {
                     // Export/import controls
                     const transferContainer = document.createElement("div");
                     transferContainer.classList.add("wftm-transfer-container");
-
-                    const transferWarning = document.createElement("div");
-                    transferWarning.classList.add("wftm-transfer-warning");
-                    transferWarning.textContent =
-                        "Backing up your Ticket Manager sessions is recommended in preparation " +
-                        "for the upcoming change to the Wayfarer website URL. Sessions stored " +
-                        "only in this browser may become inaccessible if the URL changes from " +
-                        "Nianticlabs to Scopely Explore. This export contains private session info " +
-                        "so you should not share the export with other people.";
 
                     const transferButtons = document.createElement("div");
                     transferButtons.classList.add("wftm-transfer-buttons");
@@ -1114,7 +1105,6 @@ function init() {
                     transferButtons.appendChild(exportSessionsButton);
                     transferButtons.appendChild(importSessionsButton);
 
-                    transferContainer.appendChild(transferWarning);
                     transferContainer.appendChild(transferButtons);
                     transferContainer.appendChild(importSessionsInput);
 
