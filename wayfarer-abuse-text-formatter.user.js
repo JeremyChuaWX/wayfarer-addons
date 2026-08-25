@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Wayfarer Abuse Text Formatter
-// @version      0.0.2
+// @version      0.1.0
 // @description  Adds text for copy & paste into Abuse form
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/raw/main/wayfarer-abuse-text-formatter.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @match        https://wayfarer.nianticlabs.com/*
+// @match        https://wayfarer.scopely.com/*
 // ==/UserScript==
 
 // Copyright 2024 tnt
