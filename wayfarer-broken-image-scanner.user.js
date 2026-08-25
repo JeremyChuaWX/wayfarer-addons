@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Wayfarer Broken Image Scanner
-// @version      0.1.0
+// @version      0.2.0
 // @description  Scans the Contribution Management page for broken image urls
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-broken-image-scanner.user.js
 // @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-broken-image-scanner.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @match        https://wayfarer.nianticlabs.com/*
+// @match        https://wayfarer.scopely.com/*
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
