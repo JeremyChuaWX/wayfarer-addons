@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Wayfarer Layout Mod
-// @version      0.0.4
+// @version      0.1.0
 // @description  Restores the layout to be more similar to the old layout
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-layout-mod.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @match        https://wayfarer.nianticlabs.com/*
+// @match        https://wayfarer.scopely.com/*
 // @run-at       document-start
 // ==/UserScript==
 
