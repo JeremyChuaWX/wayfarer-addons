@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Wayfarer Bonus Area Visualiser
-// @version      1.1.0
+// @version      1.2.0
 // @description  Shows L7 cells covered by Home and Bonus areas
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-bonus-area-visualiser.user.js
 // @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-bonus-area-visualiser.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @match        https://wayfarer.nianticlabs.com/*
+// @match        https://wayfarer.scopely.com/*
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
