@@ -6,7 +6,7 @@
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-draggable-help-chat.user.js
 // @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-draggable-help-chat.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @match        https://wayfarer.nianticlabs.com/*
+// @match        https://wayfarer.scopely.com/*
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
