@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Wayfarer Persistent Help Chat
-// @version      0.1.0
+// @version      1.0.0
 // @description  Makes the Help Chat button always visible
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-persistent-help-chat.user.js
 // @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-persistent-help-chat.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @match        https://wayfarer.nianticlabs.com/*
+// @match        https://wayfarer.scopely.com/*
 // ==/UserScript==
 
 // Copyright 2026 tntnnbltn
