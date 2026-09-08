@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.4.0
+// @version      0.5.0
 // @description  Support for simultaneous tickets
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
@@ -39,9 +39,9 @@ function init() {
         (function(open) {
             XMLHttpRequest.prototype.open = function(method, url) {
                 if (method === 'POST') {
-                    if (url === 'https://api.helpshift.com/websdk/niantic/conversations/history' ||
-                        url === 'https://api.helpshift.com/websdk/niantic/conversations/updates' ||
-                        url.startsWith('https://api.helpshift.com/websdk/niantic/issues/')) {
+                    if (url === 'https://api.helpshift.com/websdk/scopelyexplore/conversations/history' ||
+                        url === 'https://api.helpshift.com/websdk/scopelyexplore/conversations/updates' ||
+                        url.startsWith('https://api.helpshift.com/websdk/scopelyexplore/issues/')) {
                         this.addEventListener('load', parseResponse, false);
                         this.addEventListener('readystatechange', function() {
                             if (this.readyState === 4) { // Check if request is complete
@@ -81,9 +81,9 @@ function init() {
         }
 
         function loadAndSendSessionValues() {
-            const di = localStorage.getItem('di:niantic-4d50991f7c85c5b');
-            const asi = localStorage.getItem('asi:niantic-4d50991f7c85c5b');
-            const aui = localStorage.getItem('aui:niantic-4d50991f7c85c5b');
+            const di = localStorage.getItem('di:scopelye-2d29204ff805eac');
+            const asi = localStorage.getItem('asi:scopelye-2d29204ff805eac');
+            const aui = localStorage.getItem('aui:scopelye-2d29204ff805eac');
 
             window.parent.postMessage({
                 source: WFTM_SOURCE,
@@ -107,7 +107,7 @@ function init() {
         }
 
         function updateLocalStorage(data) {
-            const suffix = 'niantic-4d50991f7c85c5b';
+            const suffix = 'scopelye-2d29204ff805eac';
 
             const diKey = `di:${suffix}`;
             const asiKey = `asi:${suffix}`;
