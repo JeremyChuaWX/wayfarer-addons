@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Wayfarer Abuse Text Formatter
-// @version      0.1.0
+// @version      0.2.0
 // @description  Adds text for copy & paste into Abuse form
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/raw/main/wayfarer-abuse-text-formatter.user.js
+// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/raw/main/wayfarer-abuse-text-formatter.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.scopely.com/*
 // ==/UserScript==
@@ -101,7 +102,7 @@
         // Create a hyperlink element
         const reportLink = document.createElement('a');
         reportLink.textContent = '[Report]';
-        reportLink.href = 'https://niantic.helpshift.com/hc/en/21-wayfarer/faq/2190-reporting-abuse-in-wayfarer/?l=en&p=web';
+        reportLink.href = 'https://scopelyexplore.helpshift.com/hc/en/10-wayfarer/faq/1999-reporting-abuse-in-wayfarer/';
 
         // Append the hyperlink element to the new div element
         newDiv.appendChild(reportLink);
