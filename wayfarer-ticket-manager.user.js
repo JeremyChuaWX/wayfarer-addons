@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.5.0
+// @version      0.6.0
 // @description  Support for simultaneous tickets
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
@@ -483,8 +483,49 @@ function init() {
             }
         }
 
-        // Function to observe changes to iframe width properties
-        // Used to detect when the Help Chat is opened
+        function isWfmmMobileFullscreenModalOpen() {
+            const isMobile = window.matchMedia
+                ? window.matchMedia('(max-width: 640px)').matches
+                : (window.innerWidth || document.documentElement.clientWidth || 0) <= 640;
+
+            if (!isMobile) return false;
+
+            return Boolean(document.querySelector(
+                '.wfmm-modal-backdrop[data-wfmm-mobile="fullscreen"], ' +
+                '.wfmapmods-modal-backdrop[data-wfmm-mobile="fullscreen"]'
+            ));
+        }
+
+        // Mirror normal Helpshift launcher visibility where it is observable,
+        // and independently mirror WFMM's mobile fullscreen-modal suppression.
+        function syncTicketButtonVisibility() {
+            const launcher = document.getElementById('hs-web-sdk-iframe-launcher');
+            const ticketButton = document.querySelector('.wftm-containerDiv');
+
+            if (!ticketButton) return;
+
+            let launcherHidden = !launcher;
+
+            if (launcher) {
+                const launcherStyle = getComputedStyle(launcher);
+                launcherHidden =
+                    launcher.hidden ||
+                    launcher.style.display === 'none' ||
+                    launcherStyle.display === 'none' ||
+                    launcherStyle.visibility === 'hidden';
+            }
+
+            const hidden = launcherHidden || isWfmmMobileFullscreenModalOpen();
+
+            ticketButton.style.display = hidden ? 'none' : '';
+
+            if (hidden) {
+                removeInterfaceContainer();
+            }
+        }
+
+        // Function to observe changes to the Help Chat panel iframe.
+        // Used to detect when the Help Chat is opened.
         const observeIframeWidthChanges = () => {
             const iframe = document.getElementById('hs-web-sdk-iframe');
             if (iframe) {
@@ -497,6 +538,51 @@ function init() {
                 });
                 observer.observe(iframe, { attributes: true });
             }
+        };
+
+        // Helpshift can hide, show, remove, or recreate its launcher iframe.
+        // WFMM fullscreen modals are also added/removed from the document. Watch
+        // both so Ticket Manager follows the effective launcher visibility.
+        const observeHelpLauncherVisibility = () => {
+            let launcher = null;
+            let launcherObserver = null;
+
+            const attachLauncherObserver = () => {
+                const nextLauncher = document.getElementById('hs-web-sdk-iframe-launcher');
+
+                if (nextLauncher !== launcher) {
+                    launcherObserver?.disconnect();
+                    launcherObserver = null;
+                    launcher = nextLauncher;
+
+                    if (launcher) {
+                        launcherObserver = new MutationObserver(syncTicketButtonVisibility);
+                        launcherObserver.observe(launcher, {
+                            attributes: true,
+                            attributeFilter: ['style', 'class', 'hidden']
+                        });
+                    }
+                }
+
+                syncTicketButtonVisibility();
+            };
+
+            const documentObserver = new MutationObserver(attachLauncherObserver);
+            documentObserver.observe(document.documentElement, {
+                childList: true,
+                subtree: true
+            });
+
+            if (window.matchMedia) {
+                const mobileQuery = window.matchMedia('(max-width: 640px)');
+                if (typeof mobileQuery.addEventListener === 'function') {
+                    mobileQuery.addEventListener('change', syncTicketButtonVisibility);
+                } else if (typeof mobileQuery.addListener === 'function') {
+                    mobileQuery.addListener(syncTicketButtonVisibility);
+                }
+            }
+
+            attachLauncherObserver();
         };
 
 
@@ -538,6 +624,7 @@ function init() {
 
                 if (!iframeObserverStarted) {
                     observeIframeWidthChanges();
+                    observeHelpLauncherVisibility();
                     iframeObserverStarted = true;
                 }
             })
