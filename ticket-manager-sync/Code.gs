@@ -87,6 +87,9 @@ function validateRequest_(request) {
   if (typeof request.clientId !== 'string' || !request.clientId.trim()) {
     throw new Error('Missing client id.');
   }
+  if (!Number.isInteger(request.sinceRevision) || request.sinceRevision < 0) {
+    throw new Error('Invalid sync revision.');
+  }
   if (!Array.isArray(request.operations)) {
     throw new Error('Operations must be an array.');
   }
@@ -96,25 +99,19 @@ function validateRequest_(request) {
 }
 
 /**
- * Applies client operations and returns the complete canonical record set.
- *
- * Conflict policy:
- *   - Deletes always win and become permanent tombstones.
- *   - A normal upsert can never overwrite a tombstone.
- *   - A stale normal upsert cannot overwrite a newer server revision.
- *   - Only an explicitly forced upsert (used by manual Import Tickets) may
- *     resurrect a tombstoned AUI or intentionally replace a newer record.
- *
- * That policy is what prevents an old device from recreating a ticket that was
- * already deleted on another device.
+ * Applies client operations and returns records changed since the client's
+ * last successful revision. A full snapshot is returned for first syncs and
+ * after the remote store has been reset.
  */
 function sync_(request) {
   const operations = request.operations;
+  const sinceRevision = request.sinceRevision;
   const lock = LockService.getScriptLock();
   lock.waitLock(WFTM_SYNC_LOCK_TIMEOUT_MS);
 
   try {
     const store = readStore_();
+    const full = sinceRevision === 0 || sinceRevision > store.revision;
     const results = [];
     let changed = false;
 
@@ -188,12 +185,21 @@ function sync_(request) {
     pruneAppliedOperations_(store);
     if (changed || operations.length > 0) writeStore_(store);
 
+    const changes = {};
+    Object.keys(store.records).forEach(aui => {
+      const record = store.records[aui];
+      if (full || Number(record && record.revision) > sinceRevision) {
+        changes[aui] = record;
+      }
+    });
+
     return {
       ok: true,
       version: WFTM_SYNC_API_VERSION,
       revision: store.revision,
+      full: full,
       results: results,
-      records: store.records,
+      changes: changes,
     };
   } finally {
     lock.releaseLock();
