@@ -19,9 +19,7 @@ const WFTM_SYNC_MAX_APPLIED_OPERATIONS = 5000;
 const WFTM_SYNC_LOCK_TIMEOUT_MS = 30000;
 const WFTM_SYNC_STORE_NAME = 'Wayfarer Ticket Manager Sync.json';
 
-const WFTM_SYNC_PROPERTIES = Object.freeze({
-  FILE_ID: 'WFTM_SYNC_FILE_ID',
-});
+const WFTM_SYNC_FILE_ID_PROPERTY = 'WFTM_SYNC_FILE_ID';
 
 /**
  * Clears all synced records and tombstones.
@@ -81,12 +79,6 @@ function validateRequest_(request) {
   if (Number(request.version) !== WFTM_SYNC_API_VERSION) {
     throw new Error('API version mismatch.');
   }
-  if (request.action !== 'sync') {
-    throw new Error('Unsupported action.');
-  }
-  if (typeof request.clientId !== 'string' || !request.clientId.trim()) {
-    throw new Error('Missing client id.');
-  }
   if (!Number.isInteger(request.sinceRevision) || request.sinceRevision < 0) {
     throw new Error('Invalid sync revision.');
   }
@@ -113,7 +105,6 @@ function sync_(request) {
     const store = readStore_();
     const full = sinceRevision === 0 || sinceRevision > store.revision;
     const results = [];
-    let changed = false;
 
     operations.forEach(operation => {
       validateOperation_(operation);
@@ -142,10 +133,8 @@ function sync_(request) {
           store.records[operation.aui] = {
             deleted: true,
             revision: resultRevision,
-            updatedAt: new Date().toISOString(),
           };
           status = 'deleted';
-          changed = true;
         }
       } else {
         const force = operation.force === true;
@@ -161,11 +150,9 @@ function sync_(request) {
           store.records[operation.aui] = {
             deleted: false,
             revision: resultRevision,
-            updatedAt: new Date().toISOString(),
             session: cloneSession_(operation.session),
           };
           status = current && current.deleted === true ? 'resurrected' : 'saved';
-          changed = true;
         }
       }
 
@@ -183,7 +170,7 @@ function sync_(request) {
     });
 
     pruneAppliedOperations_(store);
-    if (changed || operations.length > 0) writeStore_(store);
+    if (operations.length > 0) writeStore_(store);
 
     const changes = {};
     Object.keys(store.records).forEach(aui => {
@@ -318,7 +305,7 @@ function writeStore_(store) {
 
 function getStoreFile_() {
   const properties = PropertiesService.getScriptProperties();
-  const fileId = properties.getProperty(WFTM_SYNC_PROPERTIES.FILE_ID);
+  const fileId = properties.getProperty(WFTM_SYNC_FILE_ID_PROPERTY);
 
   if (fileId) {
     try {
@@ -333,7 +320,7 @@ function getStoreFile_() {
     JSON.stringify(createEmptyStore_(), null, 2),
     MimeType.PLAIN_TEXT
   );
-  properties.setProperty(WFTM_SYNC_PROPERTIES.FILE_ID, file.getId());
+  properties.setProperty(WFTM_SYNC_FILE_ID_PROPERTY, file.getId());
   return file;
 }
 
