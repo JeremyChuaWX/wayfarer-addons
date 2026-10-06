@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.6.0
-// @description  Support for simultaneous tickets
+// @version      0.7.0
+// @description  Support for simultaneous tickets with optional cross-device sync
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
 // @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
@@ -159,6 +159,444 @@ function init() {
         let routeHooked = false;
         let waitingForIframe = false;
 
+        const TICKET_SYNC_CONFIG_KEY = 'wftmSyncConfig';
+        const TICKET_SYNC_STATE_KEY = 'wftmSyncState';
+        const TICKET_SYNC_STATE_VERSION = 1;
+        const TICKET_SYNC_API_VERSION = 1;
+        const TICKET_SYNC_DELAY_MS = 750;
+        const TICKET_SYNC_TIMEOUT_MS = 20000;
+        const TICKET_SYNC_INSTALLATION_URL =
+              'https://gitlab.com/Tntnnbltn/wayfarer-addons/-/blob/main/ticket-manager-sync/README.md';
+
+        let ticketSyncState = loadTicketSyncState();
+        let ticketSyncTimer = null;
+        let ticketSyncRequest = null;
+        let ticketSyncUiNeedsRefresh = false;
+        let ticketSyncStatus = getTicketSyncConfig()
+            ? 'Ready to sync.'
+            : 'Ticket Sync is not configured.';
+        let ticketSyncStatusKind = '';
+
+        function createTicketSyncId() {
+            if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
+                return globalThis.crypto.randomUUID();
+            }
+            return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+        }
+
+        function cloneTicketSyncValue(value) {
+            return JSON.parse(JSON.stringify(value));
+        }
+
+        function ticketSyncFingerprint(value) {
+            if (Array.isArray(value)) {
+                return `[${value.map(ticketSyncFingerprint).join(',')}]`;
+            }
+            if (!isSafeObject(value)) {
+                return JSON.stringify(value);
+            }
+            return `{${Object.keys(value).sort().map(key =>
+                `${JSON.stringify(key)}:${ticketSyncFingerprint(value[key])}`
+            ).join(',')}}`;
+        }
+
+        function isValidTicketSyncUrl(value) {
+            try {
+                const url = new URL(String(value || '').trim());
+                return url.protocol === 'https:' &&
+                    url.hostname === 'script.google.com' &&
+                    /^\/macros\/s\/[^/]+\/exec$/.test(url.pathname);
+            } catch {
+                return false;
+            }
+        }
+
+        function getTicketSyncConfig() {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(TICKET_SYNC_CONFIG_KEY) || 'null');
+                if (!isSafeObject(parsed) || Array.isArray(parsed)) return null;
+                const url = String(parsed.url || '').trim();
+                if (!isValidTicketSyncUrl(url)) return null;
+                return { url };
+            } catch {
+                return null;
+            }
+        }
+
+        function defaultTicketSyncState() {
+            return {
+                version: TICKET_SYNC_STATE_VERSION,
+                revision: 0,
+                records: {},
+                outbox: []
+            };
+        }
+
+        function isValidTicketSyncOperation(operation) {
+            return isSafeObject(operation) &&
+                !Array.isArray(operation) &&
+                typeof operation.id === 'string' &&
+                typeof operation.aui === 'string' &&
+                !isUnsafeObjectKey(operation.aui) &&
+                (operation.type === 'upsert' || operation.type === 'delete') &&
+                (operation.type === 'delete' || (
+                    isSafeObject(operation.session) &&
+                    !Array.isArray(operation.session) &&
+                    Number.isInteger(operation.baseRevision) &&
+                    operation.baseRevision >= 0
+                ));
+        }
+
+        function loadTicketSyncState() {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(TICKET_SYNC_STATE_KEY) || 'null');
+                if (!isSafeObject(parsed) || parsed.version !== TICKET_SYNC_STATE_VERSION) {
+                    return defaultTicketSyncState();
+                }
+                return {
+                    version: TICKET_SYNC_STATE_VERSION,
+                    revision: Number.isInteger(parsed.revision) && parsed.revision >= 0
+                        ? parsed.revision
+                        : 0,
+                    records: isSafeObject(parsed.records) && !Array.isArray(parsed.records)
+                        ? parsed.records
+                        : {},
+                    outbox: Array.isArray(parsed.outbox)
+                        ? parsed.outbox.filter(isValidTicketSyncOperation)
+                        : []
+                };
+            } catch {
+                return defaultTicketSyncState();
+            }
+        }
+
+        function saveTicketSyncState() {
+            localStorage.setItem(TICKET_SYNC_STATE_KEY, JSON.stringify(ticketSyncState));
+        }
+
+        function getLatestPendingTicketOperation(aui) {
+            for (let i = ticketSyncState.outbox.length - 1; i >= 0; i--) {
+                if (ticketSyncState.outbox[i].aui === aui) {
+                    return ticketSyncState.outbox[i];
+                }
+            }
+            return null;
+        }
+
+        function isTicketSyncTombstoned(aui) {
+            const pending = getLatestPendingTicketOperation(aui);
+            if (pending) return pending.type === 'delete';
+            return ticketSyncState.records?.[aui]?.deleted === true;
+        }
+
+        function queueTicketSyncOperation(type, aui, session = null, options = {}) {
+            if (!getTicketSyncConfig()) return;
+            if (typeof aui !== 'string' || !aui || isUnsafeObjectKey(aui)) return;
+
+            const recordMeta = ticketSyncState.records?.[aui];
+            if (type === 'delete' && recordMeta?.deleted === true &&
+                !getLatestPendingTicketOperation(aui)) {
+                return;
+            }
+
+            ticketSyncState.outbox = ticketSyncState.outbox.filter(operation => operation.aui !== aui);
+
+            if (type === 'delete') {
+                ticketSyncState.outbox.push({
+                    id: createTicketSyncId(),
+                    type: 'delete',
+                    aui
+                });
+            } else {
+                if (!isValidTicketSession(session)) return;
+                const force = options.force === true;
+                const fingerprint = ticketSyncFingerprint(session);
+                if (!force &&
+                    recordMeta &&
+                    recordMeta.deleted !== true &&
+                    recordMeta.fingerprint === fingerprint) {
+                    return;
+                }
+                ticketSyncState.outbox.push({
+                    id: createTicketSyncId(),
+                    type: 'upsert',
+                    aui,
+                    baseRevision: Number.isInteger(recordMeta?.revision)
+                        ? recordMeta.revision
+                        : 0,
+                    force,
+                    session: cloneTicketSyncValue(session)
+                });
+            }
+
+            saveTicketSyncState();
+            scheduleTicketSync();
+        }
+
+        function applyTicketSyncChanges(changes, replace = false) {
+            const records = Object.create(null);
+            const sessions = Object.create(null);
+
+            if (!replace) {
+                if (isSafeObject(ticketSyncState.records) && !Array.isArray(ticketSyncState.records)) {
+                    for (const [aui, meta] of Object.entries(ticketSyncState.records)) {
+                        if (!aui || isUnsafeObjectKey(aui) || !isSafeObject(meta) || Array.isArray(meta)) continue;
+                        records[aui] = cloneTicketSyncValue(meta);
+                    }
+                }
+
+                for (const [aui, session] of Object.entries(helpChatSessions)) {
+                    if (!aui || isUnsafeObjectKey(aui) || !isValidTicketSession(session)) continue;
+                    sessions[aui] = cloneTicketSyncValue(session);
+                }
+            }
+
+            if (!isSafeObject(changes) || Array.isArray(changes)) {
+                return { records, sessions };
+            }
+
+            for (const [aui, record] of Object.entries(changes)) {
+                if (!aui || isUnsafeObjectKey(aui) || !isSafeObject(record) || Array.isArray(record)) {
+                    continue;
+                }
+
+                const revision = Number(record.revision);
+                if (!Number.isInteger(revision) || revision < 0) continue;
+
+                if (record.deleted === true) {
+                    records[aui] = { revision, deleted: true };
+                    delete sessions[aui];
+                } else if (isValidTicketSession(record.session)) {
+                    records[aui] = {
+                        revision,
+                        deleted: false,
+                        fingerprint: ticketSyncFingerprint(record.session)
+                    };
+                    sessions[aui] = cloneTicketSyncValue(record.session);
+                }
+            }
+
+            return { records, sessions };
+        }
+
+        function overlayPendingTicketOperations(sessions) {
+            for (const operation of ticketSyncState.outbox) {
+                if (operation.type === 'delete') {
+                    delete sessions[operation.aui];
+                } else if (operation.type === 'upsert') {
+                    sessions[operation.aui] = cloneTicketSyncValue(operation.session);
+                }
+            }
+        }
+
+        function writeTicketSessionsFromSync(sessions) {
+            const currentFingerprint = ticketSyncFingerprint(helpChatSessions);
+            const nextFingerprint = ticketSyncFingerprint(sessions);
+            if (currentFingerprint === nextFingerprint) return false;
+
+            helpChatSessions = sessions;
+            localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(sessions));
+
+            if (document.getElementById('ticketInterfaceContainer')) {
+                if (document.getElementById('wftmSyncModal')) {
+                    ticketSyncUiNeedsRefresh = true;
+                } else {
+                    refreshTicketManagerInterface();
+                }
+            }
+            return true;
+        }
+
+        async function callTicketSyncApi(config, operations) {
+            const body = new URLSearchParams();
+            body.set('payload', JSON.stringify({
+                version: TICKET_SYNC_API_VERSION,
+                sinceRevision: ticketSyncState.revision,
+                operations
+            }));
+
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), TICKET_SYNC_TIMEOUT_MS);
+            let response;
+            try {
+                response = await fetch(config.url, {
+                    method: 'POST',
+                    credentials: 'omit',
+                    body,
+                    signal: controller.signal
+                });
+            } catch (error) {
+                if (error?.name === 'AbortError') {
+                    throw new Error('Ticket Sync request timed out.');
+                }
+                throw new Error('Ticket Sync could not reach the Apps Script web app.');
+            } finally {
+                clearTimeout(timeout);
+            }
+
+            if (!response.ok) {
+                throw new Error(`Ticket Sync request failed with HTTP ${response.status}.`);
+            }
+
+            let result;
+            try {
+                result = await response.json();
+            } catch {
+                throw new Error('Ticket Sync returned invalid JSON.');
+            }
+
+            if (!isSafeObject(result) || result.ok !== true) {
+                throw new Error(result?.error?.message || 'Ticket Sync returned an error.');
+            }
+            if (Number(result.version) !== TICKET_SYNC_API_VERSION) {
+                throw new Error('Ticket Sync API version mismatch. Update Code.gs and redeploy it.');
+            }
+            if (!isSafeObject(result.changes) || Array.isArray(result.changes) ||
+                !Array.isArray(result.results) || typeof result.full !== 'boolean') {
+                throw new Error('Ticket Sync response is incomplete.');
+            }
+            return result;
+        }
+
+        function setTicketSyncStatus(message, kind = '') {
+            ticketSyncStatus = message;
+            ticketSyncStatusKind = kind;
+            document.querySelectorAll('.wftm-sync-status').forEach(element => {
+                element.textContent = message;
+                element.dataset.kind = kind;
+            });
+        }
+
+        async function syncTicketSessions() {
+            if (ticketSyncRequest) return ticketSyncRequest;
+
+            const config = getTicketSyncConfig();
+            if (!config) {
+                setTicketSyncStatus('Ticket Sync is not configured.');
+                return false;
+            }
+
+            ticketSyncRequest = (async () => {
+                setTicketSyncStatus('Syncing…');
+                const outgoing = ticketSyncState.outbox.map(operation => cloneTicketSyncValue(operation));
+
+                try {
+                    const result = await callTicketSyncApi(config, outgoing);
+                    const resolvedIds = new Set(
+                        result.results
+                            .filter(item => isSafeObject(item) && typeof item.id === 'string')
+                            .map(item => item.id)
+                    );
+
+                    ticketSyncState.outbox = ticketSyncState.outbox.filter(operation =>
+                        !resolvedIds.has(operation.id)
+                    );
+                    const fullSnapshot = result.full === true;
+                    ticketSyncState.revision = Number.isInteger(result.revision)
+                        ? result.revision
+                        : ticketSyncState.revision;
+                    const applied = applyTicketSyncChanges(result.changes, fullSnapshot);
+                    ticketSyncState.records = applied.records;
+
+                    // Rebase operations queued while the request was in flight onto
+                    // the latest canonical record revision returned by the server.
+                    ticketSyncState.outbox.forEach(operation => {
+                        if (operation.type !== 'upsert') return;
+                        const meta = ticketSyncState.records[operation.aui];
+                        operation.baseRevision = Number.isInteger(meta?.revision)
+                            ? meta.revision
+                            : 0;
+                    });
+
+                    const merged = applied.sessions;
+
+                    if (fullSnapshot) {
+                        const remoteKeys = new Set(Object.keys(result.changes));
+                        for (const [aui, session] of Object.entries(helpChatSessions)) {
+                            if (!remoteKeys.has(aui) &&
+                                !getLatestPendingTicketOperation(aui) &&
+                                isValidTicketSession(session)) {
+                                merged[aui] = cloneTicketSyncValue(session);
+                                queueTicketSyncOperation('upsert', aui, session);
+                            }
+                        }
+                    }
+
+                    overlayPendingTicketOperations(merged);
+                    writeTicketSessionsFromSync(merged);
+
+                    saveTicketSyncState();
+
+                    const conflicts = result.results.filter(item =>
+                        item?.status === 'stale' || item?.status === 'tombstoned'
+                    ).length;
+                    if (conflicts > 0) {
+                        setTicketSyncStatus(
+                            `Synced. ${conflicts} stale local change${conflicts === 1 ? '' : 's'} replaced by newer synced data.`,
+                            'warning'
+                        );
+                    } else {
+                        setTicketSyncStatus('Synced.', 'success');
+                    }
+
+                    if (ticketSyncState.outbox.length > 0) {
+                        scheduleTicketSync(50);
+                    }
+                    return true;
+                } catch (error) {
+                    console.error('Ticket Manager: Ticket Sync failed', error);
+                    setTicketSyncStatus(error?.message || 'Ticket Sync failed.', 'error');
+                    return false;
+                }
+            })();
+
+            try {
+                return await ticketSyncRequest;
+            } finally {
+                ticketSyncRequest = null;
+            }
+        }
+
+        function scheduleTicketSync(delay = TICKET_SYNC_DELAY_MS) {
+            if (!getTicketSyncConfig()) return;
+            clearTimeout(ticketSyncTimer);
+            ticketSyncTimer = setTimeout(() => {
+                ticketSyncTimer = null;
+                syncTicketSessions();
+            }, delay);
+        }
+
+        function saveTicketSyncConfig(url) {
+            url = String(url || '').trim();
+            if (!isValidTicketSyncUrl(url)) {
+                throw new Error('Enter a deployed Google Apps Script URL ending in /exec.');
+            }
+
+            const previous = getTicketSyncConfig();
+            localStorage.setItem(TICKET_SYNC_CONFIG_KEY, JSON.stringify({ url }));
+
+            if (!previous || previous.url !== url) {
+                ticketSyncState = defaultTicketSyncState();
+                saveTicketSyncState();
+            }
+            setTicketSyncStatus('Ticket Sync configured.');
+        }
+
+        function disableTicketSync() {
+            clearTimeout(ticketSyncTimer);
+            ticketSyncTimer = null;
+            localStorage.removeItem(TICKET_SYNC_CONFIG_KEY);
+            localStorage.removeItem(TICKET_SYNC_STATE_KEY);
+            ticketSyncState = defaultTicketSyncState();
+            setTicketSyncStatus('Ticket Sync is disabled.');
+        }
+
+        function startTicketSync() {
+            if (getTicketSyncConfig()) {
+                scheduleTicketSync(0);
+            }
+        }
+
         const awaitElement = get => new Promise((resolve, reject) => {
             let triesLeft = 20;
 
@@ -203,9 +641,6 @@ function init() {
                 const shouldExport = confirm(
                     `Export ${sessionCount} Ticket Manager session` +
                     `${sessionCount === 1 ? "" : "s"}?\n\n` +
-                    "Backing up is recommended in preparation for the upcoming " +
-                    "change to the Wayfarer website URL. Sessions stored only in " +
-                    "this browser may become inaccessible after the URL changes.\n\n" +
                     "The exported file contains private Helpshift session " +
                     "identifiers. Store it securely and do not share it."
                 );
@@ -315,6 +750,13 @@ function init() {
                     OBJECT_STORE_NAME,
                     JSON.stringify(mergedSessions)
                 );
+
+                // Import is an explicit restore action. If an imported AUI was
+                // previously deleted on another device, allow this operation to
+                // intentionally replace the remote tombstone.
+                Object.entries(importedSessions).forEach(([aui, session]) => {
+                    queueTicketSyncOperation('upsert', aui, session, { force: true });
+                });
 
                 refreshTicketManagerInterface();
 
@@ -481,6 +923,223 @@ function init() {
                     ticketSwitchButton.click();
                 }, 0);
             }
+        }
+
+        function openTicketImportPicker() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json,application/json';
+            input.hidden = true;
+            document.body.appendChild(input);
+
+            const cleanup = () => input.remove();
+            input.addEventListener('cancel', cleanup, { once: true });
+            input.addEventListener('change', async () => {
+                const file = input.files?.[0];
+                try {
+                    await importTicketSessionsFile(file);
+                } finally {
+                    cleanup();
+                }
+            }, { once: true });
+
+            input.click();
+        }
+
+        function createTicketManagerMenu(interfaceContainer, menuButton) {
+            const menu = document.createElement('div');
+            menu.classList.add('wftm-menu');
+            menu.hidden = true;
+
+            const addMenuButton = (label, handler) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.classList.add('wftm-menu-item');
+                button.textContent = label;
+                button.addEventListener('click', event => {
+                    event.stopPropagation();
+                    menu.hidden = true;
+                    menuButton.setAttribute('aria-expanded', 'false');
+                    handler();
+                });
+                menu.appendChild(button);
+            };
+
+            addMenuButton('Ticket Sync', () => openTicketSyncModal(interfaceContainer));
+            addMenuButton('Export Tickets', exportTicketSessions);
+            addMenuButton('Import Tickets', openTicketImportPicker);
+
+            menuButton.addEventListener('click', event => {
+                event.stopPropagation();
+                const willOpen = menu.hidden;
+                menu.hidden = !willOpen;
+                menuButton.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+            });
+
+            interfaceContainer.addEventListener('click', event => {
+                if (!menu.hidden && !menu.contains(event.target) && event.target !== menuButton) {
+                    menu.hidden = true;
+                    menuButton.setAttribute('aria-expanded', 'false');
+                }
+            });
+
+            return menu;
+        }
+
+        function openTicketSyncModal(interfaceContainer) {
+            const existingModal = document.getElementById('wftmSyncModal');
+            if (existingModal) {
+                existingModal._wftmCleanup?.();
+                existingModal.remove();
+            }
+
+            const config = getTicketSyncConfig();
+            const backdrop = document.createElement('div');
+            backdrop.id = 'wftmSyncModal';
+            backdrop.classList.add('wftm-modal-backdrop');
+
+            const modal = document.createElement('div');
+            modal.classList.add('wftm-modal');
+            modal.setAttribute('role', 'dialog');
+            modal.setAttribute('aria-modal', 'true');
+            modal.setAttribute('aria-labelledby', 'wftmSyncTitle');
+
+            const title = document.createElement('h2');
+            title.id = 'wftmSyncTitle';
+            title.classList.add('wftm-modal-title');
+            title.textContent = 'Ticket Sync';
+
+            const description = document.createElement('p');
+            description.classList.add('wftm-modal-description');
+            description.textContent =
+                'Sync Ticket Manager sessions between your devices using a dedicated Google Apps Script.';
+
+            const urlLabel = document.createElement('label');
+            urlLabel.classList.add('wftm-field-label');
+            urlLabel.textContent = 'Script URL';
+            const urlInput = document.createElement('input');
+            urlInput.type = 'url';
+            urlInput.classList.add('wftm-field-input');
+            urlInput.placeholder = 'https://script.google.com/macros/s/…/exec';
+            urlInput.value = config?.url || '';
+            urlInput.autocomplete = 'off';
+            urlInput.spellcheck = false;
+            urlLabel.appendChild(urlInput);
+
+            const instructions = document.createElement('a');
+            instructions.classList.add('wftm-sync-instructions');
+            instructions.href = TICKET_SYNC_INSTALLATION_URL;
+            instructions.target = '_blank';
+            instructions.rel = 'noopener noreferrer';
+            instructions.textContent = 'Ticket Sync installation instructions';
+
+            const status = document.createElement('div');
+            status.classList.add('wftm-sync-status');
+            status.textContent = ticketSyncStatus;
+            status.dataset.kind = ticketSyncStatusKind;
+
+            const buttonRow = document.createElement('div');
+            buttonRow.classList.add('wftm-modal-buttons');
+
+            const disableButton = document.createElement('button');
+            disableButton.type = 'button';
+            disableButton.classList.add('wftm-modal-button', 'wftm-modal-button-secondary');
+            disableButton.textContent = 'Disable Sync';
+            disableButton.hidden = !config;
+
+            const syncNowButton = document.createElement('button');
+            syncNowButton.type = 'button';
+            syncNowButton.classList.add('wftm-modal-button', 'wftm-modal-button-secondary');
+            syncNowButton.textContent = 'Sync now';
+            syncNowButton.hidden = !config;
+
+            const saveButton = document.createElement('button');
+            saveButton.type = 'button';
+            saveButton.classList.add('wftm-modal-button', 'wftm-modal-button-primary');
+            saveButton.textContent = 'Save & Sync';
+
+            const closeButton = document.createElement('button');
+            closeButton.type = 'button';
+            closeButton.classList.add('wftm-modal-close');
+            closeButton.setAttribute('aria-label', 'Close Ticket Sync settings');
+            closeButton.textContent = '×';
+
+            const cleanupModal = () => {
+                document.removeEventListener('keydown', handleKeyDown);
+            };
+            backdrop._wftmCleanup = cleanupModal;
+
+            const closeModal = () => {
+                cleanupModal();
+                backdrop.remove();
+                if (ticketSyncUiNeedsRefresh) {
+                    ticketSyncUiNeedsRefresh = false;
+                    refreshTicketManagerInterface();
+                }
+            };
+            const handleKeyDown = event => {
+                if (event.key === 'Escape') closeModal();
+            };
+
+            closeButton.addEventListener('click', closeModal);
+            backdrop.addEventListener('click', event => {
+                if (event.target === backdrop) closeModal();
+            });
+            document.addEventListener('keydown', handleKeyDown);
+
+            saveButton.addEventListener('click', async () => {
+                try {
+                    saveTicketSyncConfig(urlInput.value);
+                    disableButton.hidden = false;
+                    syncNowButton.hidden = false;
+                    saveButton.disabled = true;
+                    syncNowButton.disabled = true;
+                    await syncTicketSessions();
+                } catch (error) {
+                    setTicketSyncStatus(error?.message || 'Ticket Sync could not be configured.', 'error');
+                } finally {
+                    saveButton.disabled = false;
+                    syncNowButton.disabled = false;
+                }
+            });
+
+            syncNowButton.addEventListener('click', async () => {
+                syncNowButton.disabled = true;
+                saveButton.disabled = true;
+                try {
+                    await syncTicketSessions();
+                } finally {
+                    syncNowButton.disabled = false;
+                    saveButton.disabled = false;
+                }
+            });
+
+            disableButton.addEventListener('click', () => {
+                disableTicketSync();
+                urlInput.value = '';
+                disableButton.hidden = true;
+                syncNowButton.hidden = true;
+            });
+
+            const titleRow = document.createElement('div');
+            titleRow.classList.add('wftm-modal-title-row');
+            titleRow.appendChild(title);
+            titleRow.appendChild(closeButton);
+
+            buttonRow.appendChild(disableButton);
+            buttonRow.appendChild(syncNowButton);
+            buttonRow.appendChild(saveButton);
+
+            modal.appendChild(titleRow);
+            modal.appendChild(description);
+            modal.appendChild(urlLabel);
+            modal.appendChild(instructions);
+            modal.appendChild(status);
+            modal.appendChild(buttonRow);
+            backdrop.appendChild(modal);
+            interfaceContainer.appendChild(backdrop);
+
+            setTimeout(() => urlInput.focus(), 0);
         }
 
         function isWfmmMobileFullscreenModalOpen() {
@@ -665,6 +1324,7 @@ function init() {
         }
 
         hookRouteChanges();
+        startTicketSync();
 
         // Initial page-load check: look for the iframe regardless of current route.
         ensureTicketManagerLoaded({ requireHelpRoute: false });
@@ -679,6 +1339,10 @@ function init() {
             if (type === 'sessionValues' && payload && payload.di && payload.aui) {
                 currentSession = payload.aui;
 
+                // A remote tombstone also suppresses the still-active Helpshift
+                // session on an old device so it cannot be recreated locally.
+                if (isTicketSyncTombstoned(payload.aui)) return;
+
                 if (!helpChatSessions[payload.aui]) {
                     helpChatSessions[payload.aui] = {
                         di: payload.di,
@@ -687,6 +1351,7 @@ function init() {
                     saveDataToLocalStorage();
                 }
             } else if (type === 'ticketHistory' && payload) {
+                if (!currentSession || isTicketSyncTombstoned(currentSession)) return;
                 processTicketData(payload);
             }
         });
@@ -724,9 +1389,12 @@ function init() {
         }
 
         function saveDataToLocalStorage() {
+            if (!currentSession || !helpChatSessions[currentSession]) return;
+
             const storedData = JSON.parse(localStorage.getItem(OBJECT_STORE_NAME)) || {};
             storedData[currentSession] = helpChatSessions[currentSession];
             localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(storedData));
+            queueTicketSyncOperation('upsert', currentSession, helpChatSessions[currentSession]);
         }
 
         function refreshPage() {
@@ -806,9 +1474,7 @@ function init() {
 
             if (lastMessage.type === "Confirmation Accepted") {
                 helpChatSessions[currentSession].inProgress = false;
-                const storedData = JSON.parse(localStorage.getItem(OBJECT_STORE_NAME)) || {};
-                storedData[currentSession] = helpChatSessions[currentSession];
-                localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(storedData));
+                saveDataToLocalStorage();
             } else {
                 helpChatSessions[currentSession].inProgress = true;
 
@@ -896,6 +1562,11 @@ function init() {
         }
 
         function removeInterfaceContainer() {
+            const syncModal = document.getElementById('wftmSyncModal');
+            if (syncModal && typeof syncModal._wftmCleanup === 'function') {
+                syncModal._wftmCleanup();
+            }
+
             const interfaceContainer = document.getElementById('ticketInterfaceContainer');
             if (interfaceContainer) {
                 interfaceContainer.remove();
@@ -989,17 +1660,34 @@ function init() {
                     titleText.classList.add('wftm-titleText');
                     textWrapper.appendChild(titleText);
 
+                    const menuButton = document.createElement('button');
+                    menuButton.type = 'button';
+                    menuButton.setAttribute('aria-label', 'Ticket Manager menu');
+                    menuButton.setAttribute('aria-haspopup', 'menu');
+                    menuButton.setAttribute('aria-expanded', 'false');
+                    menuButton.classList.add('wftm-menuButton');
+                    menuButton.textContent = '☰';
+
                     const closeButton = document.createElement('button');
-                    closeButton.setAttribute('aria-label', 'Close chat');
+                    closeButton.type = 'button';
+                    closeButton.setAttribute('aria-label', 'Close Ticket Manager');
                     closeButton.classList.add('wftm-closeButton');
                     closeButton.textContent = '×';
                     closeButton.addEventListener('click', removeInterfaceContainer);
 
+                    const headerActions = document.createElement('div');
+                    headerActions.classList.add('wftm-headerActions');
+                    headerActions.appendChild(menuButton);
+                    headerActions.appendChild(closeButton);
+
                     avatarTitleWrapper.appendChild(avatarWrapper);
                     avatarTitleWrapper.appendChild(textWrapper);
                     header.appendChild(avatarTitleWrapper);
-                    header.appendChild(closeButton);
+                    header.appendChild(headerActions);
                     interfaceContainer.appendChild(header);
+                    interfaceContainer.appendChild(
+                        createTicketManagerMenu(interfaceContainer, menuButton)
+                    );
 
                     // Create the table
                     const table = document.createElement('table');
@@ -1134,68 +1822,13 @@ function init() {
 
                     table.appendChild(tbody);
 
-                    // Create a container for the table with a fixed height and overflow auto
+                    // The table fills the space previously occupied by the
+                    // Export/Import footer. Those actions now live in the header menu.
                     const tableContainer = document.createElement('div');
-                    tableContainer.style.height = '385px';
-                    tableContainer.style.overflow = 'auto';
+                    tableContainer.classList.add('wftm-table-container');
 
                     tableContainer.appendChild(table);
                     interfaceContainer.appendChild(tableContainer);
-
-                    // Export/import controls
-                    const transferContainer = document.createElement("div");
-                    transferContainer.classList.add("wftm-transfer-container");
-
-                    const transferButtons = document.createElement("div");
-                    transferButtons.classList.add("wftm-transfer-buttons");
-
-                    const exportSessionsButton = document.createElement("button");
-                    exportSessionsButton.type = "button";
-                    exportSessionsButton.classList.add("wftm-transfer-button");
-                    exportSessionsButton.textContent = "Export sessions";
-                    exportSessionsButton.title =
-                        "Export all Ticket Manager sessions to a JSON file";
-
-                    const importSessionsButton = document.createElement("button");
-                    importSessionsButton.type = "button";
-                    importSessionsButton.classList.add("wftm-transfer-button");
-                    importSessionsButton.textContent = "Import sessions";
-                    importSessionsButton.title =
-                        "Import Ticket Manager sessions from a JSON file";
-
-                    const importSessionsInput = document.createElement("input");
-                    importSessionsInput.type = "file";
-                    importSessionsInput.accept = ".json,application/json";
-                    importSessionsInput.hidden = true;
-
-                    exportSessionsButton.addEventListener("click", event => {
-                        event.preventDefault();
-                        exportTicketSessions();
-                    });
-
-                    importSessionsButton.addEventListener("click", event => {
-                        event.preventDefault();
-                        importSessionsInput.click();
-                    });
-
-                    importSessionsInput.addEventListener("change", async () => {
-                        const file = importSessionsInput.files?.[0];
-
-                        await importTicketSessionsFile(file);
-
-                        /*
-     * Clearing the value allows the same file to be selected again.
-     */
-                        importSessionsInput.value = "";
-                    });
-
-                    transferButtons.appendChild(exportSessionsButton);
-                    transferButtons.appendChild(importSessionsButton);
-
-                    transferContainer.appendChild(transferButtons);
-                    transferContainer.appendChild(importSessionsInput);
-
-                    interfaceContainer.appendChild(transferContainer);
 
                     document.body.appendChild(interfaceContainer);
                     function deleteTicket(aui) {
@@ -1213,6 +1846,7 @@ function init() {
                         const storedData = JSON.parse(localStorage.getItem(OBJECT_STORE_NAME)) || {};
                         delete storedData[aui];
                         localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(storedData));
+                        queueTicketSyncOperation('delete', aui);
 
                         // Update the visual display of row numbers to the AUI and remove it from the tablege
                         const rows = table.querySelectorAll('tr');
@@ -1250,7 +1884,8 @@ function init() {
     inset: auto 74px 16px auto;
 }
 .wftm-interface-container {
-    display: block;
+    display: flex;
+    flex-direction: column;
     position: fixed;
     inset: auto 16px 75px auto;
     min-height: 500px;
@@ -1270,6 +1905,8 @@ function init() {
 }
 .wftm-header {
     display: flex;
+    position: relative;
+    z-index: 2;
     flex: 0 0 auto;
     align-items: center;
     justify-content: space-between;
@@ -1304,6 +1941,13 @@ function init() {
 .wftm-titleText {
     color: var(--text-color, white);
 }
+.wftm-headerActions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 2px;
+}
+.wftm-menuButton,
 .wftm-closeButton {
     padding: 0;
     margin: 0;
@@ -1317,50 +1961,221 @@ function init() {
     border-radius: 50%;
     display: flex;
     color: white;
+}
+.wftm-menuButton {
+    font-size: 20px;
+    line-height: 1;
+}
+.wftm-closeButton {
     font-size: 24px;
 }
-.wftm-transfer-container {
-    padding: 10px 12px 12px;
+.wftm-menuButton:hover,
+.wftm-closeButton:hover {
+    background: rgba(255, 255, 255, 0.14);
+}
+.wftm-menuButton:focus-visible,
+.wftm-closeButton:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.85);
+    outline-offset: -2px;
+}
+.wftm-menu {
+    position: absolute;
+    top: 54px;
+    right: 12px;
+    z-index: 6;
+    min-width: 170px;
+    padding: 6px;
     background: #ffffff;
-    border-top: 1px solid #d8dde3;
-    box-sizing: border-box;
+    border: 1px solid #d8dde3;
+    border-radius: 8px;
+    box-shadow: rgba(0, 0, 0, 0.22) 0 4px 18px;
 }
-
-.wftm-transfer-warning {
-    margin-bottom: 8px;
-    color: #6b7280;
+.wftm-menu[hidden] {
+    display: none;
+}
+.wftm-menu-item {
+    display: block;
+    width: 100%;
+    padding: 9px 10px;
+    border: 0;
+    border-radius: 5px;
+    color: #111827;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
     font-family: sans-serif;
-    font-size: 11px;
-    line-height: 1.35;
+    font-size: 13px;
 }
-
-.wftm-transfer-buttons {
+.wftm-menu-item:hover,
+.wftm-menu-item:focus-visible {
+    background: #f0f2f4;
+    outline: none;
+}
+.wftm-table-container {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+}
+.wftm-modal-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
     display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    box-sizing: border-box;
+    background: rgba(17, 24, 39, 0.45);
+}
+.wftm-modal {
+    width: 100%;
+    max-width: 340px;
+    padding: 16px;
+    box-sizing: border-box;
+    border-radius: 10px;
+    background: #ffffff;
+    color: #111827;
+    box-shadow: rgba(0, 0, 0, 0.3) 0 8px 28px;
+    font-family: sans-serif;
+}
+.wftm-modal-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: 8px;
 }
-
-.wftm-transfer-button {
-    flex: 1;
-    min-height: 32px;
-    padding: 6px 8px;
-    border: 1px solid #d85813;
+.wftm-modal-title {
+    margin: 0;
+    font-size: 18px;
+    line-height: 1.3;
+}
+.wftm-modal-close {
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: #4b5563;
+    cursor: pointer;
+    font-size: 24px;
+    line-height: 1;
+}
+.wftm-modal-close:hover {
+    background: #f0f2f4;
+}
+.wftm-modal-description {
+    margin: 8px 0 12px;
+    color: #4b5563;
+    font-size: 12px;
+    line-height: 1.4;
+}
+.wftm-field-label {
+    display: block;
+    margin-top: 10px;
+    color: #374151;
+    font-size: 12px;
+    font-weight: 600;
+}
+.wftm-field-input {
+    display: block;
+    width: 100%;
+    margin-top: 5px;
+    padding: 8px 9px;
+    box-sizing: border-box;
+    border: 1px solid #cbd1d8;
     border-radius: 5px;
-    color: #ffffff;
-    background: #d85813;
+    color: #111827;
+    background: #ffffff;
+    font-family: sans-serif;
+    font-size: 12px;
+}
+.wftm-field-input:focus {
+    border-color: #d85813;
+    outline: 2px solid rgba(216, 88, 19, 0.18);
+}
+.wftm-sync-instructions {
+    display: inline-block;
+    margin-top: 10px;
+    color: #b5470e;
+    font-size: 12px;
+    font-weight: 600;
+    text-decoration: none;
+}
+.wftm-sync-instructions:hover {
+    text-decoration: underline;
+}
+.wftm-sync-status {
+    margin-top: 10px;
+    min-height: 16px;
+    color: #6b7280;
+    font-size: 11px;
+    line-height: 1.4;
+}
+.wftm-sync-status[data-kind="success"] {
+    color: #166534;
+}
+.wftm-sync-status[data-kind="warning"] {
+    color: #92400e;
+}
+.wftm-sync-status[data-kind="error"] {
+    color: #b91c1c;
+}
+.wftm-modal-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 7px;
+    margin-top: 14px;
+}
+.wftm-modal-button {
+    min-height: 32px;
+    padding: 6px 9px;
+    border-radius: 5px;
     cursor: pointer;
     font-family: sans-serif;
     font-size: 12px;
     font-weight: 600;
 }
-
-.wftm-transfer-button:hover {
+.wftm-modal-button:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+.wftm-modal-button-primary {
+    border: 1px solid #d85813;
+    color: #ffffff;
+    background: #d85813;
+}
+.wftm-modal-button-primary:hover:not(:disabled) {
     background: #bd4b0f;
 }
-
-.wftm-transfer-button:focus {
+.wftm-modal-button-secondary {
+    border: 1px solid #cbd1d8;
+    color: #374151;
+    background: #ffffff;
+}
+.wftm-modal-button-secondary:hover:not(:disabled) {
+    background: #f0f2f4;
+}
+.wftm-modal-button:focus-visible {
     outline: 2px solid rgba(0, 103, 244, 0.4);
     outline-offset: 1px;
 }
+@media (max-width: 640px) {
+    .wftm-interface-container {
+        inset: 0;
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+        height: 100vh;
+        height: 100dvh;
+        min-height: 0;
+        max-height: none;
+        border-radius: 0;
+    }
+}
+
 `
 
         // Create a style element
