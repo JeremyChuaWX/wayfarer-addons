@@ -1,169 +1,81 @@
-# Wayfarer Ticket Manager 0.7.0 — Ticket Sync
+# Ticket Sync Setup
 
-This package adds optional cross-device Ticket Sync to **Wayfarer Ticket Manager**. Ticket Sync uses a dedicated Google Apps Script web app and a private JSON file in your Google Drive.
+Ticket Sync uses a Google Apps Script web app to keep your Ticket Manager sessions in sync across devices.
 
-The Ticket Sync API is **version 1**.
-
-## What it does
-
-Ticket Manager continues to keep its working sessions in the browser under `helpChatSessions`. When Ticket Sync is configured, it also synchronises those sessions through your Apps Script deployment.
-
-- New tickets and ticket updates sync automatically.
-- Changes from another device are downloaded when Wayfarer opens or becomes active again.
-- Deleted tickets are stored remotely as tombstones so an older device cannot recreate them.
-- **Import Tickets** is treated as an explicit restore and can intentionally restore a previously deleted ticket.
-- **Sync now** is available from the Ticket Sync settings.
-
-> **Keep your Apps Script `/exec` URL private.** Anyone with that URL can access the Ticket Sync endpoint and the Ticket Manager session data stored through it.
-
----
-
-# Set up Ticket Sync
+> **Keep your Web app URL private.** Anyone with the deployed `/exec` URL can access your Ticket Sync endpoint.
 
 ## 1. Create the Apps Script project
 
-1. Sign in to the Google account that will own your Ticket Sync data.
-2. Open [Google Apps Script](https://script.google.com/).
-3. Create a **New project**.
-4. Give it a name such as `Wayfarer Ticket Manager Sync`.
-5. Open the default `Code.gs` file and replace its contents with the `Code.gs` from this package.
+1. Go to [Google Apps Script](https://script.google.com/) and sign in to the Google account you want to use for Ticket Sync.
+2. Select **New project**.
+3. Give the project a name, such as **Wayfarer Ticket Sync**.
+4. Open the default `Code.gs` file.
+5. Replace its contents with the provided `Code.gs` file.
 6. Save the project.
-
-Use a separate Apps Script project for Ticket Sync rather than adding it to Wayfarer Planner.
 
 ## 2. Deploy the web app
 
-1. Choose **Deploy → New deployment**.
-2. Select **Web app**.
-3. Enter a title, e.g. `Ticket sync`
-4. Set **Execute as** to **Me**.
-5. Set **Who has access** to **Anyone**.
-6. Deploy and approve the requested permissions.
+1. Select **Deploy → New deployment**.
+2. Select **Web app** as the deployment type.
+3. Set **Execute as** to **Me**.
+4. Set **Who has access** to **Anyone**.
+5. Select **Deploy**.
+6. Approve the requested Google permissions.
 7. Copy the **Web app URL**.
 
-It should look like:
+The URL should look like:
 
 ```text
 https://script.google.com/macros/s/DEPLOYMENT_ID/exec
 ```
 
-Use the deployed URL ending in `/exec`, not a `/dev` test URL.
+Use the deployed URL ending in `/exec`. Do not use a `/dev` test URL.
 
-The private Drive file `Wayfarer Ticket Manager Sync.json` is created automatically on the first successful sync.
+The private Ticket Sync data file is created automatically in your Google Drive when the first sync is completed.
 
-Do not share the `/exec` URL or the private JSON file.
+## 3. Connect Ticket Sync
 
-## 3. Configure Ticket Manager
+1. Open **Wayfarer Ticket Manager**.
+2. Open the **☰** menu.
+3. Select **Ticket Sync**.
+4. Paste the Web app `/exec` URL.
+5. Select **Save & Sync**.
 
-1. Open Wayfarer.
-2. Open **Wayfarer Ticket Manager**.
-3. Select the **☰** menu beside the close button.
-4. Choose **Ticket Sync**.
-5. Enter the Apps Script `/exec` URL.
-6. Choose **Save & Sync**.
+To use Ticket Sync on another device, enter the same `/exec` URL there.
 
-On another device, install Ticket Manager and enter the same `/exec` URL.
+## Updating `Code.gs`
 
-Ticket Sync runs automatically when:
+If a newer `Code.gs` file is provided:
 
-- Wayfarer starts;
-- a Ticket Manager session is added or updated;
-- a ticket is deleted;
-- the Wayfarer tab becomes visible again;
-- the browser window regains focus.
+1. Replace the contents of `Code.gs` in your Apps Script project.
+2. Save the project.
+3. Select **Deploy → Manage deployments**.
+4. Edit the existing Web app deployment.
+5. Select **New version**.
+6. Deploy the update.
 
-You can also use **☰ → Ticket Sync → Sync now**.
+Updating the existing deployment keeps the same `/exec` URL, so your devices do not need to be configured again.
 
----
+## Resetting synced data
 
-# Sync behaviour
-
-## First sync
-
-If the remote store is empty, the current device uploads its local tickets. If remote records already exist, Ticket Manager merges the remote state with local tickets that have never existed remotely.
-
-## Deletions
-
-Deleting a ticket removes it locally and sends a delete operation to the server. The server keeps a tombstone containing the ticket identifier and revision rather than removing the record entirely.
-
-Other devices remove that ticket on their next sync. A normal update from an older device cannot overwrite the tombstone.
-
-Tombstones are retained indefinitely because they are small and prevent deleted tickets from returning.
-
-## Conflicts
-
-Each remote record has a revision. Normal updates include the revision last seen by that device. If a newer server revision already exists, the stale update is ignored and the newer server state wins.
-
-Deletes always win over normal updates.
-
-Manual **Import Tickets** is the exception: importing a ticket is treated as an explicit restore and can replace a tombstone.
-
----
-
-# Disable Ticket Sync on one device
-
-Open **☰ → Ticket Sync** and choose **Disable Sync**.
-
-This removes the Apps Script URL and sync bookkeeping from that browser. It does not delete local Ticket Manager tickets, remote records, or settings on other devices.
-
-If you configure the same URL again later, the existing remote state and tombstones apply again.
-
----
-
-# Reset all remote Ticket Sync data
-
-To clear all remote tickets and tombstones:
+To clear all synced Ticket Sync data:
 
 1. Open the Apps Script project.
 2. Select `resetTicketSyncData` from the function selector.
-3. Run it.
+3. Select **Run**.
 
-Use this carefully. Once tombstones are cleared, an old device that still contains a deleted ticket can seed it into the empty remote store again.
+This clears the remote Ticket Sync store. Devices that still contain old local tickets may upload them again after the reset.
 
----
+## Troubleshooting
 
-# Updating `Code.gs`
+If Ticket Sync cannot connect, check that:
 
-When a later Ticket Manager release includes an updated backend:
-
-1. Replace the contents of `Code.gs` in your Apps Script project.
-2. Save it.
-3. Choose **Deploy → Manage deployments**.
-4. Edit the existing Web app deployment.
-5. Create or select a **New version** and deploy it.
-
-Keeping the same deployment preserves the `/exec` URL, so Ticket Manager does not need to be reconfigured on each device.
-
----
-
-# Troubleshooting
-
-## API version mismatch
-
-The Ticket Manager userscript and `Code.gs` are from different Ticket Sync API versions. Update both and redeploy the Apps Script web app.
-
-## Failed to fetch / network error
-
-Check that:
-
-- the URL ends in `/exec`;
+- the URL is the deployed `/exec` URL;
 - the deployment type is **Web app**;
-- it executes as the deploying account;
-- access is set to **Anyone**;
-- the current version of `Code.gs` has been deployed rather than only saved.
+- **Execute as** is set to **Me**;
+- **Who has access** is set to **Anyone**;
+- the latest `Code.gs` has been deployed, not only saved in the editor.
 
-Opening the `/exec` URL directly should return:
+Opening the `/exec` URL in a browser should return a small JSON response identifying the Ticket Sync service.
 
-```json
-{"ok":true,"version":1,"service":"Wayfarer Ticket Manager Sync"}
-```
-
-## A deleted ticket returned
-
-Check that every device is using the Ticket Manager build with Ticket Sync and that the deployed Apps Script is API version 1.
-
-A normal stale update cannot replace a tombstone. **Import Tickets** can intentionally restore one.
-
-## The JSON file is visible in Drive
-
-That is expected. It is the private Ticket Sync data store. Do not share it.
+If you update `Code.gs`, remember to create a new deployment version under **Manage deployments**. Saving the script alone does not update the live web app.
