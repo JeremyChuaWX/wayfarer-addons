@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.7.0
+// @version      0.7.1
 // @description  Support for simultaneous tickets with optional cross-device sync
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
@@ -153,6 +153,7 @@ function init() {
     function initWF() {
         let helpChatSessions = JSON.parse(localStorage.getItem(OBJECT_STORE_NAME)) || {};
         let currentSession;
+        let currentSessionCredentials;
         let isTheNextMessageTheWayspotTitle = false;
         let ticketButtonAdded = false;
         let iframeObserverStarted = false;
@@ -1337,21 +1338,21 @@ function init() {
             const { type, payload } = event.data;
 
             if (type === 'sessionValues' && payload && payload.di && payload.aui) {
+                const previousSession = currentSession;
                 currentSession = payload.aui;
+                currentSessionCredentials = {
+                    di: payload.di,
+                    asi: payload.asi
+                };
 
-                // A remote tombstone also suppresses the still-active Helpshift
-                // session on an old device so it cannot be recreated locally.
-                if (isTicketSyncTombstoned(payload.aui)) return;
-
-                if (!helpChatSessions[payload.aui]) {
-                    helpChatSessions[payload.aui] = {
-                        di: payload.di,
-                        asi: payload.asi
-                    };
-                    saveDataToLocalStorage();
+                if (previousSession !== currentSession && document.getElementById('ticketInterfaceContainer')) {
+                    if (document.getElementById('wftmSyncModal')) {
+                        ticketSyncUiNeedsRefresh = true;
+                    } else {
+                        refreshTicketManagerInterface();
+                    }
                 }
             } else if (type === 'ticketHistory' && payload) {
-                if (!currentSession || isTicketSyncTombstoned(currentSession)) return;
                 processTicketData(payload);
             }
         });
@@ -1403,12 +1404,24 @@ function init() {
             }, 50);
         }
 
+        function ensureCurrentSessionStored() {
+            if (!currentSession || isTicketSyncTombstoned(currentSession)) return false;
+            if (helpChatSessions[currentSession]) return true;
+            if (!currentSessionCredentials?.di) return false;
+
+            helpChatSessions[currentSession] = {
+                di: currentSessionCredentials.di,
+                asi: currentSessionCredentials.asi
+            };
+            return true;
+        }
+
         function processTicketData(data) {
             if (data.body) {
-                let messages = [];
-                messages.push(data);
-                processTicketMessages(messages);
-            } else if (data.issues) {
+                if (!ensureCurrentSessionStored()) return;
+                processTicketMessages([data]);
+            } else if (Array.isArray(data.issues) && data.issues.length > 0) {
+                if (!ensureCurrentSessionStored()) return;
                 processTicketUpdate(data);
             }
         }
@@ -1790,6 +1803,32 @@ function init() {
                                 restoreOldTicket({ aui, asi, di });
                             });
                         }
+                    }
+
+                    // Show the current unused Helpshift session without storing or syncing it.
+                    if (currentSession &&
+                        currentSessionCredentials?.di &&
+                        !helpChatSessions[currentSession] &&
+                        !isTicketSyncTombstoned(currentSession)) {
+                        const row = document.createElement('tr');
+
+                        const cellNumber = document.createElement('td');
+                        cellNumber.textContent = index;
+                        cellNumber.style.textAlign = 'center';
+
+                        const cellSummary = document.createElement('td');
+                        cellSummary.style.textAlign = 'left';
+                        cellSummary.textContent = 'No active ticket';
+
+                        const cellRestore = document.createElement('td');
+                        const cellDelete = document.createElement('td');
+
+                        row.appendChild(cellNumber);
+                        row.appendChild(cellSummary);
+                        row.appendChild(cellRestore);
+                        row.appendChild(cellDelete);
+                        tbody.appendChild(row);
+                        index++;
                     }
 
                     // Create the last row for creating a new ticket
