@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.7.1
+// @version      0.8.0
 // @description  Support for simultaneous tickets with optional cross-device sync
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
@@ -59,12 +59,28 @@ function init() {
             if (!isSafeObject(event.data)) return;
             if (event.data.source !== WFTM_SOURCE) return;
 
-            const { type, payload } = event.data;
+            const { type, payload, requestId } = event.data;
 
-            if (type === 'clearSession') {
-                clearLocalStorage();
-            } else if (type === 'restoreSession' && payload && payload.aui) {
-                updateLocalStorage(payload);
+            if (type === 'clearSession' || (type === 'restoreSession' && payload?.aui)) {
+                let success = true;
+                try {
+                    if (type === 'clearSession') {
+                        clearLocalStorage();
+                    } else {
+                        updateLocalStorage(payload);
+                    }
+                } catch (error) {
+                    success = false;
+                    console.error('Ticket Manager: Could not prepare Helpshift session', error);
+                }
+
+                // Do not reload the widget until its own origin has written the session.
+                window.parent.postMessage({
+                    source: WFTM_SOURCE,
+                    type: 'sessionPrepared',
+                    requestId,
+                    payload: { success }
+                }, ORIGIN_WAYFARER);
             }
         }
 
@@ -74,6 +90,9 @@ function init() {
             try {
                 const json = JSON.parse(this.responseText);
                 if (!json) return;
+                // A fresh anonymous identity may be created after this frame loads.
+                // Report its credentials before passing ticket history to the parent.
+                loadAndSendSessionValues();
                 sendTicketHistory(json);
             } catch (ex) {
                 console.error('Error parsing JSON:', ex);
@@ -98,6 +117,8 @@ function init() {
             window.parent.postMessage({
                 source: WFTM_SOURCE,
                 type: 'ticketHistory',
+                // Associate each response with the Helpshift identity that received it.
+                sessionAui: localStorage.getItem('aui:scopelye-2d29204ff805eac'),
                 payload: data
             }, ORIGIN_WAYFARER);
         }
@@ -154,11 +175,26 @@ function init() {
         let helpChatSessions = JSON.parse(localStorage.getItem(OBJECT_STORE_NAME)) || {};
         let currentSession;
         let currentSessionCredentials;
-        let isTheNextMessageTheWayspotTitle = false;
+        // Conversation fragments are associated with the ticket identity and
+        // message ID, rather than a single global "next message" flag.
+        const wayspotMessageCache = new Map();
         let ticketButtonAdded = false;
         let iframeObserverStarted = false;
         let routeHooked = false;
         let waitingForIframe = false;
+        let pendingTicketSwitch = null;
+        let ticketSwitchRequestId = 0;
+        let preserveTicketPanelUntil = 0;
+        let chatWidgetOpen = null;
+        let ticketScan = null;
+        let pausedTicketScan = null;
+        let ticketScanStatus = '';
+        const TICKET_SCAN_RESPONSE_TIMEOUT_MS = 15000;
+        const TICKET_SCAN_SETTLE_MS = 1200;
+        const HELPSHIFT_RECEIVE_SOUND_URL =
+              'https://webchat.helpshift.com/3.151.0/assets/audio/receive.mp3';
+        let unreadSoundTarget = null;
+        let notificationSound = null;
 
         const TICKET_SYNC_CONFIG_KEY = 'wftmSyncConfig';
         const TICKET_SYNC_STATE_KEY = 'wftmSyncState';
@@ -964,8 +1000,16 @@ function init() {
                     handler();
                 });
                 menu.appendChild(button);
+                return button;
             };
 
+            const scanButton = addMenuButton('Check for updates', () => {
+                if (ticketScan) stopTicketScan('Update scan paused.');
+                else if (pausedTicketScan) continueTicketScan();
+                else startTicketScan();
+            });
+            scanButton.classList.add('wftm-scan-action');
+            scanButton.textContent = getTicketScanActionLabel();
             addMenuButton('Ticket Sync', () => openTicketSyncModal(interfaceContainer));
             addMenuButton('Export Tickets', exportTicketSessions);
             addMenuButton('Import Tickets', openTicketImportPicker);
@@ -1156,6 +1200,41 @@ function init() {
             ));
         }
 
+        function keepTicketPanelDuringSwitch() {
+            return Boolean(ticketScan) || Boolean(pendingTicketSwitch) || Date.now() < preserveTicketPanelUntil;
+        }
+
+        function observeChatOpenState() {
+            window.addEventListener('wftm-widget-toggle', event => {
+                chatWidgetOpen = event.detail === true;
+            });
+
+            const script = document.createElement('script');
+            script.textContent = `(() => {
+                if (typeof window.Helpshift === 'function') {
+                    window.Helpshift('addEventListener', 'widgetToggle', data => {
+                        window.dispatchEvent(new CustomEvent('wftm-widget-toggle', {
+                            detail: data.visible === true
+                        }));
+                    });
+                }
+            })();`;
+            document.documentElement.appendChild(script);
+            script.remove();
+        }
+
+        function isHelpChatIframeVisible(iframe) {
+            const style = getComputedStyle(iframe);
+            const rect = iframe.getBoundingClientRect();
+            return style.display !== 'none' && style.visibility !== 'hidden' &&
+                rect.width > 150 && rect.height > 150;
+        }
+
+        function isHelpChatOpen(iframe) {
+            // Prefer the SDK's own toggle state when one has been reported.
+            return chatWidgetOpen ?? isHelpChatIframeVisible(iframe);
+        }
+
         // Mirror normal Helpshift launcher visibility where it is observable,
         // and independently mirror WFMM's mobile fullscreen-modal suppression.
         function syncTicketButtonVisibility() {
@@ -1179,25 +1258,33 @@ function init() {
 
             ticketButton.style.display = hidden ? 'none' : '';
 
-            if (hidden) {
+            if (hidden && (isWfmmMobileFullscreenModalOpen() || !keepTicketPanelDuringSwitch())) {
                 removeInterfaceContainer();
             }
         }
 
-        // Function to observe changes to the Help Chat panel iframe.
-        // Used to detect when the Help Chat is opened.
+        // Reattach the panel observer whenever Helpshift recreates its iframe.
         const observeIframeWidthChanges = () => {
-            const iframe = document.getElementById('hs-web-sdk-iframe');
-            if (iframe) {
-                const observer = new MutationObserver(mutationsList => {
-                    for (const mutation of mutationsList) {
-                        if (mutation.type === 'attributes' && (mutation.attributeName === 'style' || mutation.attributeName === 'min-width' || mutation.attributeName === 'max-width')) {
-                            removeInterfaceContainer();
-                        }
-                    }
-                });
-                observer.observe(iframe, { attributes: true });
-            }
+            let iframe = null;
+            let iframeObserver = null;
+
+            return () => {
+                const nextIframe = document.getElementById('hs-web-sdk-iframe');
+                if (nextIframe === iframe) return;
+
+                iframeObserver?.disconnect();
+                iframe = nextIframe;
+
+                if (iframe) {
+                    iframeObserver = new MutationObserver(() => {
+                        if (!keepTicketPanelDuringSwitch()) removeInterfaceContainer();
+                    });
+                    iframeObserver.observe(iframe, {
+                        attributes: true,
+                        attributeFilter: ['style', 'min-width', 'max-width']
+                    });
+                }
+            };
         };
 
         // Helpshift can hide, show, remove, or recreate its launcher iframe.
@@ -1206,6 +1293,7 @@ function init() {
         const observeHelpLauncherVisibility = () => {
             let launcher = null;
             let launcherObserver = null;
+            const attachIframeObserver = observeIframeWidthChanges();
 
             const attachLauncherObserver = () => {
                 const nextLauncher = document.getElementById('hs-web-sdk-iframe-launcher');
@@ -1227,7 +1315,10 @@ function init() {
                 syncTicketButtonVisibility();
             };
 
-            const documentObserver = new MutationObserver(attachLauncherObserver);
+            const documentObserver = new MutationObserver(() => {
+                attachLauncherObserver();
+                attachIframeObserver();
+            });
             documentObserver.observe(document.documentElement, {
                 childList: true,
                 subtree: true
@@ -1243,6 +1334,7 @@ function init() {
             }
 
             attachLauncherObserver();
+            attachIframeObserver();
         };
 
 
@@ -1283,8 +1375,8 @@ function init() {
                 }
 
                 if (!iframeObserverStarted) {
-                    observeIframeWidthChanges();
                     observeHelpLauncherVisibility();
+                    observeChatOpenState();
                     iframeObserverStarted = true;
                 }
             })
@@ -1298,6 +1390,7 @@ function init() {
             if (isHelpRoute()) {
                 ensureTicketManagerLoaded({ requireHelpRoute: true });
             } else {
+                if (ticketScan) stopTicketScan('Update scan stopped on leaving Help.');
                 removeInterfaceContainer();
             }
         }
@@ -1330,34 +1423,214 @@ function init() {
         // Initial page-load check: look for the iframe regardless of current route.
         ensureTicketManagerLoaded({ requireHelpRoute: false });
 
+        function finishTicketSwitch(success = false) {
+            if (!pendingTicketSwitch) return;
+            const switchedAui = pendingTicketSwitch.aui;
+            clearTimeout(pendingTicketSwitch.timeout);
+            const reopenChat = pendingTicketSwitch.reopenChat === true;
+            pendingTicketSwitch = null;
+            // Allow a delayed chat reopen without the iframe observer closing the manager.
+            preserveTicketPanelUntil = ticketScan ? Infinity : Date.now() + (reopenChat ? 5000 : 2000);
+            if (ticketScan && ticketScan.awaitingAui === switchedAui && !success) {
+                stopTicketScan('Update scan stopped: ticket could not be loaded.');
+            }
+        }
+
+        // Persistent Help Chat and the native site initialise Helpshift in page
+        // context. Run the API there as well, even with userscript isolation.
+        function callHelpshift(command) {
+            let result = null;
+            const handleResult = event => { result = event.detail; };
+            window.addEventListener('wftm-helpshift-reload', handleResult, { once: true });
+
+            const script = document.createElement('script');
+            script.textContent = `(() => {
+                let status = 'ok';
+                try {
+                    if (typeof window.Helpshift !== 'function') {
+                        throw new Error('Helpshift SDK is not available');
+                    }
+                    window.Helpshift(${JSON.stringify(command)});
+                } catch (error) {
+                    console.error('Ticket Manager: Helpshift command failed', error);
+                    status = 'error';
+                }
+                window.dispatchEvent(new CustomEvent('wftm-helpshift-reload', { detail: status }));
+            })();`;
+            document.documentElement.appendChild(script);
+            script.remove();
+            window.removeEventListener('wftm-helpshift-reload', handleResult);
+            return result === 'ok';
+        }
+
+        function reloadHelpWidget() {
+            return callHelpshift('updateHelpshiftConfig');
+        }
+
+        // Restoring a saved identity works through the SDK config reload.
+        // Creating a new anonymous identity needs a fresh iframe document:
+        // the SDK can otherwise retain the current conversation in memory.
+        function reloadHelpIframe() {
+            const iframe = document.getElementById('hs-web-sdk-iframe');
+            if (!iframe) return false;
+
+            const src = iframe.getAttribute('src');
+            if (!src || new URL(src, location.href).origin !== ORIGIN_HELPSHIFT) {
+                console.error('Ticket Manager: Helpshift iframe has no reloadable URL.');
+                return false;
+            }
+
+            const reopenChat = isHelpChatOpen(iframe);
+            if (pendingTicketSwitch) pendingTicketSwitch.reopenChat = reopenChat;
+            const switchId = pendingTicketSwitch?.id;
+
+            // Sync the SDK's open/closed state before replacing only the frame.
+            // Without this, the SDK treats the first launcher click as "close".
+            if (reopenChat && !callHelpshift('close')) return false;
+
+            if (reopenChat) {
+                iframe.addEventListener('load', () => {
+                    // The iframe's load event can precede readiness of the chat app.
+                    // Retry the SDK open command until the window is visibly open.
+                    let attempts = 0;
+                    let visibleChecks = 0;
+                    const reopen = () => {
+                        if (ticketSwitchRequestId !== switchId ||
+                            document.getElementById('hs-web-sdk-iframe') !== iframe) return;
+
+                        if (isHelpChatIframeVisible(iframe)) {
+                            // Ensure the widget stays open through initialisation.
+                            if (++visibleChecks >= 2) return;
+                        } else {
+                            visibleChecks = 0;
+                            if (++attempts > 8) {
+                                console.warn('Ticket Manager: Help Chat did not reopen automatically.');
+                                return;
+                            }
+                            callHelpshift('open');
+                        }
+                        setTimeout(reopen, 400);
+                    };
+                    setTimeout(reopen, 200);
+                }, { once: true });
+            }
+
+            iframe.src = src;
+            return true;
+        }
+
         window.addEventListener('message', function(event) {
             if (event.origin !== ORIGIN_HELPSHIFT) return;
             if (!isSafeObject(event.data)) return;
             if (event.data.source !== WFTM_SOURCE) return;
 
-            const { type, payload } = event.data;
+            // An old iframe must never finish a switch or update ticket metadata.
+            const iframe = document.getElementById('hs-web-sdk-iframe');
+            if (!iframe || event.source !== iframe.contentWindow) return;
 
-            if (type === 'sessionValues' && payload && payload.di && payload.aui) {
-                const previousSession = currentSession;
-                currentSession = payload.aui;
-                currentSessionCredentials = {
-                    di: payload.di,
-                    asi: payload.asi
-                };
+            const { type, payload, requestId, sessionAui } = event.data;
 
-                if (previousSession !== currentSession && document.getElementById('ticketInterfaceContainer')) {
-                    if (document.getElementById('wftmSyncModal')) {
-                        ticketSyncUiNeedsRefresh = true;
-                    } else {
-                        refreshTicketManagerInterface();
+            if (type === 'sessionPrepared') {
+                if (!pendingTicketSwitch ||
+                    pendingTicketSwitch.phase !== 'preparing' ||
+                    requestId !== pendingTicketSwitch.id) return;
+
+                if (!payload?.success) {
+                    console.error('Ticket Manager: Session could not be prepared.');
+                    finishTicketSwitch();
+                    return;
+                }
+
+                pendingTicketSwitch.phase = 'reloading';
+                const creatingNewTicket = pendingTicketSwitch.type === 'clearSession';
+                const reloaded = creatingNewTicket ? reloadHelpIframe() : reloadHelpWidget();
+                if (!reloaded) {
+                    console.error('Ticket Manager: Could not reload Helpshift. Refresh Wayfarer manually.');
+                    finishTicketSwitch();
+                    return;
+                }
+
+                if (creatingNewTicket) {
+                    // Do not associate the fresh conversation with the previous AUI.
+                    currentSession = null;
+                    currentSessionCredentials = null;
+                    refreshTicketManagerTickets();
+                }
+
+                clearTimeout(pendingTicketSwitch.timeout);
+                pendingTicketSwitch.timeout = setTimeout(() => {
+                    console.warn('Ticket Manager: No session confirmation after widget reload. Check the chat; refresh Wayfarer if needed.');
+                    finishTicketSwitch();
+                }, 10000);
+                return;
+            }
+
+            if (type === 'sessionValues') {
+                let bufferedHistory = [];
+                if (pendingTicketSwitch) {
+                    if (pendingTicketSwitch.phase !== 'reloading') return;
+                    if (pendingTicketSwitch.type === 'clearSession') {
+                        // A blank first report is normal while Helpshift generates
+                        // its new anonymous identity. Ignore the previous AUI too.
+                        if (!payload?.di || !payload?.aui ||
+                            payload.aui === pendingTicketSwitch.previousAui) return;
+                    } else if (payload?.aui !== pendingTicketSwitch.aui) {
+                        return;
+                    }
+                    // Helpshift may deliver history before it confirms the new
+                    // identity. Once confirmed, consume only that identity's
+                    // buffered responses rather than losing its first messages.
+                    bufferedHistory = pendingTicketSwitch.queuedHistory || [];
+                    finishTicketSwitch(true);
+                    if (ticketScan?.restoreUnsaved &&
+                        ticketScan.awaitingAui === payload?.aui &&
+                        ticketScan.index >= ticketScan.order.length) {
+                        stopTicketScan(`Update scan complete: ${ticketScan.order.length} tickets checked.`, { complete: true });
                     }
                 }
+
+                const previousSession = currentSession;
+                currentSession = payload?.aui || null;
+                currentSessionCredentials = payload?.di ? {
+                    di: payload.di,
+                    asi: payload.asi
+                } : null;
+                if (previousSession !== currentSession) {
+                    // Keep conversation fragments for their original ticket;
+                    // a different ticket's messages must not alter them.
+                    refreshTicketManagerTickets();
+                }
+                for (const response of bufferedHistory) {
+                    if (response.sessionAui !== currentSession) continue;
+                    processTicketData(response.payload);
+                    notifyIfSwitchedTicketIsUnread(response.payload, response.sessionAui);
+                    processTicketScanResponse(response.payload, response.sessionAui);
+                }
             } else if (type === 'ticketHistory' && payload) {
+                if (pendingTicketSwitch) {
+                    // Buffer only responses known to belong to the new identity.
+                    // Responses from the previous iframe/session are discarded.
+                    const switching = pendingTicketSwitch;
+                    const belongsToNewTicket = switching.phase === 'reloading' &&
+                        sessionAui &&
+                        (switching.type === 'clearSession'
+                            ? sessionAui !== switching.previousAui
+                            : sessionAui === switching.aui);
+                    if (belongsToNewTicket) {
+                        switching.queuedHistory.push({ sessionAui, payload });
+                        if (switching.queuedHistory.length > 30) switching.queuedHistory.shift();
+                    }
+                    return;
+                }
+                // Do not apply a delayed response to the wrong ticket.
+                if (sessionAui && sessionAui !== currentSession) return;
                 processTicketData(payload);
+                notifyIfSwitchedTicketIsUnread(payload, sessionAui);
+                processTicketScanResponse(payload, sessionAui);
             }
         });
 
-        function postToHelp(type, payload = null) {
+        function postToHelp(type, payload = null, requestId = null) {
             const iframe = document.getElementById('hs-web-sdk-iframe');
             if (!iframe || !iframe.contentWindow) {
                 console.warn('Ticket Manager: Helpshift iframe not available');
@@ -1367,26 +1640,86 @@ function init() {
             iframe.contentWindow.postMessage({
                 source: WFTM_SOURCE,
                 type,
-                payload
+                payload,
+                requestId
             }, ORIGIN_HELPSHIFT);
 
             return true;
         }
 
-        function restoreOldTicket(data) {
-            const sent = postToHelp('restoreSession', data);
-            if (!sent) return;
+        function switchTicket(type, data = null) {
+            if (pendingTicketSwitch) return false;
+
+            const id = ++ticketSwitchRequestId;
+            preserveTicketPanelUntil = Infinity;
+            if (!postToHelp(type, data, id)) {
+                preserveTicketPanelUntil = ticketScan ? Infinity : 0;
+                return false;
+            }
 
             saveDataToLocalStorage();
-            refreshPage();
+            // Arm a short-lived unread check only when restoring an identity.
+            // A new ticket and an ordinary incoming message do not need a replay.
+            unreadSoundTarget = type === 'restoreSession' ? {
+                aui: data.aui,
+                expires: Date.now() + 20000
+            } : null;
+            pendingTicketSwitch = {
+                id,
+                type,
+                aui: data?.aui || null,
+                previousAui: currentSession,
+                phase: 'preparing',
+                queuedHistory: [],
+                timeout: setTimeout(() => {
+                    console.warn('Ticket Manager: Helpshift did not confirm the session change. Refresh Wayfarer if needed.');
+                    finishTicketSwitch();
+                }, 5000)
+            };
+            return true;
         }
 
-        function generateNewTicket() {
-            const sent = postToHelp('clearSession');
-            if (!sent) return;
+        // The SDK normally plays this sound when a reply arrives, but not when
+        // switching to a stored identity whose messages are already unread.
+        function playUnreadReplySound() {
+            try {
+                if (!notificationSound) {
+                    notificationSound = new Audio(HELPSHIFT_RECEIVE_SOUND_URL);
+                    notificationSound.preload = 'auto';
+                }
+                notificationSound.currentTime = 0;
+                const playback = notificationSound.play();
+                playback?.catch(error => {
+                    console.warn('Ticket Manager: Unread reply sound could not play', error);
+                });
+            } catch (error) {
+                console.warn('Ticket Manager: Unread reply sound could not play', error);
+            }
+        }
 
-            saveDataToLocalStorage();
-            refreshPage();
+        function notifyIfSwitchedTicketIsUnread(data, sessionAui) {
+            if (!unreadSoundTarget || pendingTicketSwitch ||
+                unreadSoundTarget.aui !== currentSession ||
+                Date.now() > unreadSoundTarget.expires ||
+                (sessionAui && sessionAui !== unreadSoundTarget.aui)) return;
+
+            if (hasUnreadTicketReply(data)) {
+                // A single request may be reported twice by the XHR listener.
+                // Only replay the sound once for each ticket switch.
+                unreadSoundTarget = null;
+                playUnreadReplySound();
+            }
+        }
+
+        function restoreOldTicket(data) {
+            if (ticketScan) stopTicketScan('Update scan stopped by manual ticket selection.');
+            switchTicket('restoreSession', data);
+        }
+
+        function generateNewTicket(event) {
+            event?.preventDefault();
+            if (ticketScan) stopTicketScan('Update scan stopped by creating a ticket.');
+            switchTicket('clearSession');
         }
 
         function saveDataToLocalStorage() {
@@ -1396,12 +1729,6 @@ function init() {
             storedData[currentSession] = helpChatSessions[currentSession];
             localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(storedData));
             queueTicketSyncOperation('upsert', currentSession, helpChatSessions[currentSession]);
-        }
-
-        function refreshPage() {
-            setTimeout(function() {
-                location.reload();
-            }, 50);
         }
 
         function ensureCurrentSessionStored() {
@@ -1417,12 +1744,30 @@ function init() {
         }
 
         function processTicketData(data) {
+            // Conversation responses often update the ticket summary while
+            // the manager is already open. Redraw only when a visible summary
+            // field changes, avoiding unnecessary rebuilds during polling.
+            const previousSessionData = helpChatSessions[currentSession];
+            const previousSummary = previousSessionData
+                ? JSON.stringify([previousSessionData.type, previousSessionData.wayspot, previousSessionData.inProgress])
+                : null;
+
             if (data.body) {
                 if (!ensureCurrentSessionStored()) return;
                 processTicketMessages([data]);
             } else if (Array.isArray(data.issues) && data.issues.length > 0) {
                 if (!ensureCurrentSessionStored()) return;
                 processTicketUpdate(data);
+            } else {
+                return;
+            }
+
+            const updatedSessionData = helpChatSessions[currentSession];
+            const updatedSummary = updatedSessionData
+                ? JSON.stringify([updatedSessionData.type, updatedSessionData.wayspot, updatedSessionData.inProgress])
+                : null;
+            if (previousSummary !== updatedSummary) {
+                refreshTicketManagerTickets();
             }
         }
 
@@ -1483,95 +1828,413 @@ function init() {
         }
 
         function processTicketMessages(messages) {
+            if (!Array.isArray(messages) || !messages.length || !currentSession) return;
+            const session = helpChatSessions[currentSession];
+            if (!session) return;
+
             const lastMessage = messages[messages.length - 1];
+            session.inProgress = lastMessage.type !== 'Confirmation Accepted';
 
-            if (lastMessage.type === "Confirmation Accepted") {
-                helpChatSessions[currentSession].inProgress = false;
-                saveDataToLocalStorage();
-            } else {
-                helpChatSessions[currentSession].inProgress = true;
-
-                let wayspotFound = false;
-                let wayspotName = '';
-                let wayspotTimestamp;
-
-                const wayspotQuestions = [
-                    { lang: 'en', question: "What is the name of the Wayspot?" },
-                    { lang: 'cs', question: "Jak se jmenuje WaysPot?" },
-                    { lang: 'de', question: "Wie heißt der Waypot?" },
-                    { lang: 'es', question: "¿Cuál es el nombre de Wayspot?" },
-                    { lang: 'fr', question: "Quel est le nom du Wayspot?" },
-                    { lang: 'it', question: "Qual è il nome di The Wayspot?" },
-                    { lang: 'ja', question: "Wayspotの名前は何ですか？" },
-                    { lang: 'ko', question: "Wayspot의 이름은 무엇입니까?" },
-                    { lang: 'pt', question: "Qual é o nome do Wayspot?" },
-                    { lang: 'nl', question: "Wat is de naam van de WaySpot?" },
-                    { lang: 'no', question: "Hva heter WaysPot?" },
-                    { lang: 'pl', question: "Jak nazywa się Wayspot?" },
-                    { lang: 'sv', question: "Vad heter The WaysPot?" },
-                    { lang: 'th', question: "Wayspot ชื่ออะไร?" },
-                    { lang: 'zh', question: "Wayspot的名稱是什麼？" },
-                    { lang: 'hi', question: "तरीके का नाम क्या है?" },
-                    { lang: 'tr', question: "Wayspot'un adı nedir?" },
-                ];
-
-                for (let i = 0; i < wayspotQuestions.length; i++) {
-                    const currentQuestion = decodeHTMLEntities(wayspotQuestions[i].question);
-                    const decodedLastMessage = decodeHTMLEntities(lastMessage.body);
-                    if (decodedLastMessage === currentQuestion) {
-                        isTheNextMessageTheWayspotTitle = true;
-                        break;
-                    }
-                }
-
-                if (messages.length > 1) {
-                    for (let i = messages.length - 1; i >= 0; i--) {
-                        const currentMessage = messages[i];
-                        const nextMessage = messages[i + 1];
-
-                        if (currentMessage && currentMessage.body && nextMessage && nextMessage.body) {
-                            for (let i = 0; i < wayspotQuestions.length; i++) {
-                                const currentQuestion = decodeHTMLEntities(wayspotQuestions[i].question);
-                                const currentBody = decodeHTMLEntities(currentMessage.body);
-                                if (currentBody === currentQuestion && nextMessage.body) {
-                                    wayspotFound = true;
-                                    wayspotName = decodeHTMLEntities(nextMessage.body);
-                                    wayspotTimestamp = nextMessage.created_at;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                } else if (messages.length === 1) {
-                    const currentMessage = messages[0];
-                    const currentBody = decodeHTMLEntities(currentMessage.body);
-
-                    // Check if current message matches any known "Wayspot question"
-                    // This is a backup to stop it putting "What is the name of the Wayspot?" as the Wayspot title
-                    const isCurrentMessageAQuestion = wayspotQuestions.some(q =>
-                                                                            currentBody === decodeHTMLEntities(q.question)
-                                                                           );
-
-                    if (isTheNextMessageTheWayspotTitle && !isCurrentMessageAQuestion) {
-                        wayspotName = currentBody;
-                        wayspotTimestamp = currentMessage.created_at;
-                        wayspotFound = true;
-                        isTheNextMessageTheWayspotTitle = false;
-                    }
-                }
-
-                if (wayspotFound) {
-                    const currentSessionData = helpChatSessions[currentSession];
-                    const existingWayspotTimestamp = currentSessionData.wayspotTimestamp || 0;
-
-                    if (wayspotTimestamp > existingWayspotTimestamp) {
-                        currentSessionData.wayspot = wayspotName;
-                        currentSessionData.wayspotTimestamp = wayspotTimestamp;
-                    }
-                }
-
-                saveDataToLocalStorage();
+            // New-ticket messages can arrive in separate API responses, and may
+            // be processed out of order. Accumulate question and user-answer
+            // fragments by message ID for this ticket, then order by timestamp.
+            let cache = wayspotMessageCache.get(currentSession);
+            if (!cache) {
+                cache = new Map();
+                wayspotMessageCache.set(currentSession, cache);
             }
+
+            const wayspotQuestions = [
+                'What is the name of the Wayspot?',
+                'Jak se jmenuje WaysPot?',
+                'Wie heißt der Waypot?',
+                '¿Cuál es el nombre de Wayspot?',
+                'Quel est le nom du Wayspot?',
+                'Qual è il nome di The Wayspot?',
+                'Wayspotの名前は何ですか？',
+                'Wayspot의 이름은 무엇입니까?',
+                'Qual é o nome do Wayspot?',
+                'Wat is de naam van de WaySpot?',
+                'Hva heter WaysPot?',
+                'Jak nazywa się Wayspot?',
+                'Vad heter The WaysPot?',
+                'Wayspot ชื่ออะไร?',
+                'Wayspot的名稱是什麼？',
+                'तरीके का नाम क्या है?',
+                "Wayspot'un adı nedir?"
+            ].map(decodeHTMLEntities);
+
+            for (const message of messages) {
+                if (!message || typeof message.body !== 'string' || !message.body) continue;
+                const body = decodeHTMLEntities(message.body);
+                const isQuestion = wayspotQuestions.includes(body);
+                const fromUser = message.origin !== 'admin' && (
+                    message.author?.roles?.includes('user') ||
+                    message.author?.role === 'u' ||
+                    ['mobile', 'webmessenger'].includes(message.origin) ||
+                    /Input Response/i.test(message.type || '')
+                );
+                if (!isQuestion && !fromUser) continue;
+
+                const timestamp = Number(message.created_at);
+                if (!Number.isFinite(timestamp)) continue;
+                const key = message.id || `${timestamp}:${message.type}:${body}`;
+                cache.set(key, { timestamp, body, isQuestion, fromUser });
+            }
+
+            // Avoid retaining unbounded history while switching many tickets.
+            if (cache.size > 60) {
+                const latest = [...cache.entries()]
+                    .sort((a, b) => b[1].timestamp - a[1].timestamp)
+                    .slice(0, 60);
+                cache.clear();
+                for (const [key, value] of latest) cache.set(key, value);
+            }
+
+            const issueCreatedAt = Number(session.ticketTypeTimestamp);
+            const earliest = Number.isFinite(issueCreatedAt) ? issueCreatedAt : -Infinity;
+            const timeline = [...cache.values()]
+                .filter(message => message.timestamp >= earliest)
+                .sort((a, b) => a.timestamp - b.timestamp);
+            let awaitingAnswer = false;
+            let latestAnswer = null;
+            for (const message of timeline) {
+                if (message.isQuestion) {
+                    awaitingAnswer = true;
+                } else if (awaitingAnswer && message.fromUser) {
+                    latestAnswer = message;
+                    awaitingAnswer = false;
+                }
+            }
+
+            if (latestAnswer && latestAnswer.timestamp > (session.wayspotTimestamp || 0)) {
+                session.wayspot = latestAnswer.body;
+                session.wayspotTimestamp = latestAnswer.timestamp;
+            }
+            saveDataToLocalStorage();
+        }
+
+        function getTicketScanActionLabel() {
+            return ticketScan ? 'Stop update scan' :
+                pausedTicketScan ? 'Continue update scan' : 'Check for updates';
+        }
+
+        function showTicketScanStatus(message) {
+            ticketScanStatus = message;
+            document.querySelectorAll('.wftm-scan-status').forEach(element => {
+                element.textContent = message;
+                element.hidden = !message;
+            });
+            document.querySelectorAll('.wftm-scan-action').forEach(button => {
+                button.textContent = getTicketScanActionLabel();
+            });
+        }
+
+        // The conversation response reports individual message read states. Ignore
+        // preissues and non-display bot lifecycle events, which can stay "sent".
+        function hasUnreadTicketReply(data) {
+            const issues = Array.isArray(data.issues) ? data.issues :
+                (data.type === 'issue' ? [data] : []);
+            return issues.some(issue => issue.type === 'issue' &&
+                Array.isArray(issue.messages) && issue.messages.some(message =>
+                    message?.origin === 'admin' && message.state === 'sent' &&
+                    !['Bot Started', 'Bot Ended'].includes(message.type)
+                ));
+        }
+
+        function stopTicketScan(message, options = {}) {
+            const scan = ticketScan;
+            if (!scan) return;
+            clearTimeout(scan.timeout);
+            clearTimeout(scan.settleTimer);
+            clearTimeout(scan.nextTimer);
+            ticketScan = null;
+            scan.timeout = scan.settleTimer = scan.nextTimer = null;
+
+            if (options.complete) {
+                // The next Check for updates starts a new lap.
+                pausedTicketScan = null;
+            } else {
+                // A reply has been confirmed on this ticket, so resume AFTER it.
+                // An interrupted/incomplete ticket must instead be retried.
+                if (scan.awaitingHistory && !options.checkedCurrent) {
+                    scan.index = Math.max(0, scan.index - 1);
+                }
+                scan.awaitingHistory = false;
+                scan.awaitingAui = null;
+                scan.gotResponse = false;
+                pausedTicketScan = scan;
+            }
+
+            preserveTicketPanelUntil = Date.now() + 3000;
+            showTicketScanStatus(message);
+
+            // Restore the user's original chat state. An unread reply should
+            // not open a chat that was closed when the scan started.
+            if (scan.wasChatOpen) {
+                if (!callHelpshift('open')) {
+                    console.warn('Ticket Manager: Could not reopen Help Chat after scan.');
+                }
+            }
+        }
+
+        function finishTicketScan() {
+            const scan = ticketScan;
+            if (!scan) return;
+            const originalAui = scan.originalAui;
+
+            // The saved starting ticket is deliberately the last item in a lap.
+            // If the user began on an unused identity, restore it as well.
+            if (scan.restoreUnsaved && originalAui !== currentSession) {
+                // Keep the return-to-start requirement until sessionValues confirms it.
+                // If the switch is interrupted, Continue can retry this final step.
+                scan.awaitingAui = originalAui;
+                scan.awaitingHistory = false;
+                showTicketScanStatus('Returning to starting ticket…');
+                const original = scan.originalCredentials;
+                if (!switchTicket('restoreSession', {
+                    aui: originalAui, di: original.di, asi: original.asi
+                })) {
+                    stopTicketScan('Update scan stopped: could not restore starting ticket.');
+                } else {
+                    scan.timeout = setTimeout(() => {
+                        stopTicketScan('Update scan stopped: starting ticket did not reload.');
+                    }, TICKET_SCAN_RESPONSE_TIMEOUT_MS);
+                }
+                return;
+            }
+            stopTicketScan(`Update scan complete: ${scan.order.length} tickets checked.`, { complete: true });
+        }
+
+        function advanceTicketScan() {
+            const scan = ticketScan;
+            if (!scan) return;
+            clearTimeout(scan.timeout);
+            clearTimeout(scan.settleTimer);
+            scan.timeout = null;
+            scan.settleTimer = null;
+
+            if (scan.index >= scan.order.length) {
+                finishTicketScan();
+                return;
+            }
+
+            const aui = scan.order[scan.index];
+            const session = helpChatSessions[aui];
+            if (!isValidTicketSession(session)) {
+                stopTicketScan('Update scan stopped: ticket is no longer available.');
+                return;
+            }
+
+            scan.index++;
+            scan.awaitingAui = aui;
+            scan.awaitingHistory = true;
+            scan.gotResponse = false;
+            showTicketScanStatus(`Checking ticket ${scan.positionByAui.get(aui)} (${scan.index} of ${scan.order.length})…`);
+
+            if (!switchTicket('restoreSession', { aui, di: session.di, asi: session.asi })) {
+                stopTicketScan('Update scan stopped: ticket switch failed.');
+                return;
+            }
+
+            // Never silently skip a ticket when Helpshift gives no response.
+            scan.timeout = setTimeout(() => {
+                stopTicketScan(`Update scan stopped: ticket ${scan.index} did not respond.`);
+            }, TICKET_SCAN_RESPONSE_TIMEOUT_MS);
+        }
+
+        function processTicketScanResponse(data, sessionAui) {
+            const scan = ticketScan;
+            if (!scan || !scan.awaitingHistory || !scan.awaitingAui ||
+                scan.awaitingAui !== currentSession ||
+                (sessionAui && sessionAui !== scan.awaitingAui)) return;
+
+            // Either a conversation list or an issue detail can carry the state.
+            if (!Array.isArray(data.issues) &&
+                !(data.type === 'issue' && Array.isArray(data.messages))) return;
+
+            if (hasUnreadTicketReply(data)) {
+                const ticketNumber = scan.positionByAui.get(scan.awaitingAui);
+                stopTicketScan(`Unread Wayfarer reply found in ticket ${ticketNumber}.`, { checkedCurrent: true });
+                return;
+            }
+
+            // An empty update may be followed by fuller conversation history;
+            // give the SDK a moment to return the rest before advancing.
+            scan.gotResponse = true;
+            clearTimeout(scan.settleTimer);
+            scan.settleTimer = setTimeout(() => {
+                if (ticketScan !== scan) return;
+                advanceTicketScan();
+            }, TICKET_SCAN_SETTLE_MS);
+        }
+
+        function continueTicketScan() {
+            if (!pausedTicketScan || ticketScan) return;
+            if (pendingTicketSwitch) {
+                showTicketScanStatus('Wait for the current ticket to finish loading before continuing.');
+                return;
+            }
+
+            const iframe = document.getElementById('hs-web-sdk-iframe');
+            if (!iframe) {
+                showTicketScanStatus('Help Chat is not available.');
+                return;
+            }
+
+            const wasChatOpen = isHelpChatOpen(iframe);
+            if (wasChatOpen && !callHelpshift('close')) {
+                showTicketScanStatus('Could not close chat to continue checking unread messages.');
+                return;
+            }
+
+            ticketScan = pausedTicketScan;
+            pausedTicketScan = null;
+            // If chat was opened to read a reply during the pause, restore
+            // that open state once the remaining scan finishes.
+            ticketScan.wasChatOpen ||= wasChatOpen;
+            preserveTicketPanelUntil = Infinity;
+            showTicketScanStatus(`Continuing update scan (${ticketScan.index} of ${ticketScan.order.length} checked)…`);
+            ticketScan.nextTimer = setTimeout(advanceTicketScan, wasChatOpen ? 500 : 0);
+        }
+
+        function startTicketScan() {
+            if (ticketScan || pausedTicketScan || pendingTicketSwitch) return;
+            const saved = Object.keys(helpChatSessions).filter(aui =>
+                !isTicketSyncTombstoned(aui) && isValidTicketSession(helpChatSessions[aui]));
+            if (!saved.length) {
+                showTicketScanStatus('No saved tickets to check.');
+                return;
+            }
+
+            const iframe = document.getElementById('hs-web-sdk-iframe');
+            if (!iframe) {
+                showTicketScanStatus('Help Chat is not available.');
+                return;
+            }
+
+            const startingIndex = saved.indexOf(currentSession);
+            // Starting at ticket 6 means 7..n, 1..5, and 6 last.
+            const order = startingIndex >= 0
+                ? saved.slice(startingIndex + 1).concat(saved.slice(0, startingIndex + 1))
+                : saved;
+            const wasChatOpen = isHelpChatOpen(iframe);
+            if (wasChatOpen && !callHelpshift('close')) {
+                showTicketScanStatus('Could not close chat to check unread messages.');
+                return;
+            }
+
+            ticketScan = {
+                order,
+                positionByAui: new Map(saved.map((aui, index) => [aui, index + 1])),
+                index: 0,
+                originalAui: currentSession,
+                originalCredentials: currentSessionCredentials,
+                restoreUnsaved: startingIndex < 0 && Boolean(currentSession && currentSessionCredentials?.di),
+                wasChatOpen,
+                awaitingAui: null,
+                awaitingHistory: false,
+                timeout: null,
+                settleTimer: null,
+                nextTimer: null
+            };
+            showTicketScanStatus('Starting update scan…');
+            // Give the SDK's close operation a chance to take effect, so
+            // automatically viewing a conversation cannot mark it as read.
+            ticketScan.nextTimer = setTimeout(advanceTicketScan, wasChatOpen ? 500 : 0);
+        }
+
+        function refreshTicketManagerTickets() {
+            const container = document.getElementById('ticketInterfaceContainer');
+            const tbody = container?.querySelector('.wftm-table-container tbody');
+            if (!tbody) return;
+
+            const scrollContainer = tbody.closest('.wftm-table-container');
+            const scrollTop = scrollContainer.scrollTop;
+            tbody.replaceChildren();
+            let index = 1;
+
+            for (const [aui, session] of Object.entries(helpChatSessions)) {
+                const row = document.createElement('tr');
+                const number = document.createElement('td');
+                number.textContent = index++;
+                number.style.textAlign = 'center';
+
+                const summary = document.createElement('td');
+                summary.style.textAlign = 'left';
+                if (!session.type) {
+                    summary.textContent = 'No active ticket';
+                } else {
+                    summary.textContent =
+                        (session.inProgress === false ? '[Previous ticket] ' : '') +
+                        session.type + (session.wayspot ? `: ${session.wayspot}` : '');
+                }
+
+                const restore = document.createElement('td');
+                restore.style.textAlign = 'center';
+                if (aui !== currentSession) {
+                    const restoreIcon = document.createElement('span');
+                    restoreIcon.textContent = '♻️';
+                    restoreIcon.style.cursor = 'pointer';
+                    restoreIcon.addEventListener('click', () => {
+                        const selected = helpChatSessions[aui];
+                        if (selected) restoreOldTicket({ aui, asi: selected.asi, di: selected.di });
+                    });
+                    restore.appendChild(restoreIcon);
+                }
+
+                const remove = document.createElement('td');
+                remove.style.textAlign = 'center';
+                const removeIcon = document.createElement('span');
+                removeIcon.textContent = '🗑️';
+                removeIcon.style.cursor = 'pointer';
+                removeIcon.addEventListener('click', () => {
+                    delete helpChatSessions[aui];
+                    const stored = JSON.parse(localStorage.getItem(OBJECT_STORE_NAME)) || {};
+                    delete stored[aui];
+                    localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(stored));
+                    queueTicketSyncOperation('delete', aui);
+                    refreshTicketManagerTickets();
+                    if (Object.keys(helpChatSessions).length === 0) generateNewTicket();
+                });
+                remove.appendChild(removeIcon);
+
+                row.append(number, summary, restore, remove);
+                tbody.appendChild(row);
+            }
+
+            // Display a newly generated, unused Helpshift identity without
+            // writing it to storage or synchronising it.
+            if (currentSession && currentSessionCredentials?.di &&
+                !helpChatSessions[currentSession] && !isTicketSyncTombstoned(currentSession)) {
+                const row = document.createElement('tr');
+                for (const value of [index++, 'No active ticket', '', '']) {
+                    const cell = document.createElement('td');
+                    cell.textContent = value;
+                    row.appendChild(cell);
+                }
+                row.cells[0].style.textAlign = 'center';
+                row.cells[1].style.textAlign = 'left';
+                tbody.appendChild(row);
+            }
+
+            const newRow = document.createElement('tr');
+            const number = document.createElement('td');
+            number.textContent = index;
+            number.style.textAlign = 'center';
+
+            const newTicketCell = document.createElement('td');
+            newTicketCell.style.textAlign = 'left';
+            const newTicketLink = document.createElement('a');
+            newTicketLink.href = '#';
+            newTicketLink.textContent = 'Create a new ticket';
+            newTicketLink.style.fontWeight = 'bold';
+            newTicketLink.addEventListener('click', generateNewTicket);
+            newTicketCell.appendChild(newTicketLink);
+            newRow.append(number, newTicketCell,
+                document.createElement('td'), document.createElement('td'));
+            tbody.appendChild(newRow);
+            scrollContainer.scrollTop = scrollTop;
         }
 
         function removeInterfaceContainer() {
@@ -1643,6 +2306,7 @@ function init() {
             ticketSwitchButton.addEventListener('click', function() {
                 if (document.getElementById('ticketInterfaceContainer')) {
                     // If interfaceContainer exists, remove it to prevent doubles
+                    if (ticketScan) stopTicketScan('Update scan stopped.');
                     removeInterfaceContainer();
                 } else {
                     // If interfaceContainer doesn't exist, create it
@@ -1686,7 +2350,10 @@ function init() {
                     closeButton.setAttribute('aria-label', 'Close Ticket Manager');
                     closeButton.classList.add('wftm-closeButton');
                     closeButton.textContent = '×';
-                    closeButton.addEventListener('click', removeInterfaceContainer);
+                    closeButton.addEventListener('click', () => {
+                        if (ticketScan) stopTicketScan('Update scan stopped.');
+                        removeInterfaceContainer();
+                    });
 
                     const headerActions = document.createElement('div');
                     headerActions.classList.add('wftm-headerActions');
@@ -1701,6 +2368,13 @@ function init() {
                     interfaceContainer.appendChild(
                         createTicketManagerMenu(interfaceContainer, menuButton)
                     );
+
+                    const scanStatus = document.createElement('div');
+                    scanStatus.className = 'wftm-scan-status';
+                    scanStatus.setAttribute('role', 'status');
+                    scanStatus.textContent = ticketScanStatus;
+                    scanStatus.hidden = !ticketScanStatus;
+                    interfaceContainer.appendChild(scanStatus);
 
                     // Create the table
                     const table = document.createElement('table');
@@ -1737,170 +2411,16 @@ function init() {
                     thead.appendChild(headerRow);
                     table.appendChild(thead);
 
-                    // Populate table with helpChatSessions data
-                    let index = 1;
-                    for (const key in helpChatSessions) {
-                        const rowData = helpChatSessions[key];
-                        const row = document.createElement('tr');
-
-                        // Create and style the cells
-                        const cellNumber = document.createElement('td');
-                        cellNumber.textContent = index;
-                        cellNumber.style.textAlign = 'center';
-
-                        const cellSummary = document.createElement('td');
-                        cellSummary.style.textAlign = 'left';
-                        if (rowData.inProgress === false || !rowData.type) {
-                            if (!rowData.type) {
-                                cellSummary.textContent = 'No active ticket';
-                            } else {
-                                cellSummary.textContent = `[Previous ticket] ${rowData.type}`;
-                                if (rowData.wayspot) {
-                                    cellSummary.textContent += `: ${rowData.wayspot}`;
-                                }
-                            }
-                        } else {
-                            cellSummary.textContent = rowData.type;
-                            if (rowData.wayspot) {
-                                cellSummary.textContent += `: ${rowData.wayspot}`;
-                            }
-                        }
-
-                        const cellRestore = document.createElement('td');
-                        cellRestore.style.textAlign = 'center';
-                        if (key !== currentSession) {
-                            const restoreText = document.createElement('span');
-                            restoreText.style.cursor = 'pointer';
-                            restoreText.textContent = '♻️';
-                            cellRestore.appendChild(restoreText);
-                        }
-
-                        const cellDelete = document.createElement('td');
-                        cellDelete.style.textAlign = 'center';
-                        const deleteText = document.createElement('span');
-                        deleteText.style.cursor = 'pointer';
-                        deleteText.textContent = '🗑️';
-                        cellDelete.appendChild(deleteText);
-
-                        row.appendChild(cellNumber);
-                        row.appendChild(cellSummary);
-                        row.appendChild(cellRestore);
-                        row.appendChild(cellDelete);
-                        tbody.appendChild(row);
-                        index++;
-
-                        cellDelete.addEventListener('click', function() {
-                            const aui = key;
-                            // Handle delete action using aui value
-                            deleteTicket(aui);
-                        });
-
-                        if (key !== currentSession) {
-                            cellRestore.addEventListener('click', function() {
-                                const aui = key;
-                                const asi = helpChatSessions[aui].asi;
-                                const di = helpChatSessions[aui].di;
-                                restoreOldTicket({ aui, asi, di });
-                            });
-                        }
-                    }
-
-                    // Show the current unused Helpshift session without storing or syncing it.
-                    if (currentSession &&
-                        currentSessionCredentials?.di &&
-                        !helpChatSessions[currentSession] &&
-                        !isTicketSyncTombstoned(currentSession)) {
-                        const row = document.createElement('tr');
-
-                        const cellNumber = document.createElement('td');
-                        cellNumber.textContent = index;
-                        cellNumber.style.textAlign = 'center';
-
-                        const cellSummary = document.createElement('td');
-                        cellSummary.style.textAlign = 'left';
-                        cellSummary.textContent = 'No active ticket';
-
-                        const cellRestore = document.createElement('td');
-                        const cellDelete = document.createElement('td');
-
-                        row.appendChild(cellNumber);
-                        row.appendChild(cellSummary);
-                        row.appendChild(cellRestore);
-                        row.appendChild(cellDelete);
-                        tbody.appendChild(row);
-                        index++;
-                    }
-
-                    // Create the last row for creating a new ticket
-                    const lastRow = document.createElement('tr');
-
-                    // Create and style the cells
-                    const cellNumberLast = document.createElement('td');
-                    cellNumberLast.textContent = index;
-                    cellNumberLast.style.textAlign = 'center';
-
-                    const cellSummaryNew = document.createElement('td');
-                    cellSummaryNew.style.textAlign = 'left';
-                    const linkNewTicket = document.createElement('a');
-                    linkNewTicket.href = '#';
-                    linkNewTicket.textContent = 'Create a new ticket';
-                    linkNewTicket.style.fontWeight = 'bold';
-                    linkNewTicket.addEventListener('click', generateNewTicket);
-                    cellSummaryNew.appendChild(linkNewTicket);
-
-                    // Create empty cells for the last two columns
-                    const cellEmpty1 = document.createElement('td');
-                    const cellEmpty2 = document.createElement('td');
-
-                    // Append cells to the last row
-                    lastRow.appendChild(cellNumberLast);
-                    lastRow.appendChild(cellSummaryNew);
-                    lastRow.appendChild(cellEmpty1);
-                    lastRow.appendChild(cellEmpty2);
-                    tbody.appendChild(lastRow);
-
+                    // Populate the table in place, so selecting a ticket never
+                    // destroys the Ticket Manager panel.
                     table.appendChild(tbody);
 
-                    // The table fills the space previously occupied by the
-                    // Export/Import footer. Those actions now live in the header menu.
                     const tableContainer = document.createElement('div');
                     tableContainer.classList.add('wftm-table-container');
-
                     tableContainer.appendChild(table);
                     interfaceContainer.appendChild(tableContainer);
-
                     document.body.appendChild(interfaceContainer);
-                    function deleteTicket(aui) {
-                        // Find the index of the aui in the keys of helpChatSessions
-                        const keys = Object.keys(helpChatSessions);
-                        const index = keys.indexOf(aui);
-
-                        // Remove the corresponding row from the table
-                        table.deleteRow(index + 1); // Add 1 to offset the header row
-
-                        // Remove the aui from helpChatSessions
-                        delete helpChatSessions[aui];
-
-                        // Remove the aui entry from local storage
-                        const storedData = JSON.parse(localStorage.getItem(OBJECT_STORE_NAME)) || {};
-                        delete storedData[aui];
-                        localStorage.setItem(OBJECT_STORE_NAME, JSON.stringify(storedData));
-                        queueTicketSyncOperation('delete', aui);
-
-                        // Update the visual display of row numbers to the AUI and remove it from the tablege
-                        const rows = table.querySelectorAll('tr');
-                        let rowIndex = 1; // Start from 1 to match the initial index
-                        for (let i = 1; i < rows.length; i++) {
-                            const row = rows[i];
-                            row.cells[0].textContent = rowIndex;
-                            rowIndex++;
-                        }
-
-                        // Check if helpChatSessions is empty and generate a new ticket if so
-                        if (Object.keys(helpChatSessions).length === 0) {
-                            generateNewTicket();
-                        }
-                    }
+                    refreshTicketManagerTickets();
                 }
             });
         }
@@ -1942,6 +2462,17 @@ function init() {
     box-shadow: rgba(0, 0, 0, 0.2) 0px 4px 32px;
     animation: 0.3s cubic-bezier(0.25, 0.1, 0.25, 1) 0s 1 normal none running hs-websdk-slide-up;
 }
+/* Visible while checking tickets, and keeps the final result available. */
+.wftm-scan-status {
+    flex: 0 0 auto;
+    padding: 8px 13px;
+    color: #374151;
+    background-color: #fff5ea;
+    font-family: sans-serif;
+    font-size: 12px;
+    line-height: 1.4;
+}
+.wftm-scan-status[hidden] { display: none; }
 .wftm-header {
     display: flex;
     position: relative;
