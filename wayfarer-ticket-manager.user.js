@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.8.0
+// @version      0.9.0
 // @description  Support for simultaneous tickets with optional cross-device sync
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
@@ -184,13 +184,12 @@ function init() {
         let waitingForIframe = false;
         let pendingTicketSwitch = null;
         let ticketSwitchRequestId = 0;
-        let preserveTicketPanelUntil = 0;
         let chatWidgetOpen = null;
         let ticketScan = null;
         let pausedTicketScan = null;
         let ticketScanStatus = '';
         const TICKET_SCAN_RESPONSE_TIMEOUT_MS = 15000;
-        const TICKET_SCAN_SETTLE_MS = 1200;
+        const TICKET_SCAN_SETTLE_MS = 100;
         const HELPSHIFT_RECEIVE_SOUND_URL =
               'https://webchat.helpshift.com/3.151.0/assets/audio/receive.mp3';
         let unreadSoundTarget = null;
@@ -1200,10 +1199,6 @@ function init() {
             ));
         }
 
-        function keepTicketPanelDuringSwitch() {
-            return Boolean(ticketScan) || Boolean(pendingTicketSwitch) || Date.now() < preserveTicketPanelUntil;
-        }
-
         function observeChatOpenState() {
             window.addEventListener('wftm-widget-toggle', event => {
                 chatWidgetOpen = event.detail === true;
@@ -1235,6 +1230,38 @@ function init() {
             return chatWidgetOpen ?? isHelpChatIframeVisible(iframe);
         }
 
+        // Follow the visible 48px Helpshift button, which sits 16px inside
+        // its 80px launcher iframe. Preserve the original 58px gap between
+        // button edges and their common vertical alignment.
+        function syncTicketManagerPosition() {
+            const launcher = document.getElementById('hs-web-sdk-iframe-launcher');
+            const button = document.querySelector('.wftm-containerDiv');
+            if (!launcher || !button) return;
+
+            const chat = launcher.getBoundingClientRect();
+            if (!chat.width || !chat.height) return;
+
+            const left = chat.right - 16 - button.offsetWidth - 58;
+            const top = chat.bottom - 16 - button.offsetHeight;
+            button.style.left = `${left}px`;
+            button.style.top = `${top}px`;
+            button.style.visibility = 'visible';
+
+            const panel = document.getElementById('ticketInterfaceContainer');
+            if (!panel) return;
+
+            // Keep the existing full-screen layout on small screens. Desktop
+            // positioning is always derived from the ticket launcher instead.
+            if (window.matchMedia?.('(max-width: 640px)').matches) {
+                panel.style.left = '';
+                panel.style.top = '';
+            } else {
+                panel.style.left = `${left + button.offsetWidth + 62 - panel.offsetWidth}px`;
+                panel.style.top = `${top + button.offsetHeight - 55 - panel.offsetHeight}px`;
+            }
+            panel.style.visibility = 'visible';
+        }
+
         // Mirror normal Helpshift launcher visibility where it is observable,
         // and independently mirror WFMM's mobile fullscreen-modal suppression.
         function syncTicketButtonVisibility() {
@@ -1255,74 +1282,83 @@ function init() {
             }
 
             const hidden = launcherHidden || isWfmmMobileFullscreenModalOpen();
-
             ticketButton.style.display = hidden ? 'none' : '';
+            syncTicketManagerPosition();
 
-            if (hidden && (isWfmmMobileFullscreenModalOpen() || !keepTicketPanelDuringSwitch())) {
+            // Keep the manager open if the launcher is temporarily hidden by routing.
+            // WFMM mobile fullscreen dialogs still take precedence over this panel.
+            if (isWfmmMobileFullscreenModalOpen()) {
                 removeInterfaceContainer();
             }
         }
 
-        // Reattach the panel observer whenever Helpshift recreates its iframe.
-        const observeIframeWidthChanges = () => {
-            let iframe = null;
-            let iframeObserver = null;
-
-            return () => {
-                const nextIframe = document.getElementById('hs-web-sdk-iframe');
-                if (nextIframe === iframe) return;
-
-                iframeObserver?.disconnect();
-                iframe = nextIframe;
-
-                if (iframe) {
-                    iframeObserver = new MutationObserver(() => {
-                        if (!keepTicketPanelDuringSwitch()) removeInterfaceContainer();
-                    });
-                    iframeObserver.observe(iframe, {
-                        attributes: true,
-                        attributeFilter: ['style', 'min-width', 'max-width']
-                    });
-                }
-            };
-        };
-
-        // Helpshift can hide, show, remove, or recreate its launcher iframe.
-        // WFMM fullscreen modals are also added/removed from the document. Watch
-        // both so Ticket Manager follows the effective launcher visibility.
+        // Reattach when Helpshift recreates its launcher. Also watch ancestors:
+        // another userscript may move the launcher by styling its parent.
         const observeHelpLauncherVisibility = () => {
             let launcher = null;
             let launcherObserver = null;
-            const attachIframeObserver = observeIframeWidthChanges();
+            let launcherResizeObserver = null;
+            let followUntil = 0;
+            let followFrame = null;
+
+            // Follow CSS transitions too: one style mutation can animate the
+            // launcher's position without causing further attribute mutations.
+            const followLauncherMotion = () => {
+                followUntil = performance.now() + 750;
+                if (followFrame !== null) return;
+                const frame = () => {
+                    followFrame = null;
+                    syncTicketManagerPosition();
+                    if (performance.now() < followUntil) {
+                        followFrame = requestAnimationFrame(frame);
+                    }
+                };
+                followFrame = requestAnimationFrame(frame);
+            };
 
             const attachLauncherObserver = () => {
                 const nextLauncher = document.getElementById('hs-web-sdk-iframe-launcher');
 
                 if (nextLauncher !== launcher) {
                     launcherObserver?.disconnect();
+                    launcherResizeObserver?.disconnect();
                     launcherObserver = null;
+                    launcherResizeObserver = null;
                     launcher = nextLauncher;
 
                     if (launcher) {
-                        launcherObserver = new MutationObserver(syncTicketButtonVisibility);
-                        launcherObserver.observe(launcher, {
-                            attributes: true,
-                            attributeFilter: ['style', 'class', 'hidden']
+                        launcherObserver = new MutationObserver(() => {
+                            syncTicketButtonVisibility();
+                            followLauncherMotion();
                         });
+                        for (let node = launcher; node; node = node.parentElement) {
+                            launcherObserver.observe(node, {
+                                attributes: true,
+                                attributeFilter: ['style', 'class', 'hidden']
+                            });
+                        }
+                        if (typeof ResizeObserver === 'function') {
+                            launcherResizeObserver = new ResizeObserver(syncTicketManagerPosition);
+                            launcherResizeObserver.observe(launcher);
+                        }
+                        followLauncherMotion();
                     }
                 }
 
                 syncTicketButtonVisibility();
             };
 
-            const documentObserver = new MutationObserver(() => {
-                attachLauncherObserver();
-                attachIframeObserver();
-            });
+            const documentObserver = new MutationObserver(attachLauncherObserver);
             documentObserver.observe(document.documentElement, {
                 childList: true,
                 subtree: true
             });
+
+            window.addEventListener('resize', syncTicketManagerPosition);
+            window.addEventListener('scroll', syncTicketManagerPosition, { capture: true, passive: true });
+            if (window.visualViewport) {
+                window.visualViewport.addEventListener('resize', syncTicketManagerPosition);
+            }
 
             if (window.matchMedia) {
                 const mobileQuery = window.matchMedia('(max-width: 640px)');
@@ -1334,23 +1370,9 @@ function init() {
             }
 
             attachLauncherObserver();
-            attachIframeObserver();
         };
 
-
-        function isHelpRoute() {
-            return location.origin === ORIGIN_WAYFARER &&
-                location.pathname === '/new/help';
-        }
-
-        function ensureTicketManagerLoaded(options = {}) {
-            const { requireHelpRoute = false } = options;
-
-            if (requireHelpRoute && !isHelpRoute()) {
-                removeInterfaceContainer();
-                return;
-            }
-
+        function ensureTicketManagerLoaded() {
             if (document.getElementById('ticketSwitchButton')) {
                 ticketButtonAdded = true;
             }
@@ -1387,12 +1409,9 @@ function init() {
         }
 
         function handleRouteChange() {
-            if (isHelpRoute()) {
-                ensureTicketManagerLoaded({ requireHelpRoute: true });
-            } else {
-                if (ticketScan) stopTicketScan('Update scan stopped on leaving Help.');
-                removeInterfaceContainer();
-            }
+            // The persistent Helpshift widget remains available on every Wayfarer route.
+            // Route changes should neither dismiss the manager nor interrupt scans.
+            ensureTicketManagerLoaded();
         }
 
         function hookRouteChanges() {
@@ -1421,18 +1440,18 @@ function init() {
         startTicketSync();
 
         // Initial page-load check: look for the iframe regardless of current route.
-        ensureTicketManagerLoaded({ requireHelpRoute: false });
+        ensureTicketManagerLoaded();
 
         function finishTicketSwitch(success = false) {
             if (!pendingTicketSwitch) return;
             const switchedAui = pendingTicketSwitch.aui;
             clearTimeout(pendingTicketSwitch.timeout);
-            const reopenChat = pendingTicketSwitch.reopenChat === true;
             pendingTicketSwitch = null;
-            // Allow a delayed chat reopen without the iframe observer closing the manager.
-            preserveTicketPanelUntil = ticketScan ? Infinity : Date.now() + (reopenChat ? 5000 : 2000);
             if (ticketScan && ticketScan.awaitingAui === switchedAui && !success) {
-                stopTicketScan('Update scan stopped: ticket could not be loaded.');
+                console.warn('Ticket Manager: Scan ticket session failed to load', {
+                    ticket: ticketScan.positionByAui.get(switchedAui)
+                });
+                stopTicketScan(`Update scan stopped: ticket ${ticketScan.positionByAui.get(switchedAui)} session failed to load.`);
             }
         }
 
@@ -1600,11 +1619,13 @@ function init() {
                     // a different ticket's messages must not alter them.
                     refreshTicketManagerTickets();
                 }
+                if (ticketScan?.awaitingHistory && ticketScan.awaitingAui === currentSession) {
+                    ticketScan.sessionConfirmed = true;
+                    logTicketScan('Session confirmed', { bufferedResponses: bufferedHistory.length });
+                }
                 for (const response of bufferedHistory) {
                     if (response.sessionAui !== currentSession) continue;
-                    processTicketData(response.payload);
-                    notifyIfSwitchedTicketIsUnread(response.payload, response.sessionAui);
-                    processTicketScanResponse(response.payload, response.sessionAui);
+                    handleTicketHistory(response.payload, response.sessionAui);
                 }
             } else if (type === 'ticketHistory' && payload) {
                 if (pendingTicketSwitch) {
@@ -1619,16 +1640,55 @@ function init() {
                     if (belongsToNewTicket) {
                         switching.queuedHistory.push({ sessionAui, payload });
                         if (switching.queuedHistory.length > 30) switching.queuedHistory.shift();
+                        logTicketScan('Conversation response buffered until session confirmation');
+                    } else if (ticketScan?.awaitingHistory) {
+                        ticketScan.lastResponseRejection = 'unexpected session during switch';
+                        logTicketScan('Conversation response rejected', { reason: 'unexpected session during switch' });
                     }
                     return;
                 }
                 // Do not apply a delayed response to the wrong ticket.
-                if (sessionAui && sessionAui !== currentSession) return;
-                processTicketData(payload);
-                notifyIfSwitchedTicketIsUnread(payload, sessionAui);
-                processTicketScanResponse(payload, sessionAui);
+                if (sessionAui && sessionAui !== currentSession) {
+                    if (ticketScan?.awaitingHistory) {
+                        ticketScan.lastResponseRejection = 'session mismatch';
+                        logTicketScan('Conversation response rejected', { reason: 'session mismatch' });
+                    }
+                    return;
+                }
+                handleTicketHistory(payload, sessionAui);
             }
         });
+
+        // Updating the ticket summary must not prevent the scan from seeing
+        // a valid response. Likewise, scan failures must be reported explicitly.
+        function handleTicketHistory(data, sessionAui) {
+            try {
+                processTicketData(data);
+            } catch (error) {
+                console.error('Ticket Manager: Ticket summary processing failed', {
+                    errorType: error?.name || 'UnknownError'
+                });
+                logTicketScan('Ticket summary processing failed');
+            }
+            try {
+                notifyIfSwitchedTicketIsUnread(data, sessionAui);
+            } catch (error) {
+                console.error('Ticket Manager: Unread notification check failed', {
+                    errorType: error?.name || 'UnknownError'
+                });
+            }
+            try {
+                processTicketScanResponse(data, sessionAui);
+            } catch (error) {
+                console.error('Ticket Manager: Scan response processing failed', {
+                    errorType: error?.name || 'UnknownError'
+                });
+                if (ticketScan?.awaitingHistory) {
+                    const ticketNumber = ticketScan.positionByAui.get(ticketScan.awaitingAui);
+                    stopTicketScan(`Update scan stopped: ticket ${ticketNumber} response processing failed.`);
+                }
+            }
+        }
 
         function postToHelp(type, payload = null, requestId = null) {
             const iframe = document.getElementById('hs-web-sdk-iframe');
@@ -1651,9 +1711,7 @@ function init() {
             if (pendingTicketSwitch) return false;
 
             const id = ++ticketSwitchRequestId;
-            preserveTicketPanelUntil = Infinity;
             if (!postToHelp(type, data, id)) {
-                preserveTicketPanelUntil = ticketScan ? Infinity : 0;
                 return false;
             }
 
@@ -1919,8 +1977,33 @@ function init() {
                 pausedTicketScan ? 'Continue update scan' : 'Check for updates';
         }
 
+        // Reveal the launcher clockwise as tickets finish, one wedge per ticket.
+        function updateTicketScanProgress() {
+            const button = document.getElementById('ticketSwitchButton');
+            const overlay = document.querySelector('.wftm-scan-progress');
+            if (!button || !overlay) return;
+
+            const scan = ticketScan || pausedTicketScan;
+            if (!scan || !scan.order.length || scan.completedCount >= scan.order.length) {
+                overlay.hidden = true;
+                button.setAttribute('aria-label', 'Switch Tickets');
+                button.removeAttribute('title');
+                return;
+            }
+
+            const completed = scan.completedCount || 0;
+            const progress = completed / scan.order.length;
+            const angle = progress * 360;
+            overlay.hidden = false;
+            overlay.style.background = `conic-gradient(transparent 0deg ${angle}deg, rgba(10, 17, 28, 0.82) ${angle}deg 360deg)`;
+            const percentage = Math.round(progress * 100);
+            button.setAttribute('aria-label', `Switch Tickets — scan ${percentage}% complete`);
+            button.title = `Update scan: ${completed} of ${scan.order.length} tickets checked (${percentage}%)`;
+        }
+
         function showTicketScanStatus(message) {
             ticketScanStatus = message;
+            updateTicketScanProgress();
             document.querySelectorAll('.wftm-scan-status').forEach(element => {
                 element.textContent = message;
                 element.hidden = !message;
@@ -1942,14 +2025,34 @@ function init() {
                 ));
         }
 
+        // Diagnostics deliberately omit AUIs, session credentials and message bodies.
+        function logTicketScan(event, details = {}) {
+            const scan = ticketScan;
+            if (!scan) return;
+            console.debug('Ticket Manager: Update scan', {
+                event,
+                ticket: scan.awaitingAui ? scan.positionByAui.get(scan.awaitingAui) : null,
+                position: scan.index,
+                total: scan.order.length,
+                elapsedMs: scan.scanStepStartedAt ? Date.now() - scan.scanStepStartedAt : null,
+                ...details
+            });
+        }
+
         function stopTicketScan(message, options = {}) {
             const scan = ticketScan;
             if (!scan) return;
+            logTicketScan('Scan stopped', { reason: message });
             clearTimeout(scan.timeout);
             clearTimeout(scan.settleTimer);
             clearTimeout(scan.nextTimer);
             ticketScan = null;
             scan.timeout = scan.settleTimer = scan.nextTimer = null;
+
+            if (options.checkedCurrent) {
+                // An unread reply confirms that the current ticket was checked.
+                scan.completedCount = Math.max(scan.completedCount || 0, scan.index);
+            }
 
             if (options.complete) {
                 // The next Check for updates starts a new lap.
@@ -1966,7 +2069,6 @@ function init() {
                 pausedTicketScan = scan;
             }
 
-            preserveTicketPanelUntil = Date.now() + 3000;
             showTicketScanStatus(message);
 
             // Restore the user's original chat state. An unread reply should
@@ -2030,6 +2132,10 @@ function init() {
             scan.awaitingAui = aui;
             scan.awaitingHistory = true;
             scan.gotResponse = false;
+            scan.sessionConfirmed = false;
+            scan.lastResponseRejection = null;
+            scan.scanStepStartedAt = Date.now();
+            logTicketScan('Switching ticket');
             showTicketScanStatus(`Checking ticket ${scan.positionByAui.get(aui)} (${scan.index} of ${scan.order.length})…`);
 
             if (!switchTicket('restoreSession', { aui, di: session.di, asi: session.asi })) {
@@ -2037,34 +2143,62 @@ function init() {
                 return;
             }
 
-            // Never silently skip a ticket when Helpshift gives no response.
+            // Stop only if the expected identity never delivered usable history.
             scan.timeout = setTimeout(() => {
-                stopTicketScan(`Update scan stopped: ticket ${scan.index} did not respond.`);
+                if (ticketScan !== scan || scan.gotResponse || scan.awaitingAui !== aui) return;
+                const reason = !scan.sessionConfirmed
+                    ? 'session was not confirmed'
+                    : scan.lastResponseRejection
+                        ? `conversation response rejected (${scan.lastResponseRejection})`
+                        : 'no conversation response received';
+                console.warn('Ticket Manager: Update scan timed out', {
+                    ticket: scan.positionByAui.get(aui),
+                    position: scan.index,
+                    sessionConfirmed: scan.sessionConfirmed,
+                    reason
+                });
+                stopTicketScan(`Update scan stopped: ticket ${scan.positionByAui.get(aui)} — ${reason}.`);
             }, TICKET_SCAN_RESPONSE_TIMEOUT_MS);
         }
 
         function processTicketScanResponse(data, sessionAui) {
             const scan = ticketScan;
-            if (!scan || !scan.awaitingHistory || !scan.awaitingAui ||
-                scan.awaitingAui !== currentSession ||
-                (sessionAui && sessionAui !== scan.awaitingAui)) return;
+            if (!scan || !scan.awaitingHistory || !scan.awaitingAui) return;
+
+            if (scan.awaitingAui !== currentSession ||
+                (sessionAui && sessionAui !== scan.awaitingAui)) {
+                scan.lastResponseRejection = 'session mismatch';
+                logTicketScan('Conversation response rejected', { reason: 'session mismatch' });
+                return;
+            }
 
             // Either a conversation list or an issue detail can carry the state.
             if (!Array.isArray(data.issues) &&
-                !(data.type === 'issue' && Array.isArray(data.messages))) return;
+                !(data.type === 'issue' && Array.isArray(data.messages))) {
+                scan.lastResponseRejection = 'unrecognised response format';
+                logTicketScan('Conversation response rejected', { reason: 'unrecognised response format' });
+                return;
+            }
 
             if (hasUnreadTicketReply(data)) {
                 const ticketNumber = scan.positionByAui.get(scan.awaitingAui);
+                logTicketScan('Unread reply detected');
                 stopTicketScan(`Unread Wayfarer reply found in ticket ${ticketNumber}.`, { checkedCurrent: true });
                 return;
             }
 
-            // An empty update may be followed by fuller conversation history;
-            // give the SDK a moment to return the rest before advancing.
+            // The response timeout applies only until the first valid response.
+            // Keep the settling period in case additional history arrives.
             scan.gotResponse = true;
+            clearTimeout(scan.timeout);
+            scan.timeout = null;
+            logTicketScan('Conversation response accepted');
             clearTimeout(scan.settleTimer);
             scan.settleTimer = setTimeout(() => {
                 if (ticketScan !== scan) return;
+                logTicketScan('Conversation settling complete');
+                scan.completedCount = Math.max(scan.completedCount || 0, scan.index);
+                updateTicketScanProgress();
                 advanceTicketScan();
             }, TICKET_SCAN_SETTLE_MS);
         }
@@ -2093,7 +2227,6 @@ function init() {
             // If chat was opened to read a reply during the pause, restore
             // that open state once the remaining scan finishes.
             ticketScan.wasChatOpen ||= wasChatOpen;
-            preserveTicketPanelUntil = Infinity;
             showTicketScanStatus(`Continuing update scan (${ticketScan.index} of ${ticketScan.order.length} checked)…`);
             ticketScan.nextTimer = setTimeout(advanceTicketScan, wasChatOpen ? 500 : 0);
         }
@@ -2128,12 +2261,16 @@ function init() {
                 order,
                 positionByAui: new Map(saved.map((aui, index) => [aui, index + 1])),
                 index: 0,
+                completedCount: 0,
                 originalAui: currentSession,
                 originalCredentials: currentSessionCredentials,
                 restoreUnsaved: startingIndex < 0 && Boolean(currentSession && currentSessionCredentials?.di),
                 wasChatOpen,
                 awaitingAui: null,
                 awaitingHistory: false,
+                sessionConfirmed: false,
+                lastResponseRejection: null,
+                scanStepStartedAt: null,
                 timeout: null,
                 settleTimer: null,
                 nextTimer: null
@@ -2299,14 +2436,21 @@ function init() {
         </button>
     `;
 
+            // The overlay never captures clicks; the original launcher remains usable.
+            const scanProgress = document.createElement('div');
+            scanProgress.className = 'wftm-scan-progress';
+            scanProgress.setAttribute('aria-hidden', 'true');
+            scanProgress.hidden = true;
+            containerDiv.appendChild(scanProgress);
             document.body.appendChild(containerDiv);
+            syncTicketManagerPosition();
+            updateTicketScanProgress();
 
             // Add event listener to the button
             const ticketSwitchButton = document.getElementById('ticketSwitchButton');
             ticketSwitchButton.addEventListener('click', function() {
                 if (document.getElementById('ticketInterfaceContainer')) {
-                    // If interfaceContainer exists, remove it to prevent doubles
-                    if (ticketScan) stopTicketScan('Update scan stopped.');
+                    // Hide the manager without interrupting an active update scan.
                     removeInterfaceContainer();
                 } else {
                     // If interfaceContainer doesn't exist, create it
@@ -2351,7 +2495,6 @@ function init() {
                     closeButton.classList.add('wftm-closeButton');
                     closeButton.textContent = '×';
                     closeButton.addEventListener('click', () => {
-                        if (ticketScan) stopTicketScan('Update scan stopped.');
                         removeInterfaceContainer();
                     });
 
@@ -2420,6 +2563,7 @@ function init() {
                     tableContainer.appendChild(table);
                     interfaceContainer.appendChild(tableContainer);
                     document.body.appendChild(interfaceContainer);
+                    syncTicketManagerPosition();
                     refreshTicketManagerTickets();
                 }
             });
@@ -2436,17 +2580,27 @@ function init() {
     border-radius: 50%;
     border: none;
     overflow: hidden;
-    margin: 4px;
-    padding: 0px;
+    margin: 0;
+    padding: 0;
     box-sizing: content-box;
     outline: none;
-    inset: auto 74px 16px auto;
+    inset: auto;
+    visibility: hidden;
 }
+.wftm-scan-progress {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    z-index: 1;
+    pointer-events: none;
+}
+.wftm-scan-progress[hidden] { display: none; }
 .wftm-interface-container {
     display: flex;
     flex-direction: column;
     position: fixed;
-    inset: auto 16px 75px auto;
+    inset: auto;
+    visibility: hidden;
     min-height: 500px;
     max-height: 500px;
     min-width: 360px;
