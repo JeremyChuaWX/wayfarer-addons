@@ -1,306 +1,264 @@
 // ==UserScript==
 // @name         Wayfarer Layout Mod
-// @version      0.1.0
+// @version      0.2.0
 // @description  Restores the layout to be more similar to the old layout
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-layout-mod.user.js
+// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-layout-mod.user.js
 // @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @match        https://wayfarer.scopely.com/*
 // @run-at       document-start
 // ==/UserScript==
 
-function init() {
+(function () {
+    'use strict';
 
-    let changed = false;
+    // Only one scheduled check may exist, and only following a successful native
+    // review response. No MutationObserver (Angular/Zone.js can react to its
+    // callbacks during review rendering), requestAnimationFrame loop, or map work.
+    let pendingCheck = null;
+    let reviewGeneration = 0;
 
-    /**
-     * Overwrite the open method of the XMLHttpRequest.prototype to intercept the server calls
-     */
-    (function (open) {
-        XMLHttpRequest.prototype.open = function (method, url) {
-            if (url == '/api/v1/vault/review' && method == 'GET') {
-                this.addEventListener('load', modifyNewReview, false);
-            }
-            open.apply(this, arguments);
-        };
-    })(XMLHttpRequest.prototype.open);
-
-    const awaitElement = get => new Promise((resolve, reject) => {
-        let triesLeft = 10;
-        const queryLoop = () => {
-            const ref = get();
-            if (ref) resolve(ref);
-            else if (!triesLeft) reject();
-            else setTimeout(queryLoop, 100);
-            triesLeft--;
-        }
-        queryLoop();
-    });
-
-    function modifyNewReview() {
-        changed = false;
-        checkElements();
+    function cancelPendingCheck() {
+        reviewGeneration++;
+        if (pendingCheck !== null) clearTimeout(pendingCheck);
+        pendingCheck = null;
     }
 
-    // Function to check if the main container and the required elements are available
-    function checkElements() {
-        var mainContainer = document.querySelector('app-review-new-b');
-        var titleAndDescription = mainContainer ? mainContainer.querySelector('app-title-and-description-b') : null;
-        var photo = mainContainer ? mainContainer.querySelector('app-photo-b') : null;
-        var supportingInfo = mainContainer ? mainContainer.querySelector('app-supporting-info-b') : null;
-        var checkDuplicates = mainContainer ? mainContainer.querySelector('app-check-duplicates-b') : null;
-        var questionsContainer = mainContainer ? mainContainer.querySelector('.review-questions') : null;
-        var categorizationCard = mainContainer ? mainContainer.querySelector('#categorization-card') : null;
+    function applyLayout() {
+        const review = document.querySelector('app-review-new-b');
+        const layout = review?.querySelector('.review-new');
+        if (!layout) return false; // Other review types, or review not rendered yet.
 
-        // If all required elements are available, proceed with reorganization
-        if (mainContainer && titleAndDescription && photo && supportingInfo && checkDuplicates && questionsContainer && categorizationCard && !changed) {
-            // Create a new container for the top row
-            var topRowContainer = document.createElement('div');
-            topRowContainer.classList.add('top-row-container');
-            // Set the display property to flex to ensure the children are in a single horizontal row
-            topRowContainer.style.display = 'flex';
+        const title = layout.querySelector('app-title-and-description-b');
+        const photo = layout.querySelector('app-photo-b');
+        const supporting = layout.querySelector('app-supporting-info-b'); // Optional in native build.
+        const duplicates = layout.querySelector('app-check-duplicates-b');
+        const questions = layout.querySelector('.review-questions');
+        const categorization = layout.querySelector('#categorization-card');
+        if (!title || !photo || !duplicates || !questions || !categorization) return false;
 
-            // Set the flex property for each child to 1
-            titleAndDescription.style.flex = '1';
-            photo.style.flex = '1';
-            supportingInfo.style.flex = '1';
-            supportingInfo.style.maxWidth = '450px';
-            // Enable overflow wrap for the supportingInfo element
-            supportingInfo.style.overflowWrap = 'break-word';
+        // The original mod placed the bottom row outside this grid; avoid an extra native 2rem row gap.
+        layout.style.rowGap = '0';
 
-            // Set the max height of images within the Photo and Supporting cards to 300 pixels
-            var photoImage = photo.querySelector('img');
-            var supportingImage = supportingInfo.querySelector('img');
+        // Reuse existing containers if Angular has updated the current review in place.
+        // All created containers live INSIDE the native ngIf view, so its destruction
+        // also cleans up the layout mod's elements.
+        let top = layout.querySelector('.top-row-container');
+        let bottom = layout.querySelector('.bottom-row-container');
+        let left = layout.querySelector('.left-column-container');
+        if (!top) {
+            top = document.createElement('div');
+            top.className = 'top-row-container';
+            top.style.display = 'flex';
+            top.style.gridColumn = '1 / -1';
+            questions.parentNode.insertBefore(top, questions);
+        }
+        if (!bottom) {
+            bottom = document.createElement('div');
+            bottom.className = 'bottom-row-container';
+            bottom.style.display = 'flex';
+            bottom.style.gridColumn = '1 / -1';
+            layout.appendChild(bottom);
+        }
+        if (!left) {
+            left = document.createElement('div');
+            left.className = 'left-column-container';
+            left.style.flex = '1';
+            left.style.maxWidth = '630px';
+            left.style.marginRight = '20px';
+            left.style.marginTop = '20px';
+            bottom.appendChild(left);
+        }
 
-            if (photoImage) {
-                photoImage.style.maxHeight = '400px';
-                photoImage.style.height = 'auto';
-                photoImage.style.display = 'block'; // Ensure the image is displayed as a block
-                photoImage.style.margin = 'auto'; // Center the image horizontally
-            }
+        title.style.flex = '1';
+        photo.style.flex = '1';
+        if (title.parentNode !== top) top.appendChild(title);
+        if (photo.parentNode !== top) top.appendChild(photo);
+        if (supporting) {
+            supporting.style.flex = '1';
+            supporting.style.maxWidth = '450px';
+            supporting.style.overflowWrap = 'break-word';
+            if (supporting.parentNode !== top) top.appendChild(supporting);
+        }
 
-            if (supportingImage) {
-                supportingImage.style.maxHeight = '350px';
-                photoImage.style.height = 'auto';
-                supportingImage.style.display = 'block'; // Ensure the image is displayed as a block
-                supportingImage.style.margin = 'auto'; // Center the image horizontally
-            }
+        if (duplicates.parentNode !== left) left.appendChild(duplicates);
+        if (categorization.parentNode !== left) left.appendChild(categorization);
+        questions.style.flex = '1';
+        questions.style.marginTop = '20px';
+        if (questions.parentNode !== bottom) bottom.appendChild(questions);
 
-            // Set the height of each wf-review-card to 100%
-            var titleDescCard = titleAndDescription.querySelector('.wf-review-card');
-            var photoCard = photo.querySelector('.wf-review-card-b');
-            var supportingCard = supportingInfo.querySelector('.wf-review-card-b');
+        const photoImage = photo.querySelector('img');
+        if (photoImage) {
+            photoImage.style.maxHeight = '400px';
+            photoImage.style.height = 'auto';
+            photoImage.style.display = 'block';
+            photoImage.style.margin = 'auto';
+        }
+        const supportingImage = supporting?.querySelector('img');
+        if (supportingImage) {
+            supportingImage.style.maxHeight = '350px';
+            supportingImage.style.height = 'auto';
+            supportingImage.style.display = 'block';
+            supportingImage.style.margin = 'auto';
+        }
 
-            if (titleDescCard) {
-                titleDescCard.style.height = '100%';
-            }
+        for (const element of [
+            title.querySelector('.wf-review-card'),
+            photo.querySelector('.wf-review-card-b'),
+            supporting?.querySelector('.wf-review-card-b')
+        ]) {
+            if (element) element.style.height = '100%';
+        }
 
-            if (photoCard) {
-                photoCard.style.height = '100%';
-            }
+        // Keep the original address structure for external userscripts: they may
+        // insert arbitrary elements immediately before/after the native address.
+        // In Wayfarer 5.50.0 the photo card body has a [wf-image-modal] element
+        // followed by the native .mt-2 street-address div. Carry ALL elements
+        // following the image into the title card, without recognising add-ons.
+        const description = title.querySelector('.mt-4.text-lg');
+        const addressParent = description?.parentElement;
+        const existingAddressBox = title.querySelector('.street-address-container');
+        const imageHost = photo.querySelector('[wf-image-modal]');
+        const photoBody = imageHost?.parentElement;
+        const scopeAttribute = imageHost?.getAttributeNames().find(name => name.startsWith('_ngcontent-'));
+        // Prefer the native Angular address when other add-ons also use .mt-2.
+        const nativeAddress = photoBody && Array.from(photoBody.children).find(element =>
+            element !== imageHost && element.classList.contains('mt-2') &&
+            (!scopeAttribute || element.hasAttribute(scopeAttribute))
+        );
+        const address = nativeAddress || existingAddressBox?.querySelector('.mt-2') || photo.querySelector('.mt-2');
+        if (addressParent && address) {
+            const addressBox = existingAddressBox || document.createElement('div');
+            if (!existingAddressBox) addressBox.className = 'street-address-container';
 
-            if (supportingCard) {
-                supportingCard.style.height = '100%';
-            }
-
-            // Append title and description, photo, and supporting information to the top row container
-            topRowContainer.appendChild(titleAndDescription);
-            topRowContainer.appendChild(photo);
-            topRowContainer.appendChild(supportingInfo);
-
-            // Get the parent of questionsContainer
-            var parentOfQuestions = questionsContainer.parentNode;
-
-            // Insert the top row container before the questionsContainer
-            parentOfQuestions.insertBefore(topRowContainer, questionsContainer);
-
-            // Create a new container for the bottom row with two columns
-            var bottomRowContainer = document.createElement('div');
-            bottomRowContainer.classList.add('bottom-row-container');
-            // Set the display property to flex to ensure the children are in a single horizontal row
-            bottomRowContainer.style.display = 'flex';
-
-            // Create a new container for the left column within the bottom row
-            var leftColumnContainer = document.createElement('div');
-            leftColumnContainer.classList.add('left-column-container');
-            // Set the flex property for the left column to 1
-            leftColumnContainer.style.flex = '1';
-            leftColumnContainer.style.maxWidth = '630px';
-
-            // Add 20 pixels of padding between the left and right columns of the bottom row
-            leftColumnContainer.style.marginRight = '20px';
-
-            // Append duplicates map and review-category-card to the left column container
-            leftColumnContainer.appendChild(checkDuplicates);
-            leftColumnContainer.appendChild(categorizationCard);
-
-            // Set the flex property for the questionsContainer to 1
-            questionsContainer.style.flex = '1';
-
-            // Add 20 pixels of padding underneath the top row
-            leftColumnContainer.style.marginTop = '20px';
-            questionsContainer.style.marginTop = '20px';
-
-            // Append left column and questions to the bottom row container
-            bottomRowContainer.appendChild(leftColumnContainer);
-            bottomRowContainer.appendChild(questionsContainer);
-
-            // Append the bottom row container to the main container
-            mainContainer.appendChild(bottomRowContainer);
-
-            // Append the street address after the description text
-            var streetAddressContainer = photo.querySelector('.mt-2');
-            var descriptionTextContainer = titleAndDescription.querySelector('.mt-4.text-lg');
-            var parentContainer = descriptionTextContainer.parentNode;
-
-            if (streetAddressContainer && descriptionTextContainer && parentContainer) {
-                // Create a new div for the street address
-                var streetAddressDiv = document.createElement('div');
-                streetAddressDiv.classList.add('street-address-container');
-
-                // Move street address to the new div
-                streetAddressDiv.appendChild(streetAddressContainer);
-
-                // Set the font size for the street address text
-                streetAddressContainer.style.fontSize = '12px'; // Adjust the font size as needed
-
-                // Prevent street address from inheriting text-lg line-height
-                streetAddressContainer.style.lineHeight = 'initial';
-
-                // Append the new div to the parent container
-                parentContainer.appendChild(streetAddressDiv);
-
-                // Apply flex styles to the parent container
-                parentContainer.style.display = 'flex';
-                parentContainer.style.flexDirection = 'column';
-                parentContainer.style.justifyContent = 'space-between';
-
-                // Apply styles to the street address div
-                streetAddressDiv.style.marginTop = 'auto';
-            }
-
-            // Text formatting for supporting statemetn to deal with line breaks and width
-            var supportingInfoStatement = document.querySelector('.supporting-info-statement');
-            if (!supportingInfoStatement) {
-                supportingInfoStatement = document.querySelector('.cursor-pointer.ng-star-inserted');
-            }
-            if (supportingInfoStatement) {
-            supportingInfoStatement.style.lineBreak = 'normal';
-            supportingInfoStatement.style.maxWidth = '380px';
-            }
-
-            // Remove the additional category selection menu
-            // var wfSelectElement = categorizationCard.querySelector('wf-select.review-categorization.ng-star-inserted');
-            // if (wfSelectElement) {
-            //     wfSelectElement.remove();
-            // }
-
-            var categoryCards = document.querySelectorAll('.wf-review-card.review-category-card');
-            categoryCards.forEach(function (card) {
-                card.style.paddingBottom = '0';
-                card.style.minHeight = '350px';
-            });
-
-            // Remove the height: 100% style from elements with the class wf-review-card--map
-            var mapCards = document.querySelectorAll('.wf-review-card--map');
-            mapCards.forEach(function (card) {
-                card.style.height = 'auto';
-            });
-
-            // SPLIT REVIEW CATEGORY INTO TWO COLUMNS FOR SPACING
-            // Find the review-categorization container
-            var reviewCategorizationContainer = document.querySelector('.review-categorization');
-
-            if (reviewCategorizationContainer) {
-                // Find the wf-select element within reviewCategorizationContainer
-                var wfSelectElement = reviewCategorizationContainer.querySelector('wf-select.review-categorization.ng-star-inserted');
-
-                if (wfSelectElement) {
-                    // Create the left column
-                    var categorizationLeft = document.createElement('div');
-                    categorizationLeft.className = 'categorization-left ' + reviewCategorizationContainer.className;
-                    categorizationLeft.style.marginRight = '20px';
-
-                    // Get the parent of reviewCategorizationContainer
-                    var parentOfReviewCategorization = reviewCategorizationContainer.parentNode;
-
-                    // Move the content from reviewCategorizationContainer to categorizationLeft
-                    while (reviewCategorizationContainer.firstChild !== wfSelectElement) {
-                        categorizationLeft.appendChild(reviewCategorizationContainer.firstChild);
+            if (address.parentElement !== addressBox) {
+                const source = address.parentElement;
+                if (imageHost?.parentElement === source) {
+                    // A snapshot is essential because appendChild moves live nodes.
+                    // Leave the native photo/image element (and anything before it)
+                    // untouched. Preserve all added siblings surrounding the address.
+                    const siblings = Array.from(source.children);
+                    const imageIndex = siblings.indexOf(imageHost);
+                    const addressIndex = siblings.indexOf(address);
+                    if (imageIndex !== -1 && addressIndex > imageIndex) {
+                        for (const sibling of siblings.slice(imageIndex + 1)) {
+                            addressBox.appendChild(sibling);
+                        }
+                    } else {
+                        addressBox.appendChild(address);
                     }
-
-                    // Insert categorizationLeft before reviewCategorizationContainer
-                    parentOfReviewCategorization.insertBefore(categorizationLeft, reviewCategorizationContainer);
+                } else {
+                    addressBox.appendChild(address);
                 }
             }
+            if (addressBox.parentElement !== addressParent) addressParent.appendChild(addressBox);
 
-            // Remove an unwanted div
-            var nominationInfoDiv = mainContainer.querySelector('.flex-col');
-            if (nominationInfoDiv) {
-                nominationInfoDiv.remove();
-            }
-
-            // Select all buttons with the class 'dont-know-button'
-            var dontKnowButtons = document.querySelectorAll('.dont-know-button');
-
-            // Iterate over each button and replace the text
-            dontKnowButtons.forEach(function (button) {
-                button.textContent = 'IDK';
-                button.style.minWidth = 'unset';
-            });
-
-            // Add "Rejection Criteria" as the text for the first h4 element
-            var h4Element = questionsContainer.querySelector('h4');
-            if (h4Element) {
-                h4Element.textContent = "Rejection Criteria";
-            }
-
-            // Remove the unwanted paragraph element
-            var descriptionParagraph = questionsContainer.querySelector('p');
-            if (descriptionParagraph) {
-                descriptionParagraph.remove();
-            }
-
-            // Add "Eligibility Criteria" heading after the 4th question card
-            var questionCards = questionsContainer.querySelectorAll('app-question-card');
-            if (questionCards.length >= 4) {
-                var eligibilityCriteriaHeading = document.createElement('h4');
-                eligibilityCriteriaHeading.textContent = 'Eligibility Criteria';
-
-                // Add padding above and below the h4 element
-                eligibilityCriteriaHeading.style.marginTop = '10px';
-                eligibilityCriteriaHeading.style.marginBottom = '10px';
-
-                // Insert the h4 element before the 5th question card
-                questionsContainer.insertBefore(eligibilityCriteriaHeading, questionCards[4]);
-            }
-
-            // THIS IS CODE TO MOVE THE SUBMIT BUTTON TO THE GAP IN THE RIGHT COLUMN
-            // NOT USED CURRENTLY BECAUSE IT MAKES THE ADD-ONS RED BUTTON DISAPPEAR
-            //var actionButtonContainer = document.querySelector('.flex.justify-center.mt-8.ng-star-inserted');
-            //if (actionButtonContainer && questionsContainer) {
-            //    questionsContainer.appendChild(actionButtonContainer);
-            //}
-
-            changed = true;
-
-            // Disconnect the observer after the reorganization is complete
-            observer.disconnect();
-        } else {
-            // If any required element is missing, wait and check again
-            setTimeout(checkElements, 100);
+            address.style.fontSize = '12px';
+            address.style.lineHeight = 'initial';
+            addressParent.style.display = 'flex';
+            addressParent.style.flexDirection = 'column';
+            addressParent.style.justifyContent = 'space-between';
+            addressBox.style.marginTop = 'auto';
         }
+
+        const supportingStatement = layout.querySelector('.supporting-info-statement') ||
+            supporting?.querySelector('.cursor-pointer.ng-star-inserted');
+        if (supportingStatement) {
+            supportingStatement.style.lineBreak = 'normal';
+            supportingStatement.style.maxWidth = '380px';
+        }
+
+        layout.querySelectorAll('.wf-review-card.review-category-card').forEach(card => {
+            card.style.paddingBottom = '0';
+            card.style.minHeight = '350px';
+        });
+        layout.querySelectorAll('.wf-review-card--map').forEach(card => {
+            card.style.height = 'auto';
+        });
+
+        // Split review categorization into two columns (original layout behaviour).
+        const categoryContainer = layout.querySelector('.review-categorization');
+        const categorySelect = categoryContainer?.querySelector('wf-select.review-categorization.ng-star-inserted');
+        if (categoryContainer && categorySelect && categorySelect.parentNode === categoryContainer &&
+            !categoryContainer.previousElementSibling?.classList.contains('categorization-left')) {
+            const categoryLeft = document.createElement('div');
+            categoryLeft.className = 'categorization-left ' + categoryContainer.className;
+            categoryLeft.style.marginRight = '20px';
+            while (categoryContainer.firstChild && categoryContainer.firstChild !== categorySelect) {
+                categoryLeft.appendChild(categoryContainer.firstChild);
+            }
+            categoryContainer.parentNode.insertBefore(categoryLeft, categoryContainer);
+        }
+
+        // Remove the unused nomination-information wrapper after moving its cards.
+        const emptyInfo = Array.from(layout.children).find(child => child.classList.contains('flex-col'));
+        if (emptyInfo) emptyInfo.remove();
+
+        layout.querySelectorAll('.dont-know-button').forEach(button => {
+            button.textContent = 'IDK';
+            button.style.minWidth = 'unset';
+        });
+        const rejectionHeading = questions.querySelector('h4');
+        if (rejectionHeading) rejectionHeading.textContent = 'Rejection Criteria';
+        const descriptionParagraph = questions.querySelector('p');
+        if (descriptionParagraph) descriptionParagraph.remove();
+
+        const questionCards = questions.querySelectorAll('app-question-card');
+        if (questionCards.length >= 4 && !questions.querySelector('.wlm-eligibility-heading')) {
+            const heading = document.createElement('h4');
+            heading.className = 'wlm-eligibility-heading';
+            heading.textContent = 'Eligibility Criteria';
+            heading.style.marginTop = '10px';
+            heading.style.marginBottom = '10px';
+            questions.insertBefore(heading, questionCards[4]);
+        }
+
+        return true;
     }
 
-    // Use a MutationObserver to detect changes in the DOM
-    var observer = new MutationObserver(checkElements);
+    function watchReview() {
+        // A newer API response cancels the prior review's outstanding check.
+        cancelPendingCheck();
+        const generation = reviewGeneration;
+        let attempts = 0;
 
-    // Start observing changes in the body of the document
-    observer.observe(document.body, { childList: true, subtree: true });
+        function checkOnce() {
+            if (generation !== reviewGeneration) return;
+            pendingCheck = null;
 
-    // Call the checkElements function initially
-    checkElements();
+            // Do nothing on other routes, or if Angular has removed the review.
+            const reviewPage = document.querySelector('app-review');
+            if (!reviewPage || reviewPage.querySelector('app-review-edit, app-review-photo')) return;
 
-}
+            // Never retry on an exception: unlike the old MutationObserver,
+            // a malformed/unexpected review cannot trap the page in callbacks.
+            try {
+                if (applyLayout()) return;
+            } catch (error) {
+                console.warn('[Wayfarer Layout Mod] Could not apply review layout:', error);
+                return;
+            }
 
-init();
+            // Allow asynchronous review/category rendering for up to eight
+            // seconds. One timeout at a time, 250 ms apart, then stop entirely.
+            if (++attempts < 32) pendingCheck = setTimeout(checkOnce, 250);
+        }
+
+        // Defer manipulation until after Angular processes this XHR response.
+        pendingCheck = setTimeout(checkOnce, 125);
+    }
+
+    // Native ReviewModule calls HttpService.get(API.REVIEW) once per review.
+    // XHR events let us make a single layout pass for the first and every next review.
+    const originalOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url) {
+        if (method === 'GET' && typeof url === 'string' &&
+            /^(?:https:\/\/wayfarer\.scopely\.com)?\/api\/v1\/vault\/review(?:\?|$)/.test(url)) {
+            this.addEventListener('load', () => {
+                if (this.status >= 200 && this.status < 300) watchReview();
+            }, false);
+        }
+        return originalOpen.apply(this, arguments);
+    };
+})();
