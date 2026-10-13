@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.9.0
+// @version      0.10.0
 // @description  Support for simultaneous tickets with optional cross-device sync
 // @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
 // @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
@@ -35,6 +35,181 @@ function init() {
     }
 
     function initHelp() {
+
+        // Helpshift displays message times but does not always insert date
+        // separators. Match the rendered messages to their API timestamps.
+        const datedMessages = new Map();
+        let dateSessionAui = localStorage.getItem('aui:scopelye-2d29204ff805eac');
+        let dateRenderQueued = false;
+
+        function normaliseDateMessageText(text) {
+            return String(text || '').replace(/\s+/g, ' ').trim();
+        }
+
+        function getApiMessageText(body) {
+            const template = document.createElement('template');
+            template.innerHTML = body;
+            return normaliseDateMessageText(template.content.textContent);
+        }
+
+        function collectMessageDates(data) {
+            const activeAui = localStorage.getItem('aui:scopelye-2d29204ff805eac');
+            if (activeAui !== dateSessionAui) {
+                datedMessages.clear();
+                dateSessionAui = activeAui;
+            }
+
+            const messages = [];
+            if (Array.isArray(data?.issues)) {
+                for (const issue of data.issues) {
+                    if (Array.isArray(issue?.messages)) messages.push(...issue.messages);
+                }
+            }
+            if (Array.isArray(data?.messages)) messages.push(...data.messages);
+            if (data?.body && data?.created_at) messages.push(data);
+
+            for (const message of messages) {
+                const timestamp = Number(message?.created_at);
+                if (!Number.isFinite(timestamp) || typeof message?.body !== 'string' ||
+                    !message.body || !message.id) continue;
+                const body = getApiMessageText(message.body);
+                if (body) datedMessages.set(message.id, { timestamp, body });
+            }
+
+            // Older ticket history can span many pages. Retain a bounded set.
+            if (datedMessages.size > 1000) {
+                const latest = [...datedMessages.entries()]
+                    .sort((a, b) => b[1].timestamp - a[1].timestamp)
+                    .slice(0, 1000);
+                datedMessages.clear();
+                for (const [id, message] of latest) datedMessages.set(id, message);
+            }
+            scheduleMessageDates();
+        }
+
+        function matchesDisplayedTime(messageNode, timestamp) {
+            const displayed = messageNode.querySelector('.hs-message__timestamp')?.textContent
+                ?.trim().toUpperCase().replace(/\s+/g, ' ');
+            if (!displayed) return true;
+            const date = new Date(timestamp);
+            const hour = date.getHours() % 12 || 12;
+            const minute = String(date.getMinutes()).padStart(2, '0');
+            const period = date.getHours() < 12 ? 'AM' : 'PM';
+            // An unknown/24-hour format is not enough to reject a text match.
+            if (!/^\d{1,2}:\d{2} (AM|PM)$/.test(displayed)) return true;
+            return displayed === `${String(hour).padStart(2, '0')}:${minute} ${period}` ||
+                displayed === `${hour}:${minute} ${period}`;
+        }
+
+        function renderMessageDates() {
+            const list = document.querySelector('.hs-message-list');
+            if (!list || !datedMessages.size) return;
+
+            const timeline = [...datedMessages.values()]
+                .sort((a, b) => a.timestamp - b.timestamp);
+            // Use the closest preceding native date, not a global set of dates.
+            // A September heading elsewhere in the conversation must never
+            // suppress an October heading.
+            function precedingNativeDate(node) {
+                for (let previous = node.previousElementSibling; previous;
+                     previous = previous.previousElementSibling) {
+                    if (previous.hasAttribute('data-wftm-day')) continue;
+                    let label;
+                    if (previous.matches('.hs-message--timestamp')) {
+                        label = previous.querySelector('.hs-message__chat-separator-content-text');
+                    } else if (previous.matches('.hs-message__chat-separator-wrapper')) {
+                        label = previous.querySelector('.hs-message--timestamp .hs-message__chat-separator-content-text');
+                    }
+                    if (label) return normaliseDateMessageText(label.textContent);
+                }
+                return '';
+            }
+            const needed = new Map();
+            let cursor = 0;
+            let previousDate = '';
+
+            for (const message of list.querySelectorAll(':scope > .hs-message')) {
+                const content = message.querySelector('.hs-message__item');
+                if (!content) continue;
+                const body = normaliseDateMessageText(content.textContent);
+                // Bot-only state transitions have no visible message, so align
+                // by text (and time where available), not by array positions.
+                let index = timeline.findIndex((item, i) => i >= cursor &&
+                    item.body === body && matchesDisplayedTime(message, item.timestamp));
+                if (index < 0) continue;
+
+                cursor = index + 1;
+                const date = new Date(timeline[index].timestamp);
+                const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                if (day !== previousDate) {
+                    needed.set(message, {
+                        day,
+                        label: new Intl.DateTimeFormat('en-US', {
+                            weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
+                        }).format(date)
+                    });
+                }
+                previousDate = day;
+            }
+
+            // Keep existing dates if an API fragment cannot be matched. Remove
+            // only when the adjacent message is gone, its confirmed day changes,
+            // or Helpshift has inserted its own separator for that day.
+            for (const wrapper of list.querySelectorAll(':scope > [data-wftm-day]')) {
+                const message = wrapper.nextElementSibling;
+                const expected = needed.get(message);
+                if (!wrapper.matches('.hs-message__chat-separator-wrapper') ||
+                    !message?.matches('.hs-message--left, .hs-message--right') ||
+                    (expected && expected.day !== wrapper.dataset.wftmDay) ||
+                    precedingNativeDate(wrapper) === wrapper.textContent.trim()) {
+                    wrapper.remove();
+                }
+            }
+            for (const [message, date] of needed) {
+                const previous = message.previousElementSibling;
+                if (previous?.dataset.wftmDay === date.day ||
+                    precedingNativeDate(message) === date.label) continue;
+                // Use Helpshift's native full-width wrapper so the pill is
+                // centred across the conversation, not the narrower bubble area.
+                const wrapper = document.createElement('div');
+                wrapper.className = 'hs-message__chat-separator-wrapper';
+                wrapper.dataset.wftmDay = date.day;
+                const heading = document.createElement('div');
+                heading.className = 'hs-message hs-message--timestamp';
+                const label = document.createElement('span');
+                label.className = 'hs-message__chat-separator-content-text';
+                label.textContent = date.label;
+                heading.appendChild(label);
+                wrapper.appendChild(heading);
+                list.insertBefore(wrapper, message);
+            }
+        }
+
+        function scheduleMessageDates() {
+            if (dateRenderQueued) return;
+            dateRenderQueued = true;
+            requestAnimationFrame(() => {
+                dateRenderQueued = false;
+                renderMessageDates();
+            });
+        }
+
+        function watchMessageList() {
+            // Includes replacements of the message list when changing tickets.
+            const observer = new MutationObserver(mutations => {
+                if (mutations.some(mutation => {
+                    const element = mutation.target.nodeType === 1 ? mutation.target : null;
+                    if (element?.closest('.hs-message-list')) return true;
+                    return [...mutation.addedNodes].some(node => node.nodeType === 1 &&
+                        (node.matches?.('.hs-message-list') || node.querySelector?.('.hs-message-list')));
+                })) scheduleMessageDates();
+            });
+            observer.observe(document.documentElement, { childList: true, subtree: true });
+            scheduleMessageDates();
+        }
+
+        if (document.documentElement) watchMessageList();
+        else document.addEventListener('DOMContentLoaded', watchMessageList, { once: true });
 
         (function(open) {
             XMLHttpRequest.prototype.open = function(method, url) {
@@ -93,6 +268,7 @@ function init() {
                 // A fresh anonymous identity may be created after this frame loads.
                 // Report its credentials before passing ticket history to the parent.
                 loadAndSendSessionValues();
+                collectMessageDates(json);
                 sendTicketHistory(json);
             } catch (ex) {
                 console.error('Error parsing JSON:', ex);
@@ -1241,8 +1417,14 @@ function init() {
             const chat = launcher.getBoundingClientRect();
             if (!chat.width || !chat.height) return;
 
-            const left = chat.right - 16 - button.offsetWidth - 58;
-            const top = chat.bottom - 16 - button.offsetHeight;
+            // Compare both elements in rendered viewport coordinates. On mobile
+            // Safari, pinch-zoom can make a fixed element's CSS left/top use a
+            // different viewport origin from getBoundingClientRect().
+            const rect = button.getBoundingClientRect();
+            const left = (parseFloat(button.style.left) || 0) +
+                chat.right - 16 - button.offsetWidth - 58 - rect.left;
+            const top = (parseFloat(button.style.top) || 0) +
+                chat.bottom - 16 - button.offsetHeight - rect.top;
             button.style.left = `${left}px`;
             button.style.top = `${top}px`;
             button.style.visibility = 'visible';
@@ -1255,9 +1437,14 @@ function init() {
             if (window.matchMedia?.('(max-width: 640px)').matches) {
                 panel.style.left = '';
                 panel.style.top = '';
+                panel.style.height = '';
             } else {
+                // Anchor the bottom as before, but shrink the scrollable ticket
+                // list when a short window would push the header off-screen.
+                const bottom = top + button.offsetHeight - 55;
+                panel.style.height = `${Math.min(500, Math.max(60, bottom - 8))}px`;
                 panel.style.left = `${left + button.offsetWidth + 62 - panel.offsetWidth}px`;
-                panel.style.top = `${top + button.offsetHeight - 55 - panel.offsetHeight}px`;
+                panel.style.top = `${Math.max(8, bottom - panel.offsetHeight)}px`;
             }
             panel.style.visibility = 'visible';
         }
@@ -1358,6 +1545,8 @@ function init() {
             window.addEventListener('scroll', syncTicketManagerPosition, { capture: true, passive: true });
             if (window.visualViewport) {
                 window.visualViewport.addEventListener('resize', syncTicketManagerPosition);
+                // Pinch-panning may move the visual viewport without a resize.
+                window.visualViewport.addEventListener('scroll', syncTicketManagerPosition);
             }
 
             if (window.matchMedia) {
@@ -2585,6 +2774,8 @@ function init() {
     box-sizing: content-box;
     outline: none;
     inset: auto;
+    left: 0;
+    top: 0;
     visibility: hidden;
 }
 .wftm-scan-progress {
@@ -2601,7 +2792,7 @@ function init() {
     position: fixed;
     inset: auto;
     visibility: hidden;
-    min-height: 500px;
+    min-height: 0;
     max-height: 500px;
     min-width: 360px;
     max-width: 380px;
