@@ -132,3 +132,36 @@ export async function gotoWithRetry(page, url, opts = {}) {
     catch (e) { if (i >= 1) throw e; console.log(`    (retrying ${url}: ${e.message.split('\n')[0]})`); await page.waitForTimeout(2000); }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Signed-in testing (see `npm run test:login`).
+
+export const hasSavedLogin = () => existsSync(join(PROFILE, 'Default'));
+
+// Launches the test browser on a throwaway copy of the saved login, with
+// "Allow user scripts" on and Wayfarer locked to read-only. Returns { ctx, id, blocked }.
+export async function launchSignedIn(opts = {}) {
+  const { cpSync } = await import('node:fs');
+  const profile = mkdtempSync(join(tmpdir(), 'wfa-profile-'));
+  cpSync(PROFILE, profile, { recursive: true });
+  const { ctx, id } = await launch({ ...opts, profile });
+  await allowUserScripts(ctx, id);
+  const blocked = await wayfarerReadOnly(ctx);
+  return { ctx, id, blocked };
+}
+
+// Safety net for tests run on a real account: aborts every request that could
+// change something on Wayfarer (any non-GET to the Wayfarer API, except the
+// map's anonymous view-tracking pings). Covers the page and the Helpshift chat.
+// Returns an array that records what was blocked, e.g. "POST /api/v1/vault/review".
+export async function wayfarerReadOnly(ctx) {
+  const blocked = [];
+  await ctx.route(/^https:\/\/wayfarer\.scopely\.com\/api\//, (route) => {
+    const req = route.request();
+    const path = new URL(req.url()).pathname;
+    if (req.method() === 'GET' || /^\/api\/v1\/vault\/mapview\/track\//.test(path)) return route.continue();
+    blocked.push(`${req.method()} ${path}`);
+    return route.abort('blockedbyclient');
+  });
+  return blocked;
+}

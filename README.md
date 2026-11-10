@@ -41,7 +41,7 @@ npm test                # build, then run the tests
 
 - `tests/install.test.mjs` follows the user steps. It turns on **Allow user scripts**, clicks every **Install** button on the site, and checks Tampermonkey's prompt and dashboard. Set `SITE_URL=https://jeremychuawx.github.io/wayfarer-addons/` to test the live site instead of the local build.
 - `tests/live.test.mjs` runs the Community Header add-on on the real (public) forum.
-- `tests/signed-in.test.mjs` runs add-ons on Wayfarer and the Pokémon GO map, which need an account. Run `npm run test:login` once: it opens the test browser so you can sign in yourself, and saves the login in `.test-cache/profile` (gitignored; delete it to sign out). Tests use a throwaway copy of that profile and only load pages and click map markers. Nothing is submitted. Without a saved login these tests are skipped.
+- `tests/signed-in/*.test.mjs` run add-ons on Wayfarer and the Pokémon GO map, which need an account. Run `npm run test:login` once: it opens the test browser so you can sign in yourself, and saves the login in `.test-cache/profile` (gitignored; delete it to sign out). Tests use a throwaway copy of that profile and only load pages and click map markers. Nothing is submitted. Without a saved login these tests are skipped.
 
 ### Project layout
 

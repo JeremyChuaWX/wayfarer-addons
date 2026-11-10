@@ -5,24 +5,18 @@
 // only load pages and click map markers; nothing is submitted to Wayfarer.
 //
 // Skipped automatically if you haven't signed in yet.
-import { cpSync, existsSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { launch, allowUserScripts, installFromUrl, collectErrors, polygonCounterInit, gotoWithRetry, PROFILE } from './lib/harness.mjs';
-import { serveSite } from './lib/serve.mjs';
-import { test, skip, assert, done } from './lib/run.mjs';
+import { launchSignedIn, hasSavedLogin, installFromUrl, collectErrors, polygonCounterInit, gotoWithRetry } from '../lib/harness.mjs';
+import { serveSite } from '../lib/serve.mjs';
+import { test, skip, assert, done } from '../lib/run.mjs';
 
-if (!existsSync(join(PROFILE, 'Default'))) {
+if (!hasSavedLogin()) {
   skip('signed-in tests', 'no saved login: run `npm run test:login` and sign in first');
   done();
   process.exit(0);
 }
 
-const profile = mkdtempSync(join(tmpdir(), 'wfa-profile-'));
-cpSync(PROFILE, profile, { recursive: true });
 const site = await serveSite();
-const { ctx, id } = await launch({ profile });
-await allowUserScripts(ctx, id);
+const { ctx } = await launchSignedIn();
 
 for (const s of ['wayfarer-ticket-manager', 'pokemon-go-map-s2', 'pokemon-go-map-search', 'pokemon-go-map-preview-card-details', 'pokemon-go-map-routes']) {
   await installFromUrl(ctx, site.url + s + '.user.js');
@@ -120,7 +114,6 @@ await test('Pokémon GO map: no add-on errors', async () => {
   assert(!e.length, 'page errors: ' + e.join('; '));
 });
 
-skip('Wayfarer: Layout Mod, Old Rating UI, Bonus Area, Broken Image Scanner, Abuse Text, EXIF', 'not working on the rebuilt Wayfarer site yet');
 skip('Mission Creator Exporter', 'missions.ingress.com sign-in loops in the test browser');
 
 await ctx.close();
