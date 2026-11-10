@@ -1,6 +1,7 @@
 # Pokémon GO Map: Routes
 
 <!-- summary: Adds a Routes button that shows Pokémon GO Routes on the map, with distance and duration. -->
+<!-- status: Probably not needed any more: the Pokémon GO map now has its own Routes button. When it does, this add-on stays out of the way. -->
 
 Finds **Pokémon GO Routes** and shows them on the official [Pokémon GO map](https://pokemongo.com/en/map).
 

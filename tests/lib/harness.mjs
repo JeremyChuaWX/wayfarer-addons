@@ -9,11 +9,17 @@ import { join, resolve } from 'node:path';
 export const EXT = resolve('.test-cache/tampermonkey');
 export const SITE = process.env.SITE_URL ?? 'https://jeremychuawx.github.io/wayfarer-addons/';
 
-export async function launch({ headless = !process.env.HEADED, viewport = { width: 1280, height: 900 } } = {}) {
+// Saved sign-in profile created by `npm run test:login` (gitignored).
+export const PROFILE = resolve('.test-cache/profile');
+
+// profile: a folder to keep cookies/logins in; default is a fresh temp folder.
+export async function launch({ headless = !process.env.HEADED, viewport = { width: 1280, height: 900 }, profile } = {}) {
   if (!existsSync(join(EXT, 'manifest.json'))) throw new Error('Tampermonkey missing: run `npm run test:setup`');
-  const ctx = await chromium.launchPersistentContext(mkdtempSync(join(tmpdir(), 'wfa-test-')), {
+  const ctx = await chromium.launchPersistentContext(profile ?? mkdtempSync(join(tmpdir(), 'wfa-test-')), {
     channel: 'chromium', headless, viewport,
-    args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`],
+    // Without this, Google sign-in refuses with "This browser may not be secure".
+    ignoreDefaultArgs: ['--enable-automation'],
+    args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, '--disable-blink-features=AutomationControlled'],
   });
   let [sw] = ctx.serviceWorkers();
   if (!sw) sw = await ctx.waitForEvent('serviceworker', { timeout: 15000 });

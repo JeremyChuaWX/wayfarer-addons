@@ -1,6 +1,7 @@
 # Wayfarer Broken Image Scanner
 
 <!-- summary: Finds your nominations whose photos no longer load, and makes a report you can send in. -->
+<!-- status: Not working right now: Wayfarer rebuilt its website in late 2026 and this add-on hasn't been updated for it yet. If you install it, it will update automatically once fixed. -->
 
 Checks all your nominations and photo edits for **photos that no longer load**, and creates a report you can send to Wayfarer.
 

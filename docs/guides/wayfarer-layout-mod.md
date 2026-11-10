@@ -1,6 +1,7 @@
 # Wayfarer Layout Mod
 
 <!-- summary: Rearranges the Review page to look more like the old Wayfarer layout, so more fits on screen. -->
+<!-- status: Not working right now: Wayfarer rebuilt its website in late 2026 and this add-on hasn't been updated for it yet. If you install it, it will update automatically once fixed. -->
 
 Rearranges the **Review** page to look more like the old Wayfarer layout, so more fits on screen at once.
 

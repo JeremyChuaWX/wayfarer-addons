@@ -63,3 +63,6 @@ footer { border-top: 1px solid var(--line); margin-top: 64px; padding: 16px 20px
   .steps ol > li { padding-left: 48px; }
 }
 .guide, .card, .note { overflow-wrap: break-word; }
+.card .status { color: var(--warn, #9a5b00); font-size: 14px; flex: 0; margin-top: -8px; }
+.note.status { border-color: #e0a100; }
+@media (prefers-color-scheme: dark) { .card .status { color: #f0b84a; } }

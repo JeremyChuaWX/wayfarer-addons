@@ -35,11 +35,13 @@ The tests use [Playwright](https://playwright.dev/) with a sandboxed Chromium an
 ```
 npm run test:browsers   # one time: download Chromium into node_modules
 npm run test:setup      # one time: download Tampermonkey into .test-cache/
+npm run test:login      # optional: sign in for the signed-in tests
 npm test                # build, then run the tests
 ```
 
 - `tests/install.test.mjs` follows the user steps. It turns on **Allow user scripts**, clicks every **Install** button on the site, and checks Tampermonkey's prompt and dashboard. Set `SITE_URL=https://jeremychuawx.github.io/wayfarer-addons/` to test the live site instead of the local build.
-- `tests/live.test.mjs` runs add-ons on the real websites. Only the Community forum is public; Wayfarer, the Pokémon GO map and Mission Creator need sign-in, so those tests are skipped.
+- `tests/live.test.mjs` runs the Community Header add-on on the real (public) forum.
+- `tests/signed-in.test.mjs` runs add-ons on Wayfarer and the Pokémon GO map, which need an account. Run `npm run test:login` once: it opens the test browser so you can sign in yourself, and saves the login in `.test-cache/profile` (gitignored; delete it to sign out). Tests use a throwaway copy of that profile and only load pages and click map markers. Nothing is submitted. Without a saved login these tests are skipped.
 
 ### Project layout
 

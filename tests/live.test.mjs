@@ -1,9 +1,8 @@
 // Test: add-ons work on the real websites.
-// Only the Wayfarer Community forum is public. Wayfarer, the Pokémon GO map and
-// the Ingress Mission Creator need a signed-in account, so those are skipped.
+// Only the Wayfarer Community forum is public; the rest is in signed-in.test.mjs.
 import { launch, allowUserScripts, installFromUrl, collectErrors, mutationCounterInit, idleMutationRate, gotoWithRetry } from './lib/harness.mjs';
 import { serveSite } from './lib/serve.mjs';
-import { test, skip, assert, done } from './lib/run.mjs';
+import { test, assert, done } from './lib/run.mjs';
 
 const site = await serveSite();
 const { ctx, id } = await launch();
@@ -29,11 +28,7 @@ await test('Community Header: runs on the forum and stays idle', async () => {
   await page.screenshot({ path: 'test-results/forum.png' });
 });
 
-for (const [name, why] of [
-  ['Wayfarer add-ons (Ticket Manager, Layout Mod, Old Rating UI, Bonus Area, Broken Image Scanner, Abuse Text)', 'wayfarer.scopely.com requires sign-in'],
-  ['Pokémon GO map add-ons (S2, Routes, Search, Preview Card)', 'pokemongo.com/en/map requires sign-in'],
-  ['Mission Creator Exporter', 'missions.ingress.com requires sign-in'],
-]) skip(name, why);
+// Wayfarer and the Pokémon GO map need sign-in: see signed-in.test.mjs.
 
 await ctx.close();
 site.close();

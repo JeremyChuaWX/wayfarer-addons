@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Pokémon Go Map Preview Card Details
-// @version      0.1.4
+// @version      0.1.5
 // @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @description  Adds coordinates to Pokemon Go Map preview cards
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
@@ -9,7 +9,6 @@
 // @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/pokemon-go-map-preview-card-details.html
 // @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
 // @match        https://pokemongo.com/gamemap*
-// @match        https://pokemongo.com/*/map*
 // @run-at       document-start
 // @grant        none
 // @inject-into  page

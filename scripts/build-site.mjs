@@ -125,6 +125,7 @@ function indexPage(scripts, guides) {
     <article class="card">
       <h4>${esc(s.name)}</h4>
       <p>${esc(s.summary)}</p>
+      ${s.status ? `<p class="status">⚠️ ${esc(s.status.split(':')[0])}${guides.has(s.slug) ? ` — <a href="./guides/${esc(s.slug)}.html">details</a>` : ''}</p>` : ''}
       <div class="actions">
         <a class="btn install" href="./${esc(s.file)}">Install</a>
         ${guides.has(s.slug) ? `<a class="btn ghost" href="./guides/${esc(s.slug)}.html">How to use</a>` : ''}
@@ -185,7 +186,8 @@ function guidePage(slug, md, scriptsBySlug) {
   const s = HIDDEN.has(slug) ? null : scriptsBySlug.get(slug);
   const header = s
     ? `<p class="crumb"><a href="../">← All add-ons</a></p>
-<div class="guide-head"><a class="btn install" href="../${esc(s.file)}">Install ${esc(s.name)}</a> <span class="ver">v${esc(s.version)}</span></div>`
+<div class="guide-head"><a class="btn install" href="../${esc(s.file)}">Install ${esc(s.name)}</a> <span class="ver">v${esc(s.version)}</span></div>
+${s.status ? `<p class="note status">⚠️ ${esc(s.status)}</p>` : ''}`
     : `<p class="crumb"><a href="../">← All add-ons</a></p>`;
   const html = marked.parse(md);
   const title = (md.match(/^#\s+(.+)$/m)?.[1] ?? slug) + ' — Wayfarer Addons';
@@ -210,6 +212,11 @@ const summaries = new Map(guideFiles.map((f) => [
   readFileSync(join(GUIDES, f), 'utf8').match(/<!--\s*summary:\s*([\s\S]*?)\s*-->/)?.[1],
 ]));
 for (const s of scripts) s.summary = summaries.get(s.slug) || s.description;
+// Optional warning: <!-- status: Short label: full explanation --> in the guide.
+// Cards show the short label; the guide page shows all of it.
+for (const s of scripts) {
+  if (guides.has(s.slug)) s.status = readFileSync(join(GUIDES, `${s.slug}.md`), 'utf8').match(/<!--\s*status:\s*([\s\S]*?)\s*-->/)?.[1];
+}
 for (const s of scripts) if (!guides.has(s.slug)) console.warn(`warning: no guide at docs/guides/${s.slug}.md`);
 
 if (process.argv.includes('--check')) {

@@ -1,6 +1,7 @@
 # Wayfarer Old Rating UI
 
 <!-- summary: Shows your old Poor / Fair / Good / Great reviewer rating on your Profile page. -->
+<!-- status: Not working right now: Wayfarer rebuilt its website in late 2026 and this add-on hasn't been updated for it yet. If you install it, it will update automatically once fixed. -->
 
 Shows your old **Wayfinder rating** as a four-part bar on your Profile page: **Poor · Fair · Good · Great**.
 

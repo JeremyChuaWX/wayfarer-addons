@@ -1,6 +1,7 @@
 # Wayfarer Bonus Area Visualiser
 
 <!-- summary: Shows on the Settings map exactly which area your Home or Bonus location covers. -->
+<!-- status: Not working right now: Wayfarer rebuilt its website in late 2026 and this add-on hasn't been updated for it yet. If you install it, it will update automatically once fixed. -->
 
 Shows which area of the map your **Home** or **Bonus** location covers, so you can see where your nominations count.
 

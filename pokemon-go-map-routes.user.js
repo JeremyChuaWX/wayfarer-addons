@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Pokémon Go Map Routes
-// @version      0.1.5
+// @version      0.1.6
 // @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @description  Adds a Routes filter that discovers and displays Pokémon GO Routes on the Pokemon Go map
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
@@ -9,7 +9,6 @@
 // @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/pokemon-go-map-routes.html
 // @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
 // @match        https://pokemongo.com/gamemap*
-// @match        https://pokemongo.com/*/map*
 // @run-at       document-start
 // @grant        none
 // @inject-into  page
