@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Wayfarer Broken Image Scanner
-// @version      0.2.1
+// @version      0.3.0
 // @author       Tntnnbltn (fork maintained by JeremyChuaWX)
-// @description  Scans the Contribution Management page for broken image urls
+// @description  Scans your Wayfarer submissions for broken image urls
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
 // @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/wayfarer-broken-image-scanner.user.js
 // @updateURL    https://jeremychuawx.github.io/wayfarer-addons/wayfarer-broken-image-scanner.user.js
@@ -11,6 +11,7 @@
 // @match        https://wayfarer.scopely.com/*
 // @run-at       document-start
 // @grant        none
+// @inject-into  page
 // ==/UserScript==
 
 // Copyright 2026 tntnnbltn
@@ -32,77 +33,154 @@
 // If not, see <https://www.gnu.org/licenses/>.
 
 
-function init() {
-    let submissions = [];
-    let parsedManageResponse = false;
+(function () {
+    'use strict';
+
+    // Wayfarer is a React single-page app. The Submit page (/submit) loads the
+    // list of submissions with fetch('/api/v1/vault/manage'). We watch that
+    // request to keep a copy of the list, and fetch it ourselves on click if
+    // we haven't seen it yet.
+    const MANAGE_PATH = '/api/v1/vault/manage';
+    const SUBMIT_PATH = '/submit';
+    const BUTTON_ID = 'wfbi-scan-button';
+
+    let submissions = null;
     let lastScanSummary = null;
+    let scanning = false;
 
-    (function (open) {
-        XMLHttpRequest.prototype.open = function (method, url) {
-            if (url === '/api/v1/vault/manage' && method === 'GET') {
-                this.addEventListener('load', parseManage, false);
+    hookFetch();
+    watchPage();
+
+    function hookFetch() {
+        const origFetch = window.fetch;
+        if (typeof origFetch !== 'function' || origFetch.__wfbiHooked) return;
+
+        const hooked = function (input, init) {
+            const promise = origFetch.apply(window, arguments);
+            try {
+                const method = String((init && init.method) || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+                const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+                if (method === 'GET' && url.origin === location.origin && url.pathname === MANAGE_PATH) {
+                    promise.then((res) => {
+                        if (res && res.ok) {
+                            res.clone().json().then(storeManageResponse).catch(() => {});
+                        }
+                    }).catch(() => {});
+                }
+            } catch (e) {
+                // Never break the page's own requests.
             }
-            open.apply(this, arguments);
+            return promise;
         };
-    })(XMLHttpRequest.prototype.open);
+        hooked.__wfbiHooked = true;
+        window.fetch = hooked;
+    }
 
-    function parseManage() {
-        try {
-            const json = JSON.parse(this.response);
-            if (!json || json.captcha) return;
-
-            const result = json.result;
-            if (!result || !Array.isArray(result.submissions)) {
-                console.log('Wayfarer response missing result.submissions');
-                return;
-            }
-
-            submissions = result.submissions;
-            parsedManageResponse = true;
-
-            setTimeout(() => {
-                addCss();
-                addScanButton();
-            }, 300);
-        } catch (e) {
-            console.error('Failed to parse manage response', e);
+    // Returns true if the response contained a submissions list.
+    function storeManageResponse(json) {
+        if (!json || json.captcha) return false;
+        const result = json.result;
+        if (!result || !Array.isArray(result.submissions)) {
+            console.warn('[Broken Image Scanner] Wayfarer response missing result.submissions');
+            return false;
         }
+        submissions = result.submissions;
+        return true;
+    }
+
+    async function loadSubmissions() {
+        if (Array.isArray(submissions)) return submissions;
+        const res = await fetch(MANAGE_PATH, { credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`Wayfarer answered ${res.status}`);
+        if (!storeManageResponse(await res.json())) throw new Error('Wayfarer did not send a submissions list');
+        return submissions;
+    }
+
+    // Keeps the button on the Submit page. React re-renders and client-side
+    // navigation can remove it, so re-check whenever the page changes. The
+    // check does nothing (and changes nothing) once the button is in place,
+    // so our own insertion can't set off an endless loop.
+    function watchPage() {
+        let queued = false;
+        const check = () => {
+            queued = false;
+            if (location.pathname.replace(/\/+$/, '') !== SUBMIT_PATH) return;
+            if (document.getElementById(BUTTON_ID)) return;
+            addScanButton();
+        };
+        const schedule = () => {
+            if (queued) return;
+            queued = true;
+            requestAnimationFrame(check);
+        };
+        const start = () => {
+            new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
+            schedule();
+        };
+        if (document.documentElement) start();
+        else document.addEventListener('readystatechange', start, { once: true });
+        window.addEventListener('popstate', schedule);
+    }
+
+    // The tab row ("Submissions (N)" / "Drafts (N)") is a <nav> made of
+    // buttons inside the page body; the site header's <nav> uses links.
+    function findTabRow() {
+        for (const nav of document.querySelectorAll('#root nav')) {
+            if (nav.closest('header')) continue;
+            const kids = Array.from(nav.children).filter(el => el.id !== BUTTON_ID);
+            if (kids.length >= 2 && kids.every(el => el.tagName === 'BUTTON')) return nav;
+        }
+        return null;
     }
 
     function addScanButton() {
-        if (document.getElementById('wfbi-scan-button')) return;
+        const tabRow = findTabRow();
+        if (!tabRow) return;
 
-        const ref = document.querySelector('wf-logo');
-        if (!ref || !ref.parentNode || !ref.parentNode.parentNode) {
-            setTimeout(addScanButton, 500);
-            return;
-        }
-
-        const div = document.createElement('div');
+        addCss();
 
         const scanButton = document.createElement('button');
-        scanButton.id = 'wfbi-scan-button';
+        scanButton.id = BUTTON_ID;
+        scanButton.type = 'button';
         scanButton.className = 'wayfarerns__button';
         scanButton.textContent = 'Scan Broken Images';
+        scanButton.disabled = scanning;
         scanButton.addEventListener('click', onScanButtonClick);
 
-        div.appendChild(scanButton);
+        tabRow.appendChild(scanButton);
+    }
 
-        const container = ref.parentNode.parentNode;
-        container.appendChild(div);
-        div.classList.add('wayfarerns__visible');
+    function setButtonBusy(busy) {
+        scanning = busy;
+        const btn = document.getElementById(BUTTON_ID);
+        if (btn) btn.disabled = busy;
     }
 
     async function onScanButtonClick() {
-        if (!parsedManageResponse || !Array.isArray(submissions) || submissions.length === 0) {
-            openModal('Broken Image Scan', 'No Wayfarer submissions have been loaded yet.\n\nOpen the Contributions / Manage page first, then try again.');
+        if (scanning) return;
+        setButtonBusy(true);
+        try {
+            await runScan();
+        } catch (e) {
+            console.error('[Broken Image Scanner] scan failed', e);
+            updateScanStatus(`Could not finish the scan: ${e && e.message ? e.message : e}\n\nReload the page and try again.`);
+        } finally {
+            setButtonBusy(false);
+        }
+    }
+
+    async function runScan() {
+        openModal('Broken Image Scan', 'Loading your submissions...');
+        const list = await loadSubmissions();
+        if (!Array.isArray(list) || list.length === 0) {
+            openModal('Broken Image Scan', 'You have no submissions to scan.');
             return;
         }
 
         lastScanSummary = null;
         openScanModal();
 
-        const relevant = submissions
+        const relevant = list
         .filter(sub => sub && (sub.type === 'NOMINATION' || sub.type === 'PHOTO'))
         .map(normalizeSubmission)
         .filter(Boolean);
@@ -499,21 +577,17 @@ function init() {
         if (document.getElementById('wfbi-style')) return;
 
 const css = `
-    .wayfarerns__visible {
-        display: block;
-    }
-
     .wayfarerns__button {
         background-color: #e5e5e5;
         border: none;
         color: #ff4713;
-        padding: 10px 10px;
-        margin: 10px;
+        padding: 8px 12px;
         border-radius: .375rem;
         text-align: center;
         text-decoration: none;
         display: inline-block;
-        font-size: 16px;
+        font-size: 15px;
+        line-height: 1.3;
         cursor: pointer;
     }
 
@@ -522,15 +596,22 @@ const css = `
         transition: 0.2s;
     }
 
-    .dark .wayfarerns__button {
-        background-color: #404040;
-        color: #20B8E3;
+    .wayfarerns__button:disabled {
+        opacity: 0.6;
+        cursor: progress;
     }
 
-    .dark .wayfarerns__button:hover {
-        background-color: #707070;
-        transition: 0.2s;
+    #wfbi-scan-button {
+        margin-left: auto;
+        margin-bottom: 6px;
+        white-space: nowrap;
     }
+
+    .wfbi-modal-footer .wayfarerns__button {
+        margin: 10px 0;
+    }
+
+
 
     .wfbi-modal-backdrop {
         position: fixed;
@@ -555,10 +636,6 @@ const css = `
         overflow: hidden;
     }
 
-    .dark .wfbi-modal {
-        background: #2d2d2d;
-        color: #f3f3f3;
-    }
 
     .wfbi-modal-header {
         display: flex;
@@ -570,9 +647,6 @@ const css = `
         flex: 0 0 auto;
     }
 
-    .dark .wfbi-modal-header {
-        border-bottom-color: #555555;
-    }
 
     .wfbi-modal-title {
         font-size: 20px;
@@ -597,9 +671,6 @@ const css = `
         flex: 0 0 auto;
     }
 
-    .dark .wfbi-modal-status {
-        border-bottom-color: #555555;
-    }
 
     .wfbi-options-row {
         margin: 0 20px;
@@ -612,9 +683,6 @@ const css = `
         flex: 0 0 auto;
     }
 
-    .dark .wfbi-options-row {
-        border-bottom-color: #555555;
-    }
 
     #wfbi-exclude-rejected {
         width: 16px;
@@ -645,11 +713,6 @@ const css = `
         overflow: auto;
     }
 
-    .dark .wfbi-modal-report {
-        background: #1f1f1f;
-        color: #f3f3f3;
-        border-color: #555555;
-    }
 
     .wfbi-info-box {
         margin: 0 20px 10px 20px;
@@ -668,13 +731,7 @@ const css = `
         text-decoration: underline;
     }
 
-    .dark .wfbi-info-box {
-        background: #1f1f1f;
-    }
 
-    .dark .wfbi-info-box a {
-        color: #20B8E3;
-    }
 
     .wfbi-modal-footer {
         display: flex;
@@ -688,9 +745,7 @@ const css = `
         const style = document.createElement('style');
         style.id = 'wfbi-style';
         style.type = 'text/css';
-        style.innerHTML = css;
-        document.head.appendChild(style);
+        style.textContent = css;
+        (document.head || document.documentElement).appendChild(style);
     }
-}
-
-init();
+})();

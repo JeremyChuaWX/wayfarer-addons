@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Bonus Area Visualiser
-// @version      1.2.1
+// @version      1.3.0
 // @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @description  Shows L7 cells covered by Home and Bonus areas
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
@@ -11,6 +11,7 @@
 // @match        https://wayfarer.scopely.com/*
 // @run-at       document-start
 // @grant        none
+// @inject-into  page
 // ==/UserScript==
 
 // Copyright 2026 tntnnbltn
@@ -34,98 +35,68 @@
 (() => {
     "use strict";
 
-    const TARGET_ROUTE = "/new/settings";
+    // Wayfarer's Settings window (avatar menu → Settings → Location) shows a
+    // small map for the Hometown location and one for the Bonus location, each
+    // with a pin. This draws the S2 cells around each pin.
+    //
+    // Runs in the page itself (see @inject-into) so it can see the Google Maps
+    // objects the website creates. The website builds each pin with
+    // `new google.maps.Marker({ map, position })`, which goes through
+    // Marker.prototype.setMap / setPosition, so patching those two is enough to
+    // notice pins appearing, moving and disappearing. Nothing is polled once
+    // Google Maps has loaded, and nothing watches the page for changes.
+    // Squares are only drawn on maps inside the Settings window.
 
-    let routeActive = false;
-    let lastLoggedKey = null;
-    let mapsPatched = false;
+    // Every Settings window (desktop dialog or full-screen on phones) is labelled by this id.
+    const SETTINGS_DIALOG = '[aria-labelledby="wayfarer-settings-menu-title"]';
 
-    // Map + overlays (polygons)
-    let settingsMap = null;
-    let s2Polys = [];
+    // map -> { marker, polys } for each settings map we've drawn on
+    const drawn = new Map();
 
-    // -------------------------
-    // Route detection
-    // -------------------------
-    function isOnTargetRoute() {
-        return location.pathname === TARGET_ROUTE;
+    // Maps we've already zoomed out once (only done when a map first shows a pin).
+    const fitted = new WeakSet();
+
+    function isSettingsMap(map) {
+        try {
+            const div = map?.getDiv?.();
+            return !!div?.closest?.(SETTINGS_DIALOG);
+        } catch {
+            return false;
+        }
     }
 
-    function teardownRoute() {
-        routeActive = false;
-        lastLoggedKey = null;
-        settingsMap = null;
-        clearS2();
+    function toLatLng(pos) {
+        if (!pos) return null;
+        const lat = typeof pos.lat === "function" ? pos.lat() : pos.lat;
+        const lng = typeof pos.lng === "function" ? pos.lng() : pos.lng;
+        if (typeof lat !== "number" || typeof lng !== "number" || !isFinite(lat) || !isFinite(lng)) return null;
+        return { lat, lng };
     }
 
-    function startRoute() {
-        if (routeActive) return;
-        routeActive = true;
-        lastLoggedKey = null;
-        ensureGoogleMapsPatched();
-    }
-
-    function installRouteWatcher() {
-        const origPushState = history.pushState;
-        const fireRouteCheck = () => queueMicrotask(checkRoute);
-
-        history.pushState = function (...args) {
-            const ret = origPushState.apply(this, args);
-            fireRouteCheck();
-            return ret;
-        };
-
-        // window.addEventListener("popstate", fireRouteCheck, true);
-        fireRouteCheck();
-    }
-
-    function checkRoute() {
-        const onTarget = isOnTargetRoute();
-        if (onTarget && !routeActive) startRoute();
-        if (!onTarget && routeActive) teardownRoute();
-    }
-
-    // -------------------------
-    // Google Maps patching
-    // -------------------------
-    function ensureGoogleMapsPatched() {
-        // Patch once only; startRoute() runs on every visit to the settings page.
-        if (mapsPatched) return;
-        mapsPatched = true;
-        waitForGoogleMaps(() => {
-            const g = window.google;
-            if (!g?.maps) return;
-            patchGoogleMaps(g.maps);
-        });
-    }
-
-    function waitForGoogleMaps(onReady) {
-        const tick = () => {
-            const g = window.google;
-            if (g && g.maps && typeof g.maps.Marker === "function") {
-                onReady();
-                return;
-            }
-            setTimeout(tick, 250);
-        };
-        tick();
-    }
-
-    function isDivInsideLocationSettingMap(div) {
-        return !!div?.closest?.("wf-location-setting-map");
-    }
-
-    function clearS2() {
-        for (const p of s2Polys) {
+    function clearMap(map) {
+        const entry = drawn.get(map);
+        if (!entry) return;
+        for (const p of entry.polys) {
             try { p.setMap(null); } catch {}
         }
-        s2Polys = [];
+        drawn.delete(map);
     }
 
-    function redrawS2(latLng) {
-        if (!settingsMap || !latLng) return;
+    // Forget maps that the website has thrown away (Settings window closed).
+    function forgetClosedMaps() {
+        for (const map of [...drawn.keys()]) {
+            let attached = false;
+            try { attached = !!map.getDiv()?.isConnected; } catch {}
+            if (!attached) clearMap(map);
+        }
+    }
 
-        clearS2();
+    function drawCells(map, marker, latLng) {
+        if (typeof google.maps.Polygon !== "function") return;
+        const prev = drawn.get(map);
+        if (prev && prev.marker === marker && prev.key === `${latLng.lat},${latLng.lng}`) return;
+        clearMap(map);
+        forgetClosedMaps();
 
         // At approximately 60 degrees North, cell size increases
         // Use Level 6 instead of Level 7 cells in this case
@@ -133,55 +104,169 @@
 
         const center = S2.S2Cell.FromLatLng(latLng, level);
         const cells = [center, ...center.getSurrounding()];
+        const polys = [];
+        const allCorners = [];
 
         for (const cell of cells) {
             const corners = cell.getCornerLatLngs().map(c => ({ lat: c.lat, lng: c.lng }));
-
-            const poly = new google.maps.Polygon({
-                map: settingsMap,
+            allCorners.push(...corners);
+            polys.push(new google.maps.Polygon({
+                map,
                 paths: corners,
                 strokeColor: "#000000",
                 strokeOpacity: 1,
                 strokeWeight: 2,
                 fillColor: "#90EE90",
                 fillOpacity: 0.25,
-                clickable: false
-            });
+                clickable: false,
+                zIndex: 1
+            }));
+        }
 
-            s2Polys.push(poly);
+        drawn.set(map, { marker, polys, key: `${latLng.lat},${latLng.lng}` });
+
+        if (!fitted.has(map)) {
+            fitted.add(map);
+            zoomOutToShow(map, latLng, allCorners);
         }
     }
 
-    function patchGoogleMaps(maps) {
-        const origSetPosition = maps.Marker.prototype.setPosition;
+    // The website opens these maps zoomed in too far to see the squares'
+    // edges. The first time a map shows a pin, zoom out just enough to show all
+    // nine squares, keeping the pin in the middle. Later pin moves (the user
+    // picking a new spot) leave the zoom alone.
+    function zoomOutToShow(map, pin, corners) {
+        const bounds = new google.maps.LatLngBounds();
+        for (const c of corners) {
+            bounds.extend(c);
+            // Mirror each corner around the pin so the pin stays centred.
+            bounds.extend({ lat: 2 * pin.lat - c.lat, lng: 2 * pin.lng - c.lng });
+        }
+        const current = map.getBounds();
+        if (!current) {
+            // Map not drawn yet: zooming now gets undone, so wait until it has.
+            google.maps.event.addListenerOnce(map, "idle", () => {
+                if (drawn.has(map)) zoomOutToShow(map, pin, corners);
+            });
+            return;
+        }
+        if (current.contains(bounds.getNorthEast()) && current.contains(bounds.getSouthWest())) return;
+        map.fitBounds(bounds, 8);
+    }
 
-        maps.Marker.prototype.setPosition = function (pos) {
-            const ret = origSetPosition.call(this, pos);
+    // Called after a pin's map or position changes.
+    function onMarkerChanged(marker) {
+        let map = null, latLng = null;
+        try {
+            map = marker.getMap();
+            latLng = toLatLng(marker.getPosition());
+        } catch {
+            return;
+        }
 
-            if (!routeActive || !pos) return ret;
+        // Pin removed: remove the squares it owned.
+        if (!map || !latLng) {
+            for (const [m, entry] of drawn) {
+                if (entry.marker === marker) clearMap(m);
+            }
+            return;
+        }
 
-            const lat = pos.lat;
-            const lng = pos.lng;
-            if (typeof lat !== "number" || typeof lng !== "number") return ret;
+        if (!isSettingsMap(map)) return;
 
-            const key = `${lat.toFixed(6)},${lng.toFixed(6)}`;
-            if (key === lastLoggedKey) return ret;
+        // "Use my current location" adds a blue dot (a drawn symbol, not a pin
+        // picture). Only the location pin counts.
+        let icon = null;
+        try { icon = marker.getIcon(); } catch {}
+        if (icon && typeof icon === "object" && icon.path != null) return;
 
-            // Only react to markers on the settings map
-            const m = this;
-            const mMap = typeof m.getMap === "function" ? m.getMap() : null;
-            const mDiv = mMap && typeof mMap.getDiv === "function" ? mMap.getDiv() : null;
+        drawCells(map, marker, latLng);
+    }
 
-            if (!mDiv || !isDivInsideLocationSettingMap(mDiv)) return ret;
+    function patchMarker(Marker) {
+        const proto = Marker?.prototype;
+        if (!proto || proto.__wfBonusAreaPatched) return;
+        proto.__wfBonusAreaPatched = true;
 
-            settingsMap = mMap;
-            lastLoggedKey = key;
+        for (const method of ["setMap", "setPosition"]) {
+            const original = proto[method];
+            if (typeof original !== "function") continue;
+            proto[method] = function (...args) {
+                const ret = original.apply(this, args);
+                queueCheck(this);
+                return ret;
+            };
+        }
+    }
 
-            // Redraw S2 L7 cell + 8 neighbours
-            redrawS2({ lat, lng });
+    // A new pin gets its map, position and icon one after another, in any
+    // order. Look at it once they're all set, just after the current code.
+    const pending = new Set();
+    function queueCheck(marker) {
+        if (!pending.size) queueMicrotask(flushChecks);
+        pending.add(marker);
+    }
+    function flushChecks() {
+        const markers = [...pending];
+        pending.clear();
+        for (const marker of markers) {
+            try {
+                onMarkerChanged(marker);
+            } catch (e) {
+                console.error("[Bonus Area Visualiser]", e);
+            }
+        }
+    }
 
-            return ret;
+    // Wayfarer only loads Google Maps when a map is first shown (e.g. when the
+    // Settings window opens), and places the pins straight away. To be in time,
+    // catch the moment google → google.maps → google.maps.Marker is assigned.
+    // The page still gets and sets the same values as before.
+    const trapped = new WeakMap(); // object -> Set of trapped keys
+    function whenAssigned(obj, key, fn) {
+        if (!obj || (typeof obj !== "object" && typeof obj !== "function")) return;
+        const keys = trapped.get(obj) ?? new Set();
+        if (keys.has(key)) return;
+        const desc = Object.getOwnPropertyDescriptor(obj, key);
+        if (desc && !desc.configurable) {
+            if (obj[key]) fn(obj[key]);
+            return;
+        }
+        keys.add(key);
+        trapped.set(obj, keys);
+
+        let value = desc && "value" in desc ? desc.value : undefined;
+        const get = desc?.get ? function () { return desc.get.call(this); } : () => value;
+        const set = desc?.set ? function (v) { desc.set.call(this, v); } : (v) => { value = v; };
+        Object.defineProperty(obj, key, {
+            configurable: true,
+            enumerable: desc ? desc.enumerable : true,
+            get,
+            set(v) {
+                set.call(this, v);
+                try { fn(get.call(this)); } catch (e) { console.error("[Bonus Area Visualiser]", e); }
+            },
+        });
+        const current = get.call(obj);
+        if (current) fn(current);
+    }
+
+    function hookGoogleMaps() {
+        whenAssigned(window, "google", (google) =>
+            whenAssigned(google, "maps", (maps) =>
+                whenAssigned(maps, "Marker", patchMarker)));
+
+        // Backup in case Google Maps is ever loaded in a way the hook above
+        // misses: check a few times a second until it's there, then stop.
+        const tick = () => {
+            const Marker = window.google?.maps?.Marker;
+            if (typeof Marker === "function") {
+                patchMarker(Marker);
+                return;
+            }
+            setTimeout(tick, 250);
         };
+        tick();
     }
 
     // -------------------------
@@ -329,5 +414,5 @@
     // -------------------------
     // Boot
     // -------------------------
-    installRouteWatcher();
+    hookGoogleMaps();
 })();

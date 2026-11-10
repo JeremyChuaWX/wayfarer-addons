@@ -1,17 +1,17 @@
 # Wayfarer Map Mods: EXIF Auto-Center
 
 <!-- summary: Moves the nomination map to where your photo was taken. -->
-<!-- status: Not working right now: Wayfarer rebuilt its website in late 2026 and this add-on hasn't been updated for it yet. If you install it, it will update automatically once fixed. -->
+<!-- status: Not needed any more: Wayfarer's rebuilt nomination page (late 2026) already moves the map and pin to your main photo's location by itself. This add-on now does nothing, so you can uninstall it. -->
 
-> **Not currently listed on the install page.** Wayfarer rebuilt its nomination page after moving to wayfarer.scopely.com, and this add-on probably doesn't work there yet. The new page may already do this by itself. If you can test it, please [let us know](https://github.com/JeremyChuaWX/wayfarer-addons/issues/new).
+Wayfarer now does this by itself. When you add the **main photo** to a new nomination, Wayfarer reads the location stored in the photo (if your camera saved one), moves the map there and puts the pin on that spot. You don't need this add-on for that.
 
-When you add the **main photo** to a new nomination, this reads the location stored in the photo (if your camera saved one) and moves the map there. It also drops the pin on that spot.
+If you still have it installed, it updates itself to an empty version that does nothing and no longer downloads anything. You can remove it from Tampermonkey whenever you like.
 
-## How to use it
+## How it works now (without the add-on)
 
 1. Start a new nomination.
 2. Choose your main photo.
-3. If the photo has a location, the map jumps to it.
+3. If the photo has a location, the map jumps to it and the pin is placed there.
 4. **Always check the pin** and drag it to the exact spot. Phone GPS can be a few metres off.
 
-It ignores supporting photos and photos with no location.
+Supporting photos and photos with no location don't move the map.

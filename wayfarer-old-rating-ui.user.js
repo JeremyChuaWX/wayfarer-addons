@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Old Rating UI
-// @version      0.1.1
+// @version      0.2.0
 // @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @description  Restores the Rating UI on the Profile page
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
@@ -11,6 +11,7 @@
 // @match        https://wayfarer.scopely.com/*
 // @run-at       document-start
 // @grant        none
+// @inject-into  page
 // ==/UserScript==
 
 // Copyright 2026 tntnnbltn
@@ -40,272 +41,187 @@
     /******************************************************************
      * STATE AND CONSTANTS
      ******************************************************************/
-    const state = {
-        performance: null,
-        darkMode: false,
-        language: 'en',
-        oldRatingUnavailable: false
-    };
+    const PROFILE_API = '/api/v1/vault/profile';
+    const PROPERTIES_API = '/api/v1/vault/properties';
+    const MESSAGES_API = '/api/v1/vault/messages';
 
-    const OLD_RATING_UNAVAILABLE_MESSAGE =
-          "Niantic has now hidden the old rating data from users. You should uninstall plug-in 'Wayfarer Old Rating UI'.";
+    // The "Wayfinder Tier" card on the Profile page.
+    const TIER_CARD_SELECTOR = 'section[aria-labelledby="wayfinder-tier-heading"]';
+    const BAR_SELECTOR = '[data-old-wayfinder-rating="true"]';
 
     const ORDER = ['poor', 'fair', 'good', 'great'];
 
-    const DEFAULT_RATING_DATA = {
-        poor: {
-            label: 'Poor',
-            description: 'Oh no! Time to freshen up on the review guidelines.'
-        },
-        fair: {
-            label: 'Fair',
-            description: 'Not bad! Try reviewing a few more Wayspots.'
-        },
-        good: {
-            label: 'Good',
-            description: 'Nice achievement, keep up the good work!'
-        },
-        great: {
-            label: 'Great',
-            description: "You're a top notch Wayfinder!"
-        }
+    const DEFAULT_TEXT = {
+        heading: 'Wayfinder rating',
+        unavailable: "Wayfarer no longer shares the old rating. You can uninstall the add-on 'Wayfarer Old Rating UI'.",
+        poor: { label: 'Poor', description: 'Oh no! Time to freshen up on the review guidelines.' },
+        fair: { label: 'Fair', description: 'Not bad! Try reviewing a few more Wayspots.' },
+        good: { label: 'Good', description: 'Nice achievement, keep up the good work!' },
+        great: { label: 'Great', description: "You're a top notch Wayfinder!" }
     };
 
+    const state = {
+        performance: null,       // 'poor' | 'fair' | 'good' | 'great'
+        unavailable: false,      // the profile came back without a rating
+        text: DEFAULT_TEXT,      // labels, translated when Wayfarer sends them
+        version: 0,              // bumped whenever anything above changes
+        fallbackStarted: false
+    };
+
+    const nativeFetch = window.fetch;
+
     /******************************************************************
-     * GENERIC HELPERS
+     * DATA
      ******************************************************************/
     function normalizeRating(value) {
-        if (!value || typeof value !== 'string') return null;
-
+        if (typeof value !== 'string') return null;
         const normalized = value.trim().toLowerCase();
         return ORDER.includes(normalized) ? normalized : null;
     }
 
-    function setPerformance(value) {
-        const normalized = normalizeRating(value);
-        if (!normalized) return false;
-
-        state.performance = normalized;
-        return true;
+    function changed() {
+        state.version++;
+        scheduleCheck();
     }
 
-    function setLanguage(value) {
-        if (!value || typeof value !== 'string') return false;
-
-        state.language = value;
-        return true;
-    }
-
-    function applyWrapperTheme(wrapper) {
-        wrapper.classList.remove('theme-light', 'theme-dark');
-        wrapper.classList.add(state.darkMode ? 'theme-dark' : 'theme-light');
-    }
-
-    function refreshUi() {
-        if (!isProfilePage()) return;
-
-        updateExistingBars();
-        scanAndInsert();
-    }
-
-    function refreshUiWithRetry(attempt = 0) {
-        if (!isProfilePage()) return;
-
-        refreshUi();
-
-        const hasBar = document.querySelector('[data-old-wayfinder-rating="true"]');
-
-        if (!hasBar && attempt < 10) {
-            setTimeout(() => refreshUiWithRetry(attempt + 1), 200);
+    function handlePerformance(result, isProfile) {
+        if (!result || typeof result !== 'object') return;
+        const rating = normalizeRating(result.performance);
+        if (rating) {
+            if (rating !== state.performance || state.unavailable) {
+                state.performance = rating;
+                state.unavailable = false;
+                changed();
+            }
+        } else if (isProfile && !state.unavailable) {
+            // Only the profile response decides that the rating is gone.
+            state.performance = null;
+            state.unavailable = true;
+            changed();
         }
     }
 
-    function isProfilePage() {
-        return window.location.pathname === '/new/profile';
-    }
+    function handleMessages(result) {
+        if (!result || typeof result !== 'object') return;
+        const ok = ORDER.every((key) =>
+            typeof result[`rating.${key}.label`] === 'string' &&
+            typeof result[`rating.${key}.description`] === 'string');
+        if (!ok) return;
 
-    /******************************************************************
-     * THEME DETECTION
-     ******************************************************************/
-
-    function isHtmlCurrentlyDark() {
-        return document.documentElement.classList.contains('dark');
-    }
-
-    function normalizeDarkModeSetting(value) {
-        if (!value || typeof value !== 'string') return null;
-
-        const normalized = value.trim().toUpperCase();
-
-        if (normalized === 'ENABLED') return 'ENABLED';
-        if (normalized === 'DISABLED') return 'DISABLED';
-        if (normalized === 'AUTO') return 'AUTO';
-
-        return null;
-    }
-
-    function resolveDarkMode(settingValue) {
-        const normalized = normalizeDarkModeSetting(settingValue);
-        if (normalized === null) return null;
-
-        if (normalized === 'ENABLED') return true;
-        if (normalized === 'DISABLED') return false;
-
-        // AUTO → detect from page
-        return isHtmlCurrentlyDark();
-    }
-
-    function setDarkMode(value) {
-        const resolved = resolveDarkMode(value);
-        if (resolved === null) return false;
-
-        state.darkMode = resolved;
-        return true;
-    }
-
-    function refreshDarkModeFromHtmlIfNeeded() {
-        const html = document.documentElement;
-        if (!html) return;
-
-        const looksDark = html.classList.contains('dark');
-
-        if (state.darkMode !== looksDark) {
-            state.darkMode = looksDark;
-            refreshUi();
-        }
-    }
-
-    /******************************************************************
-     * TRANSLATION STORAGE HELPERS
-     ******************************************************************/
-
-    function getTranslocoTranslations() {
-        try {
-            const raw = localStorage.getItem('@transloco/translations');
-            if (!raw) return null;
-            return JSON.parse(raw);
-        } catch (err) {
-            console.error('Wayfinder old rating: failed to parse transloco translations', err);
-            return null;
-        }
-    }
-
-    /******************************************************************
-     * OLD RATING TRANSLATION HELPERS
-     ******************************************************************/
-
-    function hasValidFlattenedRatingTranslations(languageCode, translations) {
-        if (!languageCode || !translations || typeof translations !== 'object') return false;
-
-        const langData = translations[languageCode];
-        if (!langData || typeof langData !== 'object') return false;
-
-        return ORDER.every((key) => {
-            return (
-                typeof langData[`rating.${key}.label`] === 'string' &&
-                typeof langData[`rating.${key}.description`] === 'string'
-            );
+        const text = { heading: DEFAULT_TEXT.heading, unavailable: DEFAULT_TEXT.unavailable };
+        if (typeof result['upgrades.performance'] === 'string') text.heading = result['upgrades.performance'];
+        ORDER.forEach((key) => {
+            text[key] = {
+                label: result[`rating.${key}.label`],
+                description: result[`rating.${key}.description`]
+            };
         });
+        state.text = text;
+        changed();
     }
 
-    function getRatingData() {
-        const translations = getTranslocoTranslations();
-        const currentLanguage = state.language;
+    const HANDLERS = {
+        [PROFILE_API]: (data) => handlePerformance(data?.result, true),
+        [PROPERTIES_API]: (data) => handlePerformance(data?.result, false),
+        [MESSAGES_API]: (data) => handleMessages(data?.result)
+    };
 
-        if (hasValidFlattenedRatingTranslations(currentLanguage, translations)) {
-            const langData = translations[currentLanguage];
-
-            return {
-                poor: {
-                    label: langData['rating.poor.label'],
-                    description: langData['rating.poor.description']
-                },
-                fair: {
-                    label: langData['rating.fair.label'],
-                    description: langData['rating.fair.description']
-                },
-                good: {
-                    label: langData['rating.good.label'],
-                    description: langData['rating.good.description']
-                },
-                great: {
-                    label: langData['rating.great.label'],
-                    description: langData['rating.great.description']
-                }
-            };
+    /******************************************************************
+     * NETWORK: read the responses Wayfarer already fetches
+     ******************************************************************/
+    function requestInfo(input, init) {
+        let url = null;
+        let method = 'GET';
+        if (typeof input === 'string') url = input;
+        else if (input instanceof URL) url = input.href;
+        else if (input && typeof input.url === 'string') {
+            url = input.url;
+            if (typeof input.method === 'string') method = input.method;
         }
+        if (init && typeof init.method === 'string') method = init.method;
+        if (!url) return null;
+        const parsed = new URL(url, location.href);
+        if (parsed.origin !== location.origin) return null;
+        return { path: parsed.pathname, method: method.toUpperCase() };
+    }
 
-        if (hasValidFlattenedRatingTranslations('en', translations)) {
-            const langData = translations.en;
+    function readResponse(handler, response) {
+        if (!response || !response.ok) return;
+        response.clone().json().then(handler).catch(() => {});
+    }
 
-            return {
-                poor: {
-                    label: langData['rating.poor.label'],
-                    description: langData['rating.poor.description']
-                },
-                fair: {
-                    label: langData['rating.fair.label'],
-                    description: langData['rating.fair.description']
-                },
-                good: {
-                    label: langData['rating.good.label'],
-                    description: langData['rating.good.description']
-                },
-                great: {
-                    label: langData['rating.great.label'],
-                    description: langData['rating.great.description']
-                }
-            };
-        }
+    function installFetchHook() {
+        if (typeof nativeFetch !== 'function') return;
 
-        return DEFAULT_RATING_DATA;
+        window.fetch = function (input, init) {
+            const promise = nativeFetch.apply(this, arguments);
+            try {
+                const info = requestInfo(input, init);
+                const handler = info && info.method === 'GET' && HANDLERS[info.path];
+                if (handler) promise.then((r) => readResponse(handler, r), () => {});
+            } catch (err) {
+                // Never let the add-on break Wayfarer's own requests.
+            }
+            return promise;
+        };
+    }
+
+    // If the page loaded its data before the hook was in place, ask once.
+    function fetchProfileIfMissing() {
+        if (state.fallbackStarted || state.performance || state.unavailable) return;
+        state.fallbackStarted = true;
+        setTimeout(() => {
+            if (state.performance || state.unavailable) return;
+            nativeFetch.call(window, PROFILE_API, { credentials: 'same-origin' })
+                .then((r) => readResponse(HANDLERS[PROFILE_API], r))
+                .catch((err) => console.warn('Wayfarer Old Rating UI: could not load profile', err));
+        }, 1500);
     }
 
     /******************************************************************
-     * OLD RATING BAR RENDERING
+     * RENDERING
      ******************************************************************/
+    function createBar() {
+        const text = state.text;
 
-    function createOldRatingUnavailableMessage() {
         const wrapper = document.createElement('div');
         wrapper.className = 'wf-old-rating-wrapper';
         wrapper.dataset.oldWayfinderRating = 'true';
-        applyWrapperTheme(wrapper);
+        wrapper.dataset.version = String(state.version);
 
-        const message = document.createElement('div');
-        message.className = 'wf-old-rating-unavailable-message';
-        message.textContent = OLD_RATING_UNAVAILABLE_MESSAGE;
+        const heading = document.createElement('div');
+        heading.className = 'wf-old-rating-heading';
+        heading.textContent = text.heading;
+        wrapper.appendChild(heading);
 
-        wrapper.appendChild(message);
-        return wrapper;
-    }
-
-    function createOldRatingBar() {
-        if (state.oldRatingUnavailable) {
-            return createOldRatingUnavailableMessage();
+        if (state.unavailable) {
+            const message = document.createElement('div');
+            message.className = 'wf-old-rating-unavailable-message';
+            message.textContent = text.unavailable;
+            wrapper.appendChild(message);
+            return wrapper;
         }
-
-        const ratingData = getRatingData();
-
-        const wrapper = document.createElement('div');
-        wrapper.className = 'wf-old-rating-wrapper';
-        wrapper.dataset.oldWayfinderRating = 'true';
-        applyWrapperTheme(wrapper);
 
         const bar = document.createElement('div');
         bar.className = 'wf-old-rating-bar';
+        bar.setAttribute('role', 'list');
 
         ORDER.forEach((key) => {
             const segment = document.createElement('div');
             segment.className = 'wf-old-rating-segment';
             segment.dataset.ratingKey = key;
-            segment.textContent = ratingData[key].label;
+            segment.setAttribute('role', 'listitem');
+            segment.textContent = text[key].label;
 
             if (key === state.performance) {
                 segment.classList.add('is-active');
+                segment.setAttribute('aria-current', 'true');
+                segment.title = text[key].description;
 
                 const tooltip = document.createElement('div');
                 tooltip.className = 'wf-old-rating-tooltip';
-                tooltip.textContent = ratingData[key].description;
+                tooltip.setAttribute('aria-hidden', 'true');
+                tooltip.textContent = text[key].description;
                 segment.appendChild(tooltip);
             }
 
@@ -316,242 +232,67 @@
         return wrapper;
     }
 
-    function updateExistingBars() {
-        const ratingData = getRatingData();
-        const wrappers = document.querySelectorAll('[data-old-wayfinder-rating="true"]');
+    function isProfilePage() {
+        return location.pathname.replace(/\/+$/, '') === '/profile';
+    }
 
-        wrappers.forEach((wrapper) => {
-            applyWrapperTheme(wrapper);
+    // Puts the bar in the Wayfinder Tier card (just under the tier name),
+    // or refreshes it if the data changed. Does nothing if it's already right,
+    // so the observer below never feeds itself.
+    function ensureBar() {
+        if (!isProfilePage()) return;
 
-            if (state.oldRatingUnavailable) {
-                wrapper.replaceChildren();
+        const card = document.querySelector(TIER_CARD_SELECTOR);
+        if (!card) return;
 
-                const message = document.createElement('div');
-                message.className = 'wf-old-rating-unavailable-message';
-                message.textContent = OLD_RATING_UNAVAILABLE_MESSAGE;
+        if (!state.performance && !state.unavailable) {
+            fetchProfileIfMissing();
+            return;
+        }
 
-                wrapper.appendChild(message);
-                return;
+        const existing = card.querySelector(BAR_SELECTOR);
+        if (existing && existing.dataset.version === String(state.version)) return;
+
+        injectStyles();
+        const bar = createBar();
+        if (existing) {
+            existing.replaceWith(bar);
+            return;
+        }
+
+        const header = card.firstElementChild;
+        if (header && header.nextSibling) card.insertBefore(bar, header.nextSibling);
+        else card.appendChild(bar);
+    }
+
+    let checkScheduled = false;
+    function scheduleCheck() {
+        if (checkScheduled) return;
+        checkScheduled = true;
+        requestAnimationFrame(() => {
+            checkScheduled = false;
+            try {
+                ensureBar();
+            } catch (err) {
+                console.error('Wayfarer Old Rating UI: could not show the rating', err);
             }
-
-            const segments = wrapper.querySelectorAll('.wf-old-rating-segment');
-
-            segments.forEach((segment) => {
-                const key = segment.dataset.ratingKey;
-                const existingTooltip = segment.querySelector('.wf-old-rating-tooltip');
-
-                segment.classList.remove('is-active');
-                segment.textContent = ratingData[key].label;
-
-                if (existingTooltip) {
-                    existingTooltip.remove();
-                }
-
-                if (key === state.performance) {
-                    segment.classList.add('is-active');
-
-                    const tooltip = document.createElement('div');
-                    tooltip.className = 'wf-old-rating-tooltip';
-                    tooltip.textContent = ratingData[key].description;
-                    segment.appendChild(tooltip);
-                }
-            });
         });
     }
 
-    /******************************************************************
-     * CARD INSERTION
-     ******************************************************************/
-
-    function insertBarIntoCard(card) {
-        if (!card || card.querySelector('[data-old-wayfinder-rating="true"]')) return;
-
-        const inline = card.querySelector('.wf-cred-inline');
-        if (!inline) return;
-
-        const newBar = inline.querySelector('.wf-cred-inline__bar');
-
-        if (!newBar) return;
-
-        const oldBar = createOldRatingBar();
-        newBar.parentNode.insertBefore(oldBar, newBar);
-    }
-
-    function scanAndInsert() {
-        const cards = document.querySelectorAll('wf-credibility-card');
-        cards.forEach(insertBarIntoCard);
-    }
-
-    /******************************************************************
-     * API RESPONSE HANDLERS
-     ******************************************************************/
-
-    function parseProfile() {
-        try {
-            if (!this.responseText) return;
-
-            const data = JSON.parse(this.responseText);
-            const result = data?.result;
-
-            if (!result) return;
-
-            const hasPerformance =
-                  Object.prototype.hasOwnProperty.call(result, 'performance');
-
-            if (!hasPerformance || !normalizeRating(result.performance)) {
-                state.oldRatingUnavailable = true;
-
-                if (isProfilePage()) {
-                    refreshUiWithRetry();
-                }
-
-                return;
-            }
-
-            let changed = false;
-
-            if (setPerformance(result.performance)) {
-                changed = true;
-            }
-
-            if (changed && isProfilePage()) {
-                refreshUiWithRetry();
-            }
-        } catch (err) {
-            console.error('Wayfinder old rating: failed to parse profile response', err);
-        }
-    }
-
-    function parseProperties() {
-        try {
-            if (!this.responseText) return;
-
-            const data = JSON.parse(this.responseText);
-            const result = data?.result;
-
-            if (!result) return;
-
-            let changed = false;
-
-            if (setPerformance(result.performance)) {
-                changed = true;
-            }
-
-            if (setDarkMode(result.darkMode)) {
-                changed = true;
-            }
-
-            if (setLanguage(result.language)) {
-                changed = true;
-            }
-
-            if (changed) {
-                refreshUi();
-            }
-        } catch (err) {
-            console.error('Wayfinder old rating: failed to parse properties response', err);
-        }
-    }
-
-    function parseSettingsChange() {
-        try {
-            const bodyText = this._wfRequestBody;
-            if (!bodyText) return;
-
-            const payload = JSON.parse(bodyText);
-            if (!payload || typeof payload !== 'object') return;
-
-            let changed = false;
-
-            if (typeof payload.language === 'string') {
-                if (setLanguage(payload.language)) {
-                    changed = true;
-                }
-            }
-
-            if (typeof payload.darkMode === 'string') {
-                if (setDarkMode(payload.darkMode)) {
-                    changed = true;
-                }
-            }
-
-            if (changed) {
-                refreshUi();
-            }
-
-        } catch (err) {
-            console.error('Wayfinder old rating: failed to parse settings request payload', err);
-        }
-    }
-
-    /******************************************************************
-     * NETWORK INTERCEPTS
-     ******************************************************************/
-
-    function installApiListeners() {
-        const originalOpen = XMLHttpRequest.prototype.open;
-        const originalSend = XMLHttpRequest.prototype.send;
-
-        XMLHttpRequest.prototype.open = function (method, url) {
-            const isProfile =
-                  (url === '/api/v1/vault/profile' ||
-                   url === 'https://wayfarer.scopely.com/api/v1/vault/profile') &&
-                  method === 'GET';
-
-            const isProperties =
-                  (url === '/api/v1/vault/properties' ||
-                   url === 'https://wayfarer.scopely.com/api/v1/vault/properties') &&
-                  method === 'GET';
-
-            const isSettingsPost =
-                  (url === '/api/v1/vault/settings' ||
-                   url === 'https://wayfarer.scopely.com/api/v1/vault/settings') &&
-                  method === 'POST';
-
-            if (isProfile) {
-                this.addEventListener('load', parseProfile, false);
-            } else if (isProperties) {
-                this.addEventListener('load', parseProperties, false);
-            } else if (isSettingsPost) {
-                this.addEventListener('load', parseSettingsChange, false);
-            }
-
-            return originalOpen.apply(this, arguments);
-        };
-
-        XMLHttpRequest.prototype.send = function (body) {
-            this._wfRequestBody = body;
-            return originalSend.apply(this, arguments);
-        };
-    }
-
-    /******************************************************************
-     * DOM OBSERVERS
-     ******************************************************************/
-
-    function installHtmlThemeObserver() {
-        const html = document.documentElement;
-        if (!html) return;
-
-        const observer = new MutationObserver((mutations) => {
-            for (const mutation of mutations) {
-                if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
-                    refreshDarkModeFromHtmlIfNeeded();
-                    break;
-                }
-            }
+    // Wayfarer is a single-page app: the Profile page can appear (or be
+    // re-rendered) at any time, so look again whenever the page changes.
+    function installPageObserver() {
+        const observer = new MutationObserver(() => {
+            if (isProfilePage()) scheduleCheck();
         });
-
-        observer.observe(html, {
-            attributes: true,
-            attributeFilter: ['class']
-        });
+        observer.observe(document, { childList: true, subtree: true });
     }
-
 
     /******************************************************************
      * STYLE INJECTION
      ******************************************************************/
+    // Colours come from Wayfarer's own theme variables, so light and dark
+    // mode are followed automatically.
     function injectStyles() {
         if (document.getElementById('wf-old-rating-style')) return;
 
@@ -559,17 +300,23 @@
         style.id = 'wf-old-rating-style';
         style.textContent = `
             .wf-old-rating-wrapper {
-                margin: 12px 0 18px 0;
+                margin-top: 16px;
                 position: relative;
+            }
+
+            .wf-old-rating-heading {
+                font-size: 14px;
+                line-height: 21px;
+                font-weight: 500;
+                color: var(--wf-theme-text-muted, #737373);
+                margin-bottom: 8px;
             }
 
             .wf-old-rating-bar {
                 display: inline-flex;
                 align-items: stretch;
-                width: auto;
                 max-width: 100%;
                 border-radius: 16px;
-                overflow: visible;
                 box-sizing: border-box;
                 user-select: none;
                 position: relative;
@@ -580,22 +327,18 @@
                 box-sizing: border-box;
                 position: relative;
                 cursor: default;
-                user-select: none;
                 text-align: center;
-
-                font-family: Akkurat, ui-sans-serif, system-ui, -apple-system, "system-ui", "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-                font-feature-settings: "tnum";
                 font-variant-numeric: tabular-nums;
                 font-size: 14px;
                 line-height: 21px;
                 font-weight: 400;
-
                 padding: 4px 24px;
-                height: 31px;
                 min-height: 31px;
-
+                color: var(--wf-theme-text-secondary, #525252);
+                background-color: transparent;
+                border: 1px solid rgb(196, 181, 253);
+                border-right: none;
                 transition: background-color 0.15s ease, color 0.15s ease;
-                -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
             }
 
             .wf-old-rating-segment:first-child {
@@ -604,8 +347,19 @@
             }
 
             .wf-old-rating-segment:last-child {
+                border-right: 1px solid rgb(196, 181, 253);
                 border-top-right-radius: 16px;
                 border-bottom-right-radius: 16px;
+            }
+
+            .wf-old-rating-segment.is-active {
+                background-color: rgb(196, 181, 253);
+                color: rgb(0, 0, 0);
+                font-weight: 500;
+            }
+
+            @media (max-width: 480px) {
+                .wf-old-rating-segment { padding: 4px 12px; }
             }
 
             .wf-old-rating-tooltip {
@@ -613,26 +367,16 @@
                 left: 50%;
                 bottom: calc(100% + 6px);
                 transform: translateX(-50%);
-
                 white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-
                 padding: 8px 16px;
                 border-radius: 4px;
-
-                font-family: Roboto, "Helvetica Neue", sans-serif;
-                font-feature-settings: "tnum";
-                font-variant-numeric: tabular-nums;
                 font-size: 12px;
                 line-height: 18px;
-
-                background: rgba(97, 97, 97, 0.9);
+                font-weight: 400;
+                background: rgba(97, 97, 97, 0.95);
                 color: #ffffff;
-
                 pointer-events: none;
                 z-index: 9999;
-
                 opacity: 0;
                 visibility: hidden;
                 transition: opacity 0.12s ease;
@@ -646,7 +390,7 @@
                 transform: translateX(-50%);
                 border-width: 6px;
                 border-style: solid;
-                border-color: rgba(97, 97, 97, 0.9) transparent transparent transparent;
+                border-color: rgba(97, 97, 97, 0.95) transparent transparent transparent;
             }
 
             .wf-old-rating-segment.is-active:hover .wf-old-rating-tooltip {
@@ -654,79 +398,22 @@
                 visibility: visible;
             }
 
-            /* Light mode */
-            .wf-old-rating-wrapper.theme-light .wf-old-rating-segment {
-                color: rgb(82, 82, 82);
-                background-color: transparent;
-                border-top: 1px solid rgb(196, 181, 253);
-                border-bottom: 1px solid rgb(196, 181, 253);
-                border-left: 1px solid rgb(196, 181, 253);
-                border-right: none;
-            }
-
-            .wf-old-rating-wrapper.theme-light .wf-old-rating-segment:last-child {
-                border-right: 1px solid rgb(196, 181, 253);
-            }
-
-            .wf-old-rating-wrapper.theme-light .wf-old-rating-segment.is-active {
-                background-color: rgb(196, 181, 253);
-                color: rgb(0, 0, 0);
-                border-right: 1px solid rgb(196, 181, 253);
-            }
-
-            /* Dark mode */
-            .wf-old-rating-wrapper.theme-dark .wf-old-rating-segment {
-                color: rgb(212, 212, 212);
-                background-color: transparent;
-                border-top: 1px solid rgb(196, 181, 253);
-                border-bottom: 1px solid rgb(196, 181, 253);
-                border-left: 1px solid rgb(196, 181, 253);
-                border-right: none;
-            }
-
-            .wf-old-rating-wrapper.theme-dark .wf-old-rating-segment:last-child {
-                border-right: 1px solid rgb(196, 181, 253);
-            }
-
-            .wf-old-rating-wrapper.theme-dark .wf-old-rating-segment.is-active {
-                background-color: rgb(196, 181, 253);
-                color: rgb(0, 0, 0);
-                border-right: 1px solid rgb(196, 181, 253);
-            }
-
             .wf-old-rating-unavailable-message {
-                font-family: Akkurat, ui-sans-serif, system-ui, -apple-system, "system-ui", "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
                 font-size: 12px;
                 line-height: 18px;
-                font-weight: 400;
-                color: rgb(115, 115, 115);
-            }
-
-            .wf-old-rating-wrapper.theme-dark .wf-old-rating-unavailable-message {
-                color: rgb(212, 212, 212);
+                color: var(--wf-theme-text-muted, #737373);
             }
         `;
 
-        document.head.appendChild(style);
+        (document.head || document.documentElement).appendChild(style);
     }
 
     /******************************************************************
      * INITIALIZATION
      ******************************************************************/
-    function init() {
-        injectStyles();
-        scanAndInsert();
-        installHtmlThemeObserver();
-        refreshDarkModeFromHtmlIfNeeded();
-    }
-
-    // Hook XHR immediately (document-start) so early profile/properties
-    // requests made before DOMContentLoaded are not missed.
-    installApiListeners();
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
+    // Hook fetch immediately (document-start) so the first profile and
+    // translation requests aren't missed.
+    installFetchHook();
+    installPageObserver();
+    scheduleCheck();
 })();

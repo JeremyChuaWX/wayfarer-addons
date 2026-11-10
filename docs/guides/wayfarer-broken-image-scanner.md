@@ -1,14 +1,13 @@
 # Wayfarer Broken Image Scanner
 
 <!-- summary: Finds your nominations whose photos no longer load, and makes a report you can send in. -->
-<!-- status: Not working right now: Wayfarer rebuilt its website in late 2026 and this add-on hasn't been updated for it yet. If you install it, it will update automatically once fixed. -->
 
 Checks all your nominations and photo edits for **photos that no longer load**, and creates a report you can send to Wayfarer.
 
 ## How to use it
 
-1. In Wayfarer, open the **Contributions** page and wait for your list to load.
-2. Click **Scan Broken Images**. The button is in the menu on the left, under the Wayfarer logo.
+1. In Wayfarer, click **Submit** in the menu at the top to open the **Submit a Wayspot** page.
+2. Click **Scan Broken Images**. The button is on the right, in the same row as the **Submissions** and **Drafts** tabs.
 3. A **Broken Image Scan** window opens and shows its progress ("Processed 120/450", "Broken found so far: 3").
 4. When it says **Scan complete**, the report lists each broken item with its date, title and location.
 5. Click **Copy Report**, then use the **Broken Wayspot Images Bug Report** link to share it.
@@ -20,6 +19,8 @@ Checks all your nominations and photo edits for **photos that no longer load**, 
 
 ## Troubleshooting
 
-**"No Wayfarer submissions have been loaded yet…"**: open the Contributions page first, wait for it to load, then click the button again.
+**I can't see the button**: make sure you're on the **Submit a Wayspot** page (click **Submit** at the top). If it still isn't there, reload the page.
 
-Don't click **Scan Broken Images** again while a scan is running. Wait for it to finish.
+**"Could not finish the scan…"**: Wayfarer didn't send your list of submissions. Reload the page and click the button again.
+
+While a scan is running the button is greyed out. Wait for it to finish before starting another.

@@ -1,22 +1,26 @@
 # Wayfarer Layout Mod
 
 <!-- summary: Rearranges the Review page to look more like the old Wayfarer layout, so more fits on screen. -->
-<!-- status: Not working right now: Wayfarer rebuilt its website in late 2026 and this add-on hasn't been updated for it yet. If you install it, it will update automatically once fixed. -->
+<!-- status: Not needed any more: Wayfarer's rebuilt Review page (late 2026) already uses this layout, with the title, photo and supporting information side by side and the duplicates map next to the questions. This add-on now does nothing, so you can uninstall it. -->
 
-Rearranges the **Review** page to look more like the old Wayfarer layout, so more fits on screen at once.
+Rearranged the **Review** page to look more like the old Wayfarer layout, so more fit on screen at once.
 
-## What changes
+## Why it's no longer needed
 
-This only affects reviews of **new Wayspots**. Edit and photo reviews are left alone.
+In late 2026 Wayfarer rebuilt its website. The new **Review** page already looks the way this add-on used to make it:
 
-- The title and description, the main photo, and the supporting information sit **side by side** across the top.
-- Underneath, the duplicates map and category card are on the **left** and the questions are on the **right**.
-- The street address moves under the description.
-- "I don't know" buttons are shortened to **IDK**.
-- The questions are grouped under **Rejection Criteria** and **Eligibility Criteria** headings.
+- The **Title and Description**, **Photo** and **Supporting Information** cards sit **side by side** across the top.
+- Underneath, the duplicates map is on the **left** and the questions are on the **right**.
+- The street address and coordinates are shown under the photo.
 
-## How to use it
+If you still have it installed, it stays out of the way and doesn't change anything. You can remove it from Tampermonkey's dashboard whenever you like.
 
-Install it and start reviewing. There are no buttons or settings.
+## What it used to do
 
-If the layout looks the same as before, Wayfarer may have changed its page. Check for updates, or [report it](https://github.com/JeremyChuaWX/wayfarer-addons/issues/new).
+On the old website, for reviews of **new Wayspots** only:
+
+- Put the title and description, the main photo and the supporting information side by side across the top.
+- Put the duplicates map and category card on the left and the questions on the right.
+- Moved the street address under the description.
+- Shortened "I don't know" buttons to **IDK**.
+- Grouped the questions under **Rejection Criteria** and **Eligibility Criteria** headings.

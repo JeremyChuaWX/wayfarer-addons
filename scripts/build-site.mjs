@@ -35,9 +35,10 @@ const GROUPS = [
 // Scripts kept in the repo (and still served, so existing installs keep
 // updating) but not shown on the install page, e.g. known not to work yet.
 const HIDDEN = new Set([
-  // Wayfarer's rebuilt submit page doesn't match this script's selectors, and
-  // appears to read photo GPS natively. Needs a logged-in check before listing.
+  // Retired: the rebuilt Wayfarer site does these jobs itself. Their guides stay
+  // online (linked from the add-ons' Tampermonkey "homepage") to explain why.
   'wayfarer-map-mods-exif-auto-center',
+  'wayfarer-layout-mod',
 ]);
 
 // ---------------------------------------------------------------------------

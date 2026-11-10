@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Abuse Text Formatter
-// @version      0.2.1
+// @version      0.3.0
 // @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @description  Adds text for copy & paste into Abuse form
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
@@ -9,6 +9,9 @@
 // @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/wayfarer-abuse-text-formatter.html
 // @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
 // @match        https://wayfarer.scopely.com/*
+// @run-at       document-start
+// @grant        none
+// @inject-into  page
 // ==/UserScript==
 
 // Copyright 2024 tnt
@@ -31,124 +34,115 @@
 
 /* eslint-env es6 */
 /* eslint no-var: "error" */
-/* eslint indent: ['error', 2] */
 
-(function() {
+(function () {
+    'use strict';
 
-    /**
-     * Overwrite the open method of the XMLHttpRequest.prototype to intercept the server calls
-     */
-    (function (open) {
-        XMLHttpRequest.prototype.open = function (method, url) {
-            if (url == '/api/v1/vault/review') {
-                if (method == 'GET') {
-                    this.addEventListener('load', checkResponse, false);
-                }
-            }
-            open.apply(this, arguments);
-        };
-    })(XMLHttpRequest.prototype.open);
+    // Runs in the page itself (see @inject-into) so it can watch the website's
+    // own requests. Guard against being injected twice.
+    if (window.__wfaAbuseTextFormatter) return;
+    window.__wfaAbuseTextFormatter = true;
 
-    function checkResponse(e) {
+    const REVIEW_API = '/api/v1/vault/review';
+    const REPORT_URL = 'https://scopelyexplore.helpshift.com/hc/en/10-wayfarer/faq/1999-reporting-abuse-in-wayfarer/';
+    const LINE_CLASS = 'wfa-abuse-text';
+
+    let candidate = null; // The nomination currently being reviewed.
+    let observer = null;
+    let pending = null;
+
+    // Wayfarer loads each review with fetch('/api/v1/vault/review'). Read a copy
+    // of the response; the website gets the original untouched.
+    const originalFetch = window.fetch;
+    window.fetch = function (input, init) {
+        const result = originalFetch.apply(this, arguments);
         try {
-            const response = this.response;
-            const json = JSON.parse(response);
-            if (!json) {
-                console.warn('Failed to parse response from Wayfarer');
-                return;
+            if (isReviewRequest(input, init)) {
+                result.then(response => {
+                    if (response.ok) response.clone().json().then(onReview).catch(() => {});
+                }).catch(() => {});
             }
-            // ignore if it's related to captchas
-            if (json.captcha) return;
-
-            const candidate = json.result;
-            if (!candidate) {
-                console.warn('Wayfarer\'s response didn\'t include a candidate.');
-                return;
-            }
-
-            if (candidate.type === 'NEW' || candidate.type === 'PHOTO') {
-                insertReportLink(candidate);
-            } else if (candidate.type === 'EDIT') {
-                insertEditReportLink(candidate);
-            }
-
         } catch (e) {
-            console.log(e); // eslint-disable-line no-console
+            console.warn('[Abuse Text Formatter]', e);
         }
+        return result;
+    };
+
+    function isReviewRequest(input, init) {
+        const url = typeof input === 'string' || input instanceof URL ? String(input) : input?.url;
+        const method = (init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+        if (!url || method !== 'GET') return false;
+        const parsed = new URL(url, location.href);
+        return parsed.origin === location.origin && parsed.pathname === REVIEW_API;
     }
 
-     const awaitElement = get => new Promise((resolve, reject) => {
-                let triesLeft = 30;
-                const queryLoop = () => {
-                        const ref = get();
-                        if (ref) resolve(ref);
-                        else if (!triesLeft) reject();
-                        else setTimeout(queryLoop, 100);
-                        triesLeft--;
-                }
-                queryLoop();
-     });
+    function onReview(json) {
+        // Ignore captcha responses and empty queues.
+        const next = json && !json.captcha ? json.result : null;
+        candidate = next && typeof next.lat === 'number' && typeof next.lng === 'number' ? next : null;
+        document.querySelectorAll('.' + LINE_CLASS).forEach(el => el.remove());
+        if (candidate) watch();
+        else stopWatching();
+    }
 
-    function createReportText(candidate) {
-        const { title, lat, lng } = candidate;
+    function reportText({ title, lat, lng }) {
+        return `${title ? `"${title}"` : '[Unknown Title]'} at ${lat},${lng} `;
+    }
 
-        // Create a new div element
-        const newDiv = document.createElement('div');
+    function createLine(text) {
+        const line = document.createElement('div');
+        line.className = LINE_CLASS;
+        line.style.cssText = 'margin-top:8px;font-size:14px;line-height:1.5;user-select:text;overflow-wrap:anywhere;';
+        line.append(text);
 
-        // Set the content of the new div element
-        if (title) {
-            newDiv.textContent = `"${title}" at ${lat},${lng} `;
-        } else {
-            newDiv.textContent = `[Unknown Title] at ${lat},${lng} `;
-        }
-
-        // Create a hyperlink element
-        const reportLink = document.createElement('a');
-        reportLink.textContent = '[Report]';
-        reportLink.href = 'https://scopelyexplore.helpshift.com/hc/en/10-wayfarer/faq/1999-reporting-abuse-in-wayfarer/';
+        const link = document.createElement('a');
+        link.textContent = '[Report]';
+        link.href = REPORT_URL;
         // Open in a new tab so the in-progress review isn't lost.
-        reportLink.target = '_blank';
-        reportLink.rel = 'noopener noreferrer';
-
-        // Append the hyperlink element to the new div element
-        newDiv.appendChild(reportLink);
-
-        return newDiv;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.style.cssText = 'text-decoration:underline;';
+        line.appendChild(link);
+        return line;
     }
 
-    function insertReportLink(candidate) {
-        // Use awaitElement to wait for the target div element to be available
-        awaitElement(() => document.querySelector('.mt-2'))
-            .then(targetElement => {
-            const { title, lat, lng } = candidate;
+    // Show the line under the "Review" page heading. That heading is the same
+    // for every kind of review, so this works for new, photo and edit reviews.
+    function placeLine() {
+        pending = null;
+        if (!candidate) return;
+        if (!/^\/review(\/|$)/.test(location.pathname)) {
+            // Left the Review page: the next visit loads a fresh review.
+            candidate = null;
+            stopWatching();
+            return;
+        }
+        const heading = document.getElementById('review-page-title') || document.querySelector('main h1');
+        if (!heading?.parentElement) return;
 
-            const abuseTextDiv = createReportText(candidate);
+        const text = reportText(candidate);
+        const existing = heading.parentElement.querySelector(':scope > .' + LINE_CLASS);
+        if (existing && existing.firstChild?.nodeValue === text) return; // Already showing.
+        existing?.remove();
+        heading.parentElement.appendChild(createLine(text));
+    }
 
-            // Insert the new div element before the target element
-            targetElement.parentNode.insertBefore(abuseTextDiv, targetElement);
-        })
-            .catch(() => {
-            console.log("Target div element not found.");
+    // React rebuilds parts of the page at any time, which can throw the line
+    // away. Put it back when that happens. placeLine() does nothing while the
+    // line is in place, so adding it doesn't cause another round of changes.
+    function watch() {
+        placeLine();
+        if (observer) return;
+        observer = new MutationObserver(() => {
+            if (!pending) pending = setTimeout(placeLine, 100);
         });
+        observer.observe(document.documentElement, { childList: true, subtree: true });
     }
 
-    function insertEditReportLink(candidate) {
-        // Use awaitElement to wait for the target div element to be available
-        awaitElement(() => document.querySelector('.review-edit-info'))
-            .then(targetElement => {
-
-            const abuseTextDiv = createReportText(candidate);
-
-            // Insert the new div element as the second child of the target element
-            if (targetElement.children.length >= 1) {
-                targetElement.insertBefore(abuseTextDiv, targetElement.children[1]);
-            } else {
-                targetElement.appendChild(abuseTextDiv); // If no child exists, simply append
-            }
-        })
-            .catch(() => {
-            console.log("Target div element not found.");
-        });
+    function stopWatching() {
+        observer?.disconnect();
+        observer = null;
+        if (pending) clearTimeout(pending);
+        pending = null;
     }
-
 })();
