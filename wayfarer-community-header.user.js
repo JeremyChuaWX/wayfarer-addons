@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Community Header Layout
-// @version      1.2.17
+// @version      1.2.18
 // @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @description  Changes the header links on Wayfarer Community Forum
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
@@ -9,7 +9,6 @@
 // @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/wayfarer-community-header.html
 // @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
 // @match        https://community.wayfarer.scopely.com/*
-// @match        https://community.wayfarer.nianticlabs.com/*
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==

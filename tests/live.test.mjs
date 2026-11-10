@@ -14,7 +14,7 @@ await test('Community Header: runs on the forum and stays idle', async () => {
   const errors = collectErrors(page);
   await page.addInitScript(mutationCounterInit);
   // Old address on purpose: checks the redirect lands where the script now matches.
-  await gotoWithRetry(page, 'https://community.wayfarer.nianticlabs.com/');
+  await gotoWithRetry(page, 'https://community.wayfarer.scopely.com/');
   assert(page.url().startsWith('https://community.wayfarer.scopely.com/'), `unexpected forum URL ${page.url()}`);
   await page.locator('.wayfarer-flags-applied').waitFor({ timeout: 15000 });
   const flags = await page.locator('.wayfarer-flags-applied a').evaluateAll((as) => as.map((a) => a.href));

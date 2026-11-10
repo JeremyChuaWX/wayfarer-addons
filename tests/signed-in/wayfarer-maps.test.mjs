@@ -1,18 +1,11 @@
-// Test: Wayfarer add-ons that draw on or drive Wayfarer's Google Maps.
-//
-//  - Bonus Area Visualiser: avatar menu → Settings → Location shows a map for
-//    the Hometown and the Bonus location; the add-on draws nine S2 cells
-//    around each pin.
-//  - EXIF Auto-Center is retired: Wayfarer's /submit/new page now moves the
-//    map to the main photo's GPS location by itself. The test checks that this
-//    built-in behaviour still exists (if it disappears, the add-on needs
-//    reviving) and that the retired add-on causes no errors.
+// Test: Bonus Area Visualiser. Avatar menu → Settings → Location shows a map
+// for the Hometown and the Bonus location; the add-on draws nine S2 cells
+// around each pin.
 //
 // Uses the login saved by `npm run test:login`, on a throwaway copy, with the
 // read-only guard from launchSignedIn(). Nothing is saved or submitted: the
-// Settings window is only opened and closed, and the photo is only chosen
-// (never uploaded or submitted). Never loads /review (that assigns a
-// nomination). Prints no locations from the account; the photo and browser
+// Settings window is only opened and closed. Never loads /review (that assigns a
+// nomination). Prints no locations from the account; the test pin and browser
 // location are synthetic (Sydney Harbour).
 import { launchSignedIn, hasSavedLogin, installFromUrl, collectErrors, gotoWithRetry, mutationCounterInit, idleMutationRate } from '../lib/harness.mjs';
 import { serveSite } from '../lib/serve.mjs';
@@ -27,7 +20,7 @@ if (!hasSavedLogin()) {
 
 // Synthetic locations, nowhere near the account's own.
 const BROWSER_LOCATION = { latitude: -33.8568, longitude: 151.2153 };
-const PHOTO_LOCATION = { lat: -33.8600, lng: 151.2100 };
+const TEST_PIN = { lat: -33.8600, lng: 151.2100 };
 
 // Serve the working copy (repo root) so the local scripts are installed.
 const site = await serveSite(resolve('.'));
@@ -35,9 +28,7 @@ const { ctx, blocked } = await launchSignedIn();
 await ctx.grantPermissions(['geolocation'], { origin: 'https://wayfarer.scopely.com' });
 await ctx.setGeolocation(BROWSER_LOCATION);
 
-for (const s of ['wayfarer-bonus-area-visualiser', 'wayfarer-map-mods-exif-auto-center']) {
-  await installFromUrl(ctx, site.url + s + '.user.js');
-}
+await installFromUrl(ctx, site.url + 'wayfarer-bonus-area-visualiser.user.js');
 
 const dismissCookies = (page) => page.getByRole('button', { name: 'Decline' }).click({ timeout: 3000 }).catch(() => {});
 const scriptErrors = (errors) => errors.filter((e) => !/Failed to load resource|net::ERR|status of 4\d\d/.test(e));
@@ -182,7 +173,7 @@ await test('Bonus Area Visualiser: squares follow the pin, and ignore the blue "
     await settle();
     out.clearedWithPin = squaresOn(map).length === 0;
     return out;
-  }, PHOTO_LOCATION);
+  }, TEST_PIN);
   assert(r.dotIgnored, 'squares moved to the blue location dot');
   assert(r.followsPin, 'squares did not move to the new pin');
   assert(r.clearedWithPin, 'squares stayed after the pin was removed');
@@ -194,80 +185,8 @@ await test('Bonus Area Visualiser: no add-on errors', async () => {
   assert(!e.length, 'page errors: ' + e.join('; '));
 });
 
-// A small JPEG with GPS EXIF at PHOTO_LOCATION, written by hand (no image tools needed).
-function jpegWithGps(jpeg, lat, lng) {
-  const tiff = Buffer.alloc(128);
-  tiff.write('MM', 0, 'ascii'); tiff.writeUInt16BE(42, 2); tiff.writeUInt32BE(8, 4);
-  tiff.writeUInt16BE(1, 8); // IFD0: one entry, a pointer to the GPS IFD at 26
-  tiff.writeUInt16BE(0x8825, 10); tiff.writeUInt16BE(4, 12); tiff.writeUInt32BE(1, 14); tiff.writeUInt32BE(26, 18);
-  tiff.writeUInt16BE(4, 26); // GPS IFD: 4 entries
-  const entry = (i, tag, type, count, value) => {
-    const o = 28 + i * 12;
-    tiff.writeUInt16BE(tag, o); tiff.writeUInt16BE(type, o + 2); tiff.writeUInt32BE(count, o + 4);
-    if (typeof value === 'string') tiff.write(value, o + 8, 'ascii'); else tiff.writeUInt32BE(value, o + 8);
-  };
-  entry(0, 1, 2, 2, lat >= 0 ? 'N\0' : 'S\0');
-  entry(1, 2, 5, 3, 80);
-  entry(2, 3, 2, 2, lng >= 0 ? 'E\0' : 'W\0');
-  entry(3, 4, 5, 3, 104);
-  const dms = (v, off) => {
-    v = Math.abs(v);
-    const d = Math.floor(v), m = Math.floor((v - d) * 60), s = Math.round(((v - d) * 60 - m) * 60 * 10000);
-    [[d, 1], [m, 1], [s, 10000]].forEach(([n, den], k) => { tiff.writeUInt32BE(n, off + k * 8); tiff.writeUInt32BE(den, off + k * 8 + 4); });
-  };
-  dms(lat, 80); dms(lng, 104);
-  const app1 = Buffer.alloc(10);
-  app1.writeUInt16BE(0xffe1, 0); app1.writeUInt16BE(2 + 6 + tiff.length, 2); app1.write('Exif\0\0', 4, 'binary');
-  return Buffer.concat([jpeg.subarray(0, 2), app1, tiff, jpeg.subarray(2)]);
-}
-
-await test('EXIF (retired add-on): Wayfarer itself moves the nomination map to the photo\'s location', async () => {
-  const p = await ctx.newPage();
-  const errs = collectErrors(p);
-  // Record the submit page's map so its centre can be read.
-  await p.addInitScript(() => {
-    window.__maps = new Set();
-    const iv = setInterval(() => {
-      const M = window.google?.maps?.Map;
-      if (!M || M.prototype.__testWrapped) return;
-      for (const k of ['setCenter', 'panTo', 'getCenter']) {
-        const o = M.prototype[k];
-        M.prototype[k] = function (...a) { window.__maps.add(this); return o.apply(this, a); };
-      }
-      M.prototype.__testWrapped = true;
-      clearInterval(iv);
-    }, 20);
-  });
-  await gotoWithRetry(p, 'https://wayfarer.scopely.com/submit/new');
-  await dismissCookies(p);
-  const base = Buffer.from(await p.evaluate(() => {
-    const c = document.createElement('canvas'); c.width = 640; c.height = 480;
-    const x = c.getContext('2d'); x.fillStyle = '#4a8'; x.fillRect(0, 0, 640, 480);
-    return c.toDataURL('image/jpeg', 0.9).split(',')[1];
-  }), 'base64');
-  await p.getByText('Select an image to upload').first().click({ timeout: 30000 });
-  // Choosing the photo only previews it; nothing is uploaded until Submit/Save as Draft.
-  await p.locator('[role=dialog] input[type=file][data-testid=file-input]').setInputFiles({
-    name: 'photo.jpg', mimeType: 'image/jpeg', buffer: jpegWithGps(base, PHOTO_LOCATION.lat, PHOTO_LOCATION.lng),
-  });
-  const near = () => p.evaluate(({ lat, lng }) => [...window.__maps].some((m) => {
-    const c = m.getDiv().isConnected && m.getCenter();
-    return c && Math.abs(c.lat() - lat) < 1e-4 && Math.abs(c.lng() - lng) < 1e-4;
-  }), PHOTO_LOCATION);
-  await p.waitForFunction(({ lat, lng }) => [...window.__maps].some((m) => {
-    const c = m.getDiv().isConnected && m.getCenter();
-    return c && Math.abs(c.lat() - lat) < 1e-4 && Math.abs(c.lng() - lng) < 1e-4;
-  }), PHOTO_LOCATION, { timeout: 15000 }).catch(() => {});
-  assert(await near(), 'map did not move to the photo location: Wayfarer may have dropped this, so the EXIF add-on would be needed again');
-  // The Location box shows the photo's coordinates too (i.e. the pin moved, not just the view).
-  await p.getByText(`(${PHOTO_LOCATION.lat.toFixed(6)}, ${PHOTO_LOCATION.lng.toFixed(6)})`).waitFor({ timeout: 10000 });
-  const e = scriptErrors(errs);
-  assert(!e.length, 'page errors: ' + e.join('; '));
-  await p.close();
-});
-
 await test('Nothing was sent to Wayfarer', async () => {
-  // Opening Settings and choosing a photo only read from Wayfarer, so the
+  // Opening Settings only reads from Wayfarer, so the
   // read-only guard should not have had to block anything.
   assert(blocked.length === 0, 'blocked requests: ' + blocked.join(', '));
 });

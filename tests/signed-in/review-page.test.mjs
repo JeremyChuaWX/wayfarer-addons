@@ -48,9 +48,7 @@ if (!nomination?.lat) {
   process.exit(0);
 }
 
-for (const s of ['wayfarer-abuse-text-formatter', 'wayfarer-layout-mod']) {
-  await installFromUrl(ctx, site.url + s + '.user.js');
-}
+await installFromUrl(ctx, site.url + 'wayfarer-abuse-text-formatter.user.js');
 
 // Serve the saved review (or a variant of it) instead of asking Wayfarer for one.
 let served = nomination;
@@ -94,14 +92,6 @@ await test('Abuse Text Formatter: puts the line back if the page redraws', async
   await page.evaluate(() => document.querySelector('.wfa-abuse-text').remove());
   await lines(page).first().waitFor({ timeout: 5000 });
   assert(await lines(page).count() === 1, 'line not restored exactly once');
-});
-
-await test('Layout Mod: leaves the new Review page alone', async () => {
-  // Retired (v0.3.0 does nothing): the new page already has this layout.
-  assert(await page.locator('.top-row-container, .left-column-container, .wlm-eligibility-heading').count() === 0, 'layout containers were added');
-  for (const slot of ['title-and-description', 'nomination-photo', 'supporting-info']) {
-    assert(await page.locator(`[data-testid="review-new-${slot}-slot"] > *`).count() > 0, `${slot} card moved out of its place`);
-  }
 });
 
 await test('Review page: stays idle (no mutation loop)', async () => {

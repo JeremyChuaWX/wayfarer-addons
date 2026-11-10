@@ -26,20 +26,11 @@ export const NAMESPACE = REPO_URL;
 
 // Which group each script is shown under, keyed by @match hostname.
 const GROUPS = [
-  { id: 'wayfarer', title: 'Wayfarer', hosts: ['wayfarer.scopely.com', 'wayfarer.nianticlabs.com'], link: 'https://wayfarer.scopely.com/' },
-  { id: 'community', title: 'Wayfarer Community Forum', hosts: ['community.wayfarer.scopely.com', 'community.wayfarer.nianticlabs.com'], link: 'https://community.wayfarer.scopely.com/' },
+  { id: 'wayfarer', title: 'Wayfarer', hosts: ['wayfarer.scopely.com'], link: 'https://wayfarer.scopely.com/' },
+  { id: 'community', title: 'Wayfarer Community Forum', hosts: ['community.wayfarer.scopely.com'], link: 'https://community.wayfarer.scopely.com/' },
   { id: 'pogo', title: 'Pokémon GO Map', hosts: ['pokemongo.com'], link: 'https://pokemongo.com/en/map' },
   { id: 'ingress', title: 'Ingress Mission Creator', hosts: ['missions.ingress.com'], link: 'https://missions.ingress.com/' },
 ];
-
-// Scripts kept in the repo (and still served, so existing installs keep
-// updating) but not shown on the install page, e.g. known not to work yet.
-const HIDDEN = new Set([
-  // Retired: the rebuilt Wayfarer site does these jobs itself. Their guides stay
-  // online (linked from the add-ons' Tampermonkey "homepage") to explain why.
-  'wayfarer-map-mods-exif-auto-center',
-  'wayfarer-layout-mod',
-]);
 
 // ---------------------------------------------------------------------------
 
@@ -115,7 +106,7 @@ Licensed under the <a href="${REPO_URL}/blob/main/LICENSE">GNU GPL v3</a>. Not a
 
 function indexPage(scripts, guides) {
   const grouped = GROUPS.concat([{ id: 'other', title: 'Other' }])
-    .map((g) => ({ ...g, items: scripts.filter((s) => !HIDDEN.has(s.slug) && groupFor(s).id === g.id) }))
+    .map((g) => ({ ...g, items: scripts.filter((s) => groupFor(s).id === g.id) }))
     .filter((g) => g.items.length);
 
   const cards = grouped.map((g) => `
@@ -184,7 +175,7 @@ function indexPage(scripts, guides) {
 }
 
 function guidePage(slug, md, scriptsBySlug) {
-  const s = HIDDEN.has(slug) ? null : scriptsBySlug.get(slug);
+  const s = scriptsBySlug.get(slug);
   const header = s
     ? `<p class="crumb"><a href="../">← All add-ons</a></p>
 <div class="guide-head"><a class="btn install" href="../${esc(s.file)}">Install ${esc(s.name)}</a> <span class="ver">v${esc(s.version)}</span></div>

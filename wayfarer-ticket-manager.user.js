@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.10.1
+// @version      0.10.2
 // @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @description  Support for simultaneous tickets with optional cross-device sync
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
@@ -215,8 +215,9 @@ function init() {
         else document.addEventListener('DOMContentLoaded', watchMessageList, { once: true });
 
         (function(open) {
-            XMLHttpRequest.prototype.open = function(method, url) {
-                if (method === 'POST') {
+            XMLHttpRequest.prototype.open = function(method, rawUrl) {
+                const url = String(rawUrl); // open() also accepts URL objects
+                if (String(method).toUpperCase() === 'POST') {
                     if (url === 'https://api.helpshift.com/websdk/scopelyexplore/conversations/history' ||
                         url === 'https://api.helpshift.com/websdk/scopelyexplore/conversations/updates' ||
                         url.startsWith('https://api.helpshift.com/websdk/scopelyexplore/issues/')) {

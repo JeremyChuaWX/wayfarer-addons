@@ -18,7 +18,7 @@ if (!hasSavedLogin()) {
 const site = await serveSite();
 const { ctx } = await launchSignedIn();
 
-for (const s of ['wayfarer-ticket-manager', 'pokemon-go-map-s2', 'pokemon-go-map-search', 'pokemon-go-map-preview-card-details', 'pokemon-go-map-routes']) {
+for (const s of ['wayfarer-ticket-manager', 'pokemon-go-map-s2', 'pokemon-go-map-search', 'pokemon-go-map-preview-card-details']) {
   await installFromUrl(ctx, site.url + s + '.user.js');
 }
 
@@ -100,11 +100,6 @@ await test('Search: typing coordinates moves the map', async () => {
   const status = await map.locator('#pgo-better-search-status').innerText().catch(() => '');
   assert(!/error|fail|could not/i.test(status), `search status: ${status}`);
   await page.screenshot({ path: 'test-results/map-search.png' });
-});
-
-await test('Routes: steps aside for the map\'s built-in Routes filter', async () => {
-  const routeButtons = await map.locator('ion-button', { hasText: 'Routes' }).count();
-  assert(routeButtons === 1, `expected 1 Routes button, found ${routeButtons}`);
 });
 
 await test('Pokémon GO map: no add-on errors', async () => {
