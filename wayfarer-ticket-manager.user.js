@@ -1,6 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
 // @version      0.10.1
+// @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @description  Support for simultaneous tickets with optional cross-device sync
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
 // @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/wayfarer-ticket-manager.user.js

@@ -4,9 +4,11 @@
 
 Replaces the map's location button with a **search box** that understands both **place names** and **coordinates**.
 
+> The Pokémon GO map now asks you to **sign in with your Pokémon GO account** before it shows anything. Sign in first, and the add-on works once the map appears.
+
 ## How to use it
 
-The search box is at the top of the [Pokémon GO map](https://pokemongo.com/gamemap). It says **Search location or lat,lng**.
+The search box is at the top of the [Pokémon GO map](https://pokemongo.com/en/map). It says **Search location or lat,lng**.
 
 **Search for a place:**
 1. Type at least 3 letters, e.g. `Tokyo Tower`.

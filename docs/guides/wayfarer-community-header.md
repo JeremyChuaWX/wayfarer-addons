@@ -2,7 +2,7 @@
 
 <!-- summary: Tidies the forum header: flag buttons for English / Japanese, and help links always visible. -->
 
-Tidies the top bar of the [Wayfarer Community forum](https://community.wayfarer.nianticlabs.com/).
+Tidies the top bar of the [Wayfarer Community forum](https://community.wayfarer.scopely.com/).
 
 ## What changes
 

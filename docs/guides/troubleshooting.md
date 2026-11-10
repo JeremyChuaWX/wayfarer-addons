@@ -10,7 +10,7 @@
 2. **Turn on user scripts.** Recent versions of Chrome-based browsers block add-ons like these until you allow them:
    1. Right-click the Tampermonkey icon in the toolbar. If you can't see it, click the puzzle-piece icon first.
    2. Choose **Manage extension**.
-   3. Turn on **Allow User Scripts**.
+   3. Turn on **Allow user scripts**.
    4. If there's no such switch, open `chrome://extensions` (or `edge://extensions`) instead and turn on **Developer mode** in the top-right corner.
 3. Go back to the [add-on list](../index.html#addons) and click **Install** on an add-on.
 4. Tampermonkey opens a page showing the add-on's details. Click **Install** there.
@@ -35,7 +35,7 @@ Your userscript manager isn't installed, or it's switched off. On Safari this is
 **The add-on is installed but nothing happens.**
 - Refresh the website page.
 - Open your userscript manager's dashboard and check the add-on's switch is on.
-- On Chrome, Edge or Brave, check **Allow User Scripts** / **Developer mode** is on ([see above](#chrome)).
+- On Chrome, Edge or Brave, check **Allow user scripts** / **Developer mode** is on ([see above](#chrome)).
 - Make sure you're on the right website: each add-on only runs on the site listed above it on the install page.
 
 **I see everything twice (two buttons, two panels).**

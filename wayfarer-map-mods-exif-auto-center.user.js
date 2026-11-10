@@ -1,6 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Exif Auto-Center
 // @version      0.2.2
+// @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @description  Read EXIF GPS from the main photo upload and auto-center the submit map.
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
 // @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/wayfarer-map-mods-exif-auto-center.user.js

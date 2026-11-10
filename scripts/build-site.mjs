@@ -27,8 +27,8 @@ export const NAMESPACE = REPO_URL;
 // Which group each script is shown under, keyed by @match hostname.
 const GROUPS = [
   { id: 'wayfarer', title: 'Wayfarer', hosts: ['wayfarer.scopely.com', 'wayfarer.nianticlabs.com'], link: 'https://wayfarer.scopely.com/' },
-  { id: 'community', title: 'Wayfarer Community Forum', hosts: ['community.wayfarer.nianticlabs.com'], link: 'https://community.wayfarer.nianticlabs.com/' },
-  { id: 'pogo', title: 'Pokémon GO Map', hosts: ['pokemongo.com'], link: 'https://pokemongo.com/gamemap' },
+  { id: 'community', title: 'Wayfarer Community Forum', hosts: ['community.wayfarer.scopely.com', 'community.wayfarer.nianticlabs.com'], link: 'https://community.wayfarer.scopely.com/' },
+  { id: 'pogo', title: 'Pokémon GO Map', hosts: ['pokemongo.com'], link: 'https://pokemongo.com/en/map' },
   { id: 'ingress', title: 'Ingress Mission Creator', hosts: ['missions.ingress.com'], link: 'https://missions.ingress.com/' },
 ];
 
@@ -155,7 +155,7 @@ function indexPage(scripts, guides) {
       </ul>
       <div class="note" data-browser-note="chrome">
         <b>Chrome / Edge / Brave:</b> one more setting is needed or the add-ons won't run.
-        Right-click the Tampermonkey icon → <b>Manage extension</b> → turn on <b>Allow User Scripts</b>.
+        Right-click the Tampermonkey icon → <b>Manage extension</b> → turn on <b>Allow user scripts</b>.
         (Older browser versions: turn on <b>Developer mode</b> at the top-right of the Extensions page instead.)
         <a href="./guides/troubleshooting.html#chrome">Step-by-step help</a>.
       </div>

@@ -1,6 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Broken Image Scanner
-// @version      0.2.0
+// @version      0.2.1
+// @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @description  Scans the Contribution Management page for broken image urls
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
 // @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/wayfarer-broken-image-scanner.user.js
@@ -435,7 +436,7 @@ function init() {
         const infoItem = document.createElement('li');
 
         const infoLink = document.createElement('a');
-        infoLink.href = 'https://community.wayfarer.nianticlabs.com/t/broken-wayspot-images-for-wayspots-originally-submitted-via-ingress-prime-beta-in-2019/113002';
+        infoLink.href = 'https://community.wayfarer.scopely.com/t/broken-wayspot-images-for-wayspots-originally-submitted-via-ingress-prime-beta-in-2019/113002';
         infoLink.target = '_blank';
         infoLink.rel = 'noopener noreferrer';
         infoLink.textContent = 'Broken Wayspot Images Bug Report';

@@ -7,7 +7,7 @@
 //   git fetch upstream && git merge upstream/main
 //   node scripts/fix-metadata.mjs
 //
-// Sets @namespace, @downloadURL, @updateURL, @homepageURL and @supportURL,
+// Sets @author, @namespace, @downloadURL, @updateURL, @homepageURL and @supportURL,
 // adding any that are missing. Everything else in the header is untouched.
 
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
@@ -18,7 +18,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SITE_URL = 'https://jeremychuawx.github.io/wayfarer-addons/';
 const REPO_URL = 'https://github.com/JeremyChuaWX/wayfarer-addons';
 
-const ORDER = ['namespace', 'downloadURL', 'updateURL', 'homepageURL', 'supportURL'];
+const ORDER = ['author', 'namespace', 'downloadURL', 'updateURL', 'homepageURL', 'supportURL'];
 
 let changed = 0;
 for (const file of readdirSync(ROOT).filter((f) => f.endsWith('.user.js'))) {
@@ -28,6 +28,7 @@ for (const file of readdirSync(ROOT).filter((f) => f.endsWith('.user.js'))) {
   if (!m) { console.warn(`skip ${file}: no header`); continue; }
 
   const want = {
+    author: 'Tntnnbltn (fork maintained by JeremyChuaWX)',
     namespace: REPO_URL,
     downloadURL: SITE_URL + file,
     updateURL: SITE_URL + file,

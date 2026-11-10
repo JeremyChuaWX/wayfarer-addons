@@ -1,6 +1,7 @@
 // ==UserScript==
 // @name         Pokémon Go Map Search
-// @version      0.2.2
+// @version      0.2.3
+// @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @description  Improves the functionality of the Pokemon Go Map search bar
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
 // @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/pokemon-go-map-search.user.js
@@ -8,6 +9,7 @@
 // @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/pokemon-go-map-search.html
 // @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
 // @match        https://pokemongo.com/gamemap*
+// @match        https://pokemongo.com/*/map*
 // @run-at       document-start
 // @grant        unsafeWindow
 // @grant        GM_xmlhttpRequest

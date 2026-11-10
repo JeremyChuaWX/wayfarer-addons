@@ -1,6 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Bonus Area Visualiser
 // @version      1.2.1
+// @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @description  Shows L7 cells covered by Home and Bonus areas
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
 // @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/wayfarer-bonus-area-visualiser.user.js

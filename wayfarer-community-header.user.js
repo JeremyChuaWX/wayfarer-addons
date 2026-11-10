@@ -1,12 +1,14 @@
 // ==UserScript==
 // @name         Wayfarer Community Header Layout
-// @version      1.2.16
+// @version      1.2.17
+// @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @description  Changes the header links on Wayfarer Community Forum
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
 // @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/wayfarer-community-header.user.js
 // @updateURL    https://jeremychuawx.github.io/wayfarer-addons/wayfarer-community-header.user.js
 // @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/wayfarer-community-header.html
 // @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
+// @match        https://community.wayfarer.scopely.com/*
 // @match        https://community.wayfarer.nianticlabs.com/*
 // @run-at       document-start
 // @grant        none
@@ -17,8 +19,8 @@
 (function () {
   "use strict";
 
-  const HOME_URL = "https://community.wayfarer.nianticlabs.com/";
-  const JP_URL = "https://community.wayfarer.nianticlabs.com/c/japan/56";
+  const HOME_URL = "https://community.wayfarer.scopely.com/";
+  const JP_URL = "https://community.wayfarer.scopely.com/c/japan/56";
   const STYLE_ID = "wayfarer-header-tweaks-style";
 
   function ensureStyles() {

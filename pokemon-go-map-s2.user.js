@@ -1,6 +1,7 @@
 // ==UserScript==
 // @name         Pokémon Go Map S2 Grids
-// @version      0.2.2
+// @version      0.2.3
+// @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @description  Adds L17 and L14 S2 cells to the Pokemon Go Map
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
 // @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/pokemon-go-map-s2.user.js
@@ -8,6 +9,7 @@
 // @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/pokemon-go-map-s2.html
 // @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
 // @match        https://pokemongo.com/gamemap*
+// @match        https://pokemongo.com/*/map*
 // @run-at       document-start
 // @grant        none
 // @inject-into  page

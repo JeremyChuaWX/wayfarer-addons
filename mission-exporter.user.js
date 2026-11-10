@@ -7,6 +7,7 @@
 // @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/mission-exporter.html
 // @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
 // @version      0.1.2
+// @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @match        https://missions.ingress.com/*
 // @grant        none
 // ==/UserScript==

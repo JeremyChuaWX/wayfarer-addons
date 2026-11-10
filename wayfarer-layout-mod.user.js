@@ -1,6 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Layout Mod
 // @version      0.2.0
+// @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @description  Restores the layout to be more similar to the old layout
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
 // @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/wayfarer-layout-mod.user.js

@@ -1,6 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Old Rating UI
 // @version      0.1.1
+// @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @description  Restores the Rating UI on the Profile page
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
 // @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/wayfarer-old-rating-ui.user.js

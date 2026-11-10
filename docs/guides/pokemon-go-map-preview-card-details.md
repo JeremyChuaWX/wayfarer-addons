@@ -2,7 +2,9 @@
 
 <!-- summary: Shows the exact coordinates of PokéStops, Gyms and Routes. Click to copy. -->
 
-Shows the **exact coordinates** on the pop-up card when you click something on the [Pokémon GO map](https://pokemongo.com/gamemap).
+Shows the **exact coordinates** on the pop-up card when you click something on the [Pokémon GO map](https://pokemongo.com/en/map).
+
+> The Pokémon GO map now asks you to **sign in with your Pokémon GO account** before it shows anything. Sign in first, and the add-on works once the map appears.
 
 ## How to use it
 

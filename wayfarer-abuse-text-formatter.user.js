@@ -1,6 +1,7 @@
 // ==UserScript==
 // @name         Wayfarer Abuse Text Formatter
 // @version      0.2.1
+// @author       Tntnnbltn (fork maintained by JeremyChuaWX)
 // @description  Adds text for copy & paste into Abuse form
 // @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
 // @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/wayfarer-abuse-text-formatter.user.js

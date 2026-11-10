@@ -6,9 +6,13 @@
   "scripts": {
     "build": "node scripts/build-site.mjs",
     "check": "node scripts/build-site.mjs --check && for f in *.user.js; do node --check \"$f\" || exit 1; done",
-    "serve": "npm run build && npx --yes serve _site"
+    "serve": "npm run build && npx --yes serve _site",
+    "test:setup": "node tests/setup.mjs",
+    "test": "npm run build && PLAYWRIGHT_BROWSERS_PATH=0 node tests/install.test.mjs && PLAYWRIGHT_BROWSERS_PATH=0 node tests/live.test.mjs",
+    "test:browsers": "PLAYWRIGHT_BROWSERS_PATH=0 playwright install chromium"
   },
   "devDependencies": {
-    "marked": "^15.0.0"
+    "marked": "^15.0.0",
+    "playwright": "^1.65.0"
   }
 }
