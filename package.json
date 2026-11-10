@@ -1,0 +1,14 @@
+{
+  "name": "wayfarer-addons",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "build": "node scripts/build-site.mjs",
+    "check": "node scripts/build-site.mjs --check && for f in *.user.js; do node --check \"$f\" || exit 1; done",
+    "serve": "npm run build && npx --yes serve _site"
+  },
+  "devDependencies": {
+    "marked": "^15.0.0"
+  }
+}

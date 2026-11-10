@@ -1,0 +1,65 @@
+:root {
+  --bg: #fafaf7; --fg: #1d1d1f; --muted: #5f6368; --card: #fff; --line: #e3e3de;
+  --accent: #df471c; --accent-fg: #fff; --note: #fff7e0; --note-line: #f0d68a;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #16171a; --fg: #ececec; --muted: #a0a4ab; --card: #202227; --line: #33363d;
+          --note: #2c2716; --note-line: #6b5a22; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+       font: 17px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.wrap { max-width: 960px; margin: 0 auto; padding: 0 20px; }
+.top { border-bottom: 1px solid var(--line); background: var(--card); position: sticky; top: 0; z-index: 1; }
+.top .wrap { display: flex; align-items: center; justify-content: space-between; height: 56px; gap: 16px; }
+.brand { font-weight: 700; color: var(--fg); text-decoration: none; }
+nav a { margin-left: 18px; color: var(--muted); text-decoration: none; font-size: 15px; }
+nav a:hover { color: var(--fg); }
+.hero { padding: 48px 0 16px; }
+.hero h1 { font-size: clamp(28px, 5vw, 40px); line-height: 1.15; margin: 0 0 12px; }
+.hero p { font-size: 19px; color: var(--muted); max-width: 640px; }
+h2 { margin-top: 48px; }
+.steps ol { padding-left: 0; list-style: none; counter-reset: step; }
+.steps ol > li { counter-increment: step; position: relative; padding: 4px 0 8px 56px; margin-bottom: 16px; }
+.steps ol > li::before { content: counter(step); position: absolute; left: 0; top: 6px; width: 38px; height: 38px;
+  border-radius: 50%; background: var(--accent); color: var(--accent-fg); font-weight: 700;
+  display: grid; place-items: center; }
+.steps h3 { margin: 6px 0 4px; }
+.browsers { padding-left: 20px; }
+.browsers li { margin: 4px 0; padding: 2px 6px; border-radius: 6px; }
+.browsers li.mine { background: var(--note); outline: 1px solid var(--note-line); }
+.browsers li.mine::after { content: "  ← your browser"; color: var(--muted); font-size: 14px; }
+.note { background: var(--note); border: 1px solid var(--note-line); border-radius: 10px; padding: 12px 16px; margin: 12px 0; }
+.muted { color: var(--muted); }
+.group h3 { margin: 32px 0 12px; }
+.site-link { font-size: 14px; font-weight: 400; margin-left: 8px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; }
+.card h4 { margin: 0 0 6px; font-size: 18px; }
+.card p { margin: 0 0 14px; color: var(--muted); flex: 1; }
+.actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.btn { display: inline-block; padding: 8px 16px; border-radius: 8px; font-weight: 600; text-decoration: none; font-size: 15px; }
+.btn.install { background: var(--accent); color: var(--accent-fg); }
+.btn.install:hover { filter: brightness(1.08); }
+.btn.ghost { border: 1px solid var(--line); color: var(--fg); }
+.ver { color: var(--muted); font-size: 13px; margin-left: auto; }
+.crumb { margin-top: 24px; }
+.guide-head { display: flex; align-items: center; gap: 12px; margin: 8px 0 0; }
+.guide { max-width: 720px; padding-bottom: 32px; }
+.guide img { max-width: 100%; border: 1px solid var(--line); border-radius: 8px; }
+.guide code { background: var(--card); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; font-size: 0.9em; }
+.guide pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; }
+.guide pre code { border: 0; padding: 0; }
+.guide blockquote { margin: 16px 0; background: var(--note); border: 1px solid var(--note-line); border-radius: 10px; padding: 4px 16px; }
+.guide table { border-collapse: collapse; display: block; overflow-x: auto; } .guide th, .guide td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; }
+footer { border-top: 1px solid var(--line); margin-top: 64px; padding: 16px 20px 32px; color: var(--muted); font-size: 14px; }
+@media (max-width: 560px) {
+  body { font-size: 16px; }
+  .top .wrap { height: 52px; }
+  nav a { margin-left: 12px; }
+  nav a:nth-child(2), nav a:nth-child(4) { display: none; }
+  .steps ol > li { padding-left: 48px; }
+}
+.guide, .card, .note { overflow-wrap: break-word; }
