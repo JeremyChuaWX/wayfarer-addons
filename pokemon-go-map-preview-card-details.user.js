@@ -1,16 +1,19 @@
 // ==UserScript==
 // @name         Pokémon Go Map Preview Card Details
-// @version      0.1.2
+// @version      0.1.3
 // @description  Adds coordinates to Pokemon Go Map preview cards
-// @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/pokemon-go-map-preview-card-details.user.js
-// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/pokemon-go-map-preview-card-details.user.js
-// @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
+// @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
+// @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/pokemon-go-map-preview-card-details.user.js
+// @updateURL    https://jeremychuawx.github.io/wayfarer-addons/pokemon-go-map-preview-card-details.user.js
+// @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/pokemon-go-map-preview-card-details.html
+// @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
 // @match        https://pokemongo.com/gamemap*
 // @run-at       document-start
 // @grant        none
 // @inject-into  page
 // ==/UserScript==
+
+// Modified by JeremyChuaWX, 2026-11 — see https://github.com/JeremyChuaWX/wayfarer-addons/commits/main
 
 (() => {
     'use strict';
@@ -456,12 +459,14 @@
             });
         }
 
-        coordEl.dataset.coordText = payload.coordText;
-        coordEl.dataset.lat = String(payload.lat);
-        coordEl.dataset.lng = String(payload.lng);
+        // Only write when values change: every attribute/text write is itself a
+        // mutation, which would re-trigger the observer and rescan every 50ms.
+        if (coordEl.dataset.coordText !== payload.coordText) coordEl.dataset.coordText = payload.coordText;
+        if (coordEl.dataset.lat !== String(payload.lat)) coordEl.dataset.lat = String(payload.lat);
+        if (coordEl.dataset.lng !== String(payload.lng)) coordEl.dataset.lng = String(payload.lng);
 
         // Do not overwrite the temporary "copied" message during MutationObserver rescans.
-        if (!coordEl.classList.contains('pgo-card-coords-copied')) {
+        if (!coordEl.classList.contains('pgo-card-coords-copied') && coordEl.textContent !== `(${payload.coordText})`) {
             coordEl.textContent = `(${payload.coordText})`;
         }
 

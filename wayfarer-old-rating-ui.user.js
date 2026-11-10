@@ -1,17 +1,19 @@
 // ==UserScript==
 // @name         Wayfarer Old Rating UI
-// @version      0.1.0
+// @version      0.1.1
 // @description  Restores the Rating UI on the Profile page
-// @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-old-rating-ui.user.js
-// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-old-rating-ui.user.js
-// @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
+// @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
+// @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/wayfarer-old-rating-ui.user.js
+// @updateURL    https://jeremychuawx.github.io/wayfarer-addons/wayfarer-old-rating-ui.user.js
+// @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/wayfarer-old-rating-ui.html
+// @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
 // @match        https://wayfarer.scopely.com/*
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
 
 // Copyright 2026 tntnnbltn
+// Modified by JeremyChuaWX, 2026-11 — see https://github.com/JeremyChuaWX/wayfarer-addons/commits/main
 
 // This script is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -492,17 +494,17 @@
         XMLHttpRequest.prototype.open = function (method, url) {
             const isProfile =
                   (url === '/api/v1/vault/profile' ||
-                   url === 'https://wayfarer.nianticlabs.com/api/v1/vault/profile') &&
+                   url === 'https://wayfarer.scopely.com/api/v1/vault/profile') &&
                   method === 'GET';
 
             const isProperties =
                   (url === '/api/v1/vault/properties' ||
-                   url === 'https://wayfarer.nianticlabs.com/api/v1/vault/properties') &&
+                   url === 'https://wayfarer.scopely.com/api/v1/vault/properties') &&
                   method === 'GET';
 
             const isSettingsPost =
                   (url === '/api/v1/vault/settings' ||
-                   url === 'https://wayfarer.nianticlabs.com/api/v1/vault/settings') &&
+                   url === 'https://wayfarer.scopely.com/api/v1/vault/settings') &&
                   method === 'POST';
 
             if (isProfile) {
@@ -712,11 +714,14 @@
      ******************************************************************/
     function init() {
         injectStyles();
-        installApiListeners();
         scanAndInsert();
         installHtmlThemeObserver();
         refreshDarkModeFromHtmlIfNeeded();
     }
+
+    // Hook XHR immediately (document-start) so early profile/properties
+    // requests made before DOMContentLoaded are not missed.
+    installApiListeners();
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);

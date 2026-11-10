@@ -2,13 +2,16 @@
 // @name         Wayfarer Layout Mod
 // @version      0.2.0
 // @description  Restores the layout to be more similar to the old layout
-// @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-layout-mod.user.js
-// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-layout-mod.user.js
-// @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
+// @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
+// @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/wayfarer-layout-mod.user.js
+// @updateURL    https://jeremychuawx.github.io/wayfarer-addons/wayfarer-layout-mod.user.js
+// @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/wayfarer-layout-mod.html
+// @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
 // @match        https://wayfarer.scopely.com/*
 // @run-at       document-start
 // ==/UserScript==
+
+// Modified by JeremyChuaWX, 2026-11 — see https://github.com/JeremyChuaWX/wayfarer-addons/commits/main
 
 (function () {
     'use strict';

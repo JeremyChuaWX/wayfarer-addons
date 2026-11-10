@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         Pokémon Go Map Search
-// @version      0.2.1
+// @version      0.2.2
 // @description  Improves the functionality of the Pokemon Go Map search bar
-// @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/pokemon-go-map-search.user.js
-// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/pokemon-go-map-search.user.js
-// @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
+// @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
+// @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/pokemon-go-map-search.user.js
+// @updateURL    https://jeremychuawx.github.io/wayfarer-addons/pokemon-go-map-search.user.js
+// @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/pokemon-go-map-search.html
+// @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
 // @match        https://pokemongo.com/gamemap*
 // @run-at       document-start
 // @grant        unsafeWindow
@@ -15,6 +16,7 @@
 // ==/UserScript==
 
 // Copyright 2026 tntnnbltn
+// Modified by JeremyChuaWX, 2026-11 — see https://github.com/JeremyChuaWX/wayfarer-addons/commits/main
 
 // This script is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -307,7 +309,16 @@
         });
     }
 
+    // Nominatim usage policy: absolute maximum of 1 request per second.
+    // Reserve the next slot synchronously so overlapping searches are serialised.
+    let nominatimNextSlot = 0;
+
     async function geocodeNominatim(query) {
+        const now = Date.now();
+        const wait = Math.max(0, nominatimNextSlot - now);
+        nominatimNextSlot = now + wait + 1000;
+        if (wait) await new Promise(resolve => setTimeout(resolve, wait));
+
         const url = new URL('https://nominatim.openstreetmap.org/search');
         url.searchParams.set('q', query);
         url.searchParams.set('format', 'jsonv2');
@@ -879,6 +890,9 @@
         }
 
         input.addEventListener('keydown', ev => {
+            // Ignore keys used to confirm IME composition (e.g. Japanese input).
+            if (ev.isComposing || ev.keyCode === 229) return;
+
             const hasSuggestions = suggestions.style.display === 'block' && autocompleteResults.length > 0;
 
             if (ev.key === 'ArrowDown' && hasSuggestions) {

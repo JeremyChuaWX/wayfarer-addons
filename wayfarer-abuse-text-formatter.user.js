@@ -1,15 +1,17 @@
 // ==UserScript==
 // @name         Wayfarer Abuse Text Formatter
-// @version      0.2.0
+// @version      0.2.1
 // @description  Adds text for copy & paste into Abuse form
-// @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/raw/main/wayfarer-abuse-text-formatter.user.js
-// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/raw/main/wayfarer-abuse-text-formatter.user.js
-// @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
+// @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
+// @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/wayfarer-abuse-text-formatter.user.js
+// @updateURL    https://jeremychuawx.github.io/wayfarer-addons/wayfarer-abuse-text-formatter.user.js
+// @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/wayfarer-abuse-text-formatter.html
+// @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
 // @match        https://wayfarer.scopely.com/*
 // ==/UserScript==
 
 // Copyright 2024 tnt
+// Modified by JeremyChuaWX, 2026-11 — see https://github.com/JeremyChuaWX/wayfarer-addons/commits/main
 
 // This script is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -57,7 +59,7 @@
             // ignore if it's related to captchas
             if (json.captcha) return;
 
-            candidate = json.result;
+            const candidate = json.result;
             if (!candidate) {
                 console.warn('Wayfarer\'s response didn\'t include a candidate.');
                 return;
@@ -103,6 +105,9 @@
         const reportLink = document.createElement('a');
         reportLink.textContent = '[Report]';
         reportLink.href = 'https://scopelyexplore.helpshift.com/hc/en/10-wayfarer/faq/1999-reporting-abuse-in-wayfarer/';
+        // Open in a new tab so the in-progress review isn't lost.
+        reportLink.target = '_blank';
+        reportLink.rel = 'noopener noreferrer';
 
         // Append the hyperlink element to the new div element
         newDiv.appendChild(reportLink);

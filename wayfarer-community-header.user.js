@@ -1,15 +1,18 @@
 // ==UserScript==
 // @name         Wayfarer Community Header Layout
-// @version      1.2.15
+// @version      1.2.16
 // @description  Changes the header links on Wayfarer Community Forum
-// @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-community-header.user.js
-// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-community-header.user.js
-// @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
+// @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
+// @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/wayfarer-community-header.user.js
+// @updateURL    https://jeremychuawx.github.io/wayfarer-addons/wayfarer-community-header.user.js
+// @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/wayfarer-community-header.html
+// @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
 // @match        https://community.wayfarer.nianticlabs.com/*
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
+
+// Modified by JeremyChuaWX, 2026-11 — see https://github.com/JeremyChuaWX/wayfarer-addons/commits/main
 
 (function () {
   "use strict";
@@ -275,6 +278,7 @@
   }
 
   let scheduled = false;
+  let observer = null;
 
   function scheduleTweak() {
     if (scheduled) return;
@@ -284,6 +288,9 @@
     requestAnimationFrame(() => {
       scheduled = false;
       tweakHeader();
+      // Discard mutation records caused by tweakHeader itself (style text,
+      // classList, inline styles) so the observer does not re-trigger every frame.
+      if (observer) observer.takeRecords();
     });
   }
 
@@ -291,7 +298,7 @@
     ensureStyles();
     tweakHeader();
 
-    const observer = new MutationObserver(scheduleTweak);
+    observer = new MutationObserver(scheduleTweak);
     observer.observe(document.documentElement, {
       childList: true,
       subtree: true,

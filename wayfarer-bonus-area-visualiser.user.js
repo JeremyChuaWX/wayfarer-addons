@@ -1,17 +1,19 @@
 // ==UserScript==
 // @name         Wayfarer Bonus Area Visualiser
-// @version      1.2.0
+// @version      1.2.1
 // @description  Shows L7 cells covered by Home and Bonus areas
-// @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-bonus-area-visualiser.user.js
-// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-bonus-area-visualiser.user.js
-// @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
+// @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
+// @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/wayfarer-bonus-area-visualiser.user.js
+// @updateURL    https://jeremychuawx.github.io/wayfarer-addons/wayfarer-bonus-area-visualiser.user.js
+// @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/wayfarer-bonus-area-visualiser.html
+// @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
 // @match        https://wayfarer.scopely.com/*
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
 
 // Copyright 2026 tntnnbltn
+// Modified by JeremyChuaWX, 2026-11 — see https://github.com/JeremyChuaWX/wayfarer-addons/commits/main
 
 // This script is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -35,6 +37,7 @@
 
     let routeActive = false;
     let lastLoggedKey = null;
+    let mapsPatched = false;
 
     // Map + overlays (polygons)
     let settingsMap = null;
@@ -85,6 +88,9 @@
     // Google Maps patching
     // -------------------------
     function ensureGoogleMapsPatched() {
+        // Patch once only; startRoute() runs on every visit to the settings page.
+        if (mapsPatched) return;
+        mapsPatched = true;
         waitForGoogleMaps(() => {
             const g = window.google;
             if (!g?.maps) return;

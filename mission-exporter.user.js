@@ -1,12 +1,17 @@
 // ==UserScript==
 // @name         Mission Creator Exporter
 // @description  Exports search results from Mission Creator as a csv
-// @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/mission-exporter.user.js
-// @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @version      0.1.1
+// @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
+// @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/mission-exporter.user.js
+// @updateURL    https://jeremychuawx.github.io/wayfarer-addons/mission-exporter.user.js
+// @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/mission-exporter.html
+// @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
+// @version      0.1.2
 // @match        https://missions.ingress.com/*
+// @grant        none
 // ==/UserScript==
+
+// Modified by JeremyChuaWX, 2026-11 — see https://github.com/JeremyChuaWX/wayfarer-addons/commits/main
 
 /* eslint-env es6 */
 /* eslint no-var: "error" */
@@ -66,8 +71,15 @@ function init() {
         // Add headers to the CSV string
         let csvString = "guid,title,description,lat,lng,image,intel link,geospatial link\n";
 
+        // Strip characters that break the CSV/data URI, and neutralise spreadsheet
+        // formula injection (cells starting with = + - @ tab or CR).
+        const cleanText = s => {
+            s = String(s || "").replace(/#/g, "'").replace(/"/g, "'");
+            return /^[=+\-@\t\r]/.test(s) ? "'" + s : s;
+        };
+
         // Convert the data to a CSV string
-        csvString += portalList.map(d => `${d.guid},${JSON.stringify(d.title.replace(/#/g, "'").replace(/"/g, "'"))},${JSON.stringify(d.description.replace(/#/g, "'").replace(/"/g, "'"))},${d.location.latitude},${d.location.longitude},${d.imageUrl},https://intel.ingress.com/intel?pll=${d.location.latitude}%2c${d.location.longitude},https://lightship.dev/account/geospatial-browser/${d.location.latitude}%2C${d.location.longitude}%2C14%2C%2C${d.guid}`).join("\n");
+        csvString += portalList.map(d => `${d.guid},${JSON.stringify(cleanText(d.title))},${JSON.stringify(cleanText(d.description))},${d.location.latitude},${d.location.longitude},${d.imageUrl},https://intel.ingress.com/intel?pll=${d.location.latitude}%2c${d.location.longitude},https://lightship.dev/account/geospatial-browser/${d.location.latitude}%2C${d.location.longitude}%2C14%2C%2C${d.guid}`).join("\n");
 
         // Create a link element and trigger a click event to download the file
         const link = document.createElement("a");

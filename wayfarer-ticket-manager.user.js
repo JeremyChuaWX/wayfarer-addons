@@ -1,16 +1,18 @@
 // ==UserScript==
 // @name         Wayfarer Ticket Manager
-// @version      0.10.0
+// @version      0.10.1
 // @description  Support for simultaneous tickets with optional cross-device sync
-// @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
-// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-ticket-manager.user.js
-// @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
+// @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
+// @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/wayfarer-ticket-manager.user.js
+// @updateURL    https://jeremychuawx.github.io/wayfarer-addons/wayfarer-ticket-manager.user.js
+// @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/wayfarer-ticket-manager.html
+// @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
 // @match        https://wayfarer.scopely.com/*
 // @match        https://webchat.helpshift.com/*
 // ==/UserScript==
 
 // Copyright 2026 tntnnbltn
+// Modified by JeremyChuaWX, 2026-11 — see https://github.com/JeremyChuaWX/wayfarer-addons/commits/main
 
 // This script is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -377,8 +379,10 @@ function init() {
         const TICKET_SYNC_API_VERSION = 1;
         const TICKET_SYNC_DELAY_MS = 750;
         const TICKET_SYNC_TIMEOUT_MS = 20000;
+        // Must not exceed WFTM_SYNC_MAX_OPERATIONS in Code.gs.
+        const TICKET_SYNC_MAX_OPERATIONS = 250;
         const TICKET_SYNC_INSTALLATION_URL =
-              'https://gitlab.com/Tntnnbltn/wayfarer-addons/-/blob/main/ticket-manager-sync/README.md';
+              'https://jeremychuawx.github.io/wayfarer-addons/guides/ticket-sync.html';
 
         let ticketSyncState = loadTicketSyncState();
         let ticketSyncTimer = null;
@@ -690,10 +694,19 @@ function init() {
 
             ticketSyncRequest = (async () => {
                 setTicketSyncStatus('Syncing…');
-                const outgoing = ticketSyncState.outbox.map(operation => cloneTicketSyncValue(operation));
+                // Send in batches; any remainder is sent by the follow-up sync below.
+                const outgoing = ticketSyncState.outbox
+                    .slice(0, TICKET_SYNC_MAX_OPERATIONS)
+                    .map(operation => cloneTicketSyncValue(operation));
+                // Sync may be disabled or pointed at another URL while in flight.
+                const requestState = ticketSyncState;
 
                 try {
                     const result = await callTicketSyncApi(config, outgoing);
+                    if (ticketSyncState !== requestState) {
+                        scheduleTicketSync(0);
+                        return false;
+                    }
                     const resolvedIds = new Set(
                         result.results
                             .filter(item => isSafeObject(item) && typeof item.id === 'string')
@@ -756,6 +769,10 @@ function init() {
                     }
                     return true;
                 } catch (error) {
+                    if (ticketSyncState !== requestState) {
+                        scheduleTicketSync(0);
+                        return false;
+                    }
                     console.error('Ticket Manager: Ticket Sync failed', error);
                     setTicketSyncStatus(error?.message || 'Ticket Sync failed.', 'error');
                     return false;

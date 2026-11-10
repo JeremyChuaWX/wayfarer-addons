@@ -1,16 +1,19 @@
 // ==UserScript==
 // @name         Wayfarer Map Mods - Exif Auto-Center
-// @version      0.2.1
+// @version      0.2.2
 // @description  Read EXIF GPS from the main photo upload and auto-center the submit map.
-// @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/wayfarer-map-mods-exif-auto-center.user.js
-// @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @match        https://wayfarer.nianticlabs.com/*
-// @require      https://unpkg.com/exifr/dist/full.umd.js
+// @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
+// @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/wayfarer-map-mods-exif-auto-center.user.js
+// @updateURL    https://jeremychuawx.github.io/wayfarer-addons/wayfarer-map-mods-exif-auto-center.user.js
+// @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/wayfarer-map-mods-exif-auto-center.html
+// @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
+// @match        https://wayfarer.scopely.com/*
+// @require      https://unpkg.com/exifr@7.1.3/dist/full.umd.js
 // @run-at       document-start
 // ==/UserScript==
 
 // Copyright 2026 tntnnbltn
+// Modified by JeremyChuaWX, 2026-11 — see https://github.com/JeremyChuaWX/wayfarer-addons/commits/main
 
 // This script is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by

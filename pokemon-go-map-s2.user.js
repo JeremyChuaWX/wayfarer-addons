@@ -2,16 +2,19 @@
 // @name         Pokémon Go Map S2 Grids
 // @version      0.2.2
 // @description  Adds L17 and L14 S2 cells to the Pokemon Go Map
-// @namespace    https://gitlab.com/Tntnnbltn/wayfarer-addons
-// @downloadURL  https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/pokemon-go-map-s2.user.js
-// @updateURL    https://gitlab.com/Tntnnbltn/wayfarer-addons/-/raw/main/pokemon-go-map-s2.user.js
-// @homepageURL  https://gitlab.com/Tntnnbltn/wayfarer-addons
+// @namespace    https://github.com/JeremyChuaWX/wayfarer-addons
+// @downloadURL  https://jeremychuawx.github.io/wayfarer-addons/pokemon-go-map-s2.user.js
+// @updateURL    https://jeremychuawx.github.io/wayfarer-addons/pokemon-go-map-s2.user.js
+// @homepageURL  https://jeremychuawx.github.io/wayfarer-addons/guides/pokemon-go-map-s2.html
+// @supportURL   https://github.com/JeremyChuaWX/wayfarer-addons/issues
 // @match        https://pokemongo.com/gamemap*
 // @run-at       document-start
 // @grant        none
+// @inject-into  page
 // ==/UserScript==
 
 // Copyright 2026 tntnnbltn
+// Modified by JeremyChuaWX, 2026-11 — see https://github.com/JeremyChuaWX/wayfarer-addons/commits/main
 
 // This script is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
